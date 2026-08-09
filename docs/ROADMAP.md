@@ -56,15 +56,21 @@ this is a guess. Expect a long tail of small incompatibilities, not one large pr
 2. ~~Delegate binary asset generation to upstream's Makefile (developer data path).~~ **done**
 3. ~~Redirect the hardware memory map; point the memory regions at the arena.~~ **done** — via the
    prelude ([ARCHITECTURE §4.1](ARCHITECTURE.md#41-the-prelude)), not path-order shadowing
-4. Assemble `data/*.s` with the host assembler (verified: portable directives only).
-5. Override the five ARM-assembly sources
-   ([ARCHITECTURE §4.3](ARCHITECTURE.md#43-files-not-built)).
+4. ~~Assemble `data/*.s` with the host assembler.~~ **abandoned, correctly** — no host assembler
+   can ([spike 0002](spikes/0002-host-assembly.md)). Those 1,107 symbols are bound into the cart
+   region at link time instead, which is where they were always going to come from.
+5. Override the five ARM-assembly sources plus `libagbsyscall.s` and `m4a_1.s`
+   ([ARCHITECTURE §4.3](ARCHITECTURE.md#43-files-not-built)) — **176 symbols, next up**.
 6. Stub every hardware entry point — enough to link, nothing more.
 7. Link, run, reach `AgbMain`, exit cleanly.
 
 **278 of 283 game sources now compile natively as x86-32** (`libgame.a`, 16.6 MB), with no change
 to a single line of upstream source. The five exclusions are exactly the files carrying ARM inline
 assembly, and each was already on the override list for an independent reason.
+
+Link progress: **1,295 unresolved symbols → 176**, after binding the script and map data into the
+cart region. The remainder are the seven excluded files' symbols — 17 BIOS syscalls and the rest
+from `main.c`, `script.c`, `m4a.c`, `multiboot.c`, `librfu_intr.c` and the GameCube multiboot stub.
 
 **The relocation spike is done** — [spike 0001](spikes/0001-relocation-table.md). Deriving the
 table from `--emit-relocs` works: 61,137 embedded pointers, every offset inside the image, 100% of

@@ -257,12 +257,33 @@ This is the same seam the pointer-width strategy needs ([§12](#12-pointer-width
 two are one mechanism rather than two: native function addresses must fit the ROM's 4-byte slots,
 which is 32-bit-only, exactly as ADR 0003 independently concluded.
 
-### 5.4 The developer data path
+### 5.4 Data the host cannot build
 
-A developer build compiles the data in, exactly as upstream's ROM build does, so renderer work can
-proceed before the importer exists. This keeps the importer off the critical path for Phases 1–3.
+`data/*.s` — event scripts, battle scripts, map data — **is never assembled, on any platform.**
+[Spike 0002](spikes/0002-host-assembly.md) found that no host assembler can build it: GNU `as`
+splits macro arguments on whitespace, clang's integrated assembler rejects `.if` on non-absolute
+symbols, and the two fail on different files. `event_scripts.s` alone is 83% of `script_data`.
+
+Those symbols are bound into the cart region at link time instead, by `tools/gen_cart_syms.py`,
+which emits one `--defsym <symbol>=agb_cart+<rom offset>` per symbol from the ROM build's `.sym`.
+Game code then reaches its data through the symbol it always used. This resolved **1,107 of the
+1,295** unresolved symbols in a real link.
+
+Since the data was always going to come from the player's ROM ([§5.2](#52-the-cart-region-and-symbol-binding)),
+this costs nothing and removes a whole class of toolchain risk — MSVC has no GAS at all, and
+Android, iOS and wasm all use clang.
+
+### 5.5 The developer data path
+
+A developer build compiles the `.c`-defined data in, exactly as upstream's ROM build does, so
+renderer work can proceed before the importer exists. This keeps the importer off the critical path
+for Phases 1–3. Script and map data still come from a locally built ROM, per §5.4.
 
 **Developer builds are never distributed.** They embed ROM-derived data.
+
+Full extraction is proven for script and map data and **still unproven for `.c`-defined tables**:
+the compiler emits those from source, so excluding them needs `-fdata-sections` plus per-symbol
+section stripping rather than a linker flag. Tracked for Phase 7.
 
 ## 6. The virtual GBA
 
