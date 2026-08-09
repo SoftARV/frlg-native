@@ -9,7 +9,7 @@ Update the status column when a milestone lands.
 | Phase | Goal | Status |
 | --- | --- | --- |
 | 0 | Foundations: repo, pinned submodule, docs, reference ROM builds | **done** |
-| 1 | The game compiles and links natively and reaches `AgbMain` | next |
+| 1 | The game compiles and links natively and reaches `AgbMain` | **in progress** — 278/283 sources compile |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | |
 | 4 | Audio — the m4a mixer in C | |
@@ -49,12 +49,19 @@ Three known gaps, none on the critical path:
 The riskiest phase, and first: until 320k lines compile for an x86 target, every estimate after
 this is a guess. Expect a long tail of small incompatibilities, not one large problem.
 
-1. CMake compiles the game sources through `preproc` → cpp → `gcc -m32`.
-2. Delegate binary asset generation to upstream's Makefile (developer data path).
-3. Assemble `data/*.s` with the host assembler (verified: portable directives only).
-4. Shadow the five hardware headers; point the memory regions at the arena.
-5. Stub every hardware entry point — enough to link, nothing more.
-6. Link, run, reach `AgbMain`, exit cleanly.
+1. ~~CMake compiles the game sources through cpp → `preproc` → `gcc -m32`.~~ **done**
+2. ~~Delegate binary asset generation to upstream's Makefile (developer data path).~~ **done**
+3. ~~Redirect the hardware memory map; point the memory regions at the arena.~~ **done** — via the
+   prelude ([ARCHITECTURE §4.1](ARCHITECTURE.md#41-the-prelude)), not path-order shadowing
+4. Assemble `data/*.s` with the host assembler (verified: portable directives only).
+5. Override the five ARM-assembly sources
+   ([ARCHITECTURE §4.3](ARCHITECTURE.md#43-files-not-built)).
+6. Stub every hardware entry point — enough to link, nothing more.
+7. Link, run, reach `AgbMain`, exit cleanly.
+
+**278 of 283 game sources now compile natively as x86-32** (`libgame.a`, 16.6 MB), with no change
+to a single line of upstream source. The five exclusions are exactly the files carrying ARM inline
+assembly, and each was already on the override list for an independent reason.
 
 **Plus the relocation spike.** The importer does not land until Phase 7, but its unproven
 mechanism — deriving a relocation table from `--emit-relocs` or object-file relocation sections

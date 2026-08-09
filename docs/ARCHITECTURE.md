@@ -126,25 +126,42 @@ frlg-native/
 fix decomp bugs; we want those for free. Every deviation is expressed in one of exactly three ways,
 all explicit and greppable.
 
-### 4.1 Shadow headers
+### 4.1 The prelude
 
-CMake places `platform/agb/include` ahead of `vendor/pokefirered/include`. Five headers are fully
-replaced:
+`platform/agb/include/agb/prelude.h` is force-included ahead of every game translation unit with
+`-include`. It pulls in upstream's hardware headers first — which sets their include guards — and
+then redefines what it needs. When game code later reaches its own `#include "gba/io_reg.h"`, the
+guard short-circuits the file and our definitions stand.
 
-| Header | Why it is replaced |
+| Redefined | Effect |
 | --- | --- |
-| `gba/defines.h` | Region base addresses point into our arena; `EWRAM_DATA`/`IWRAM_DATA` become no-ops. |
-| `gba/io_reg.h` | `REG_BASE` points at our register file. |
-| `gba/macro.h` | `DmaSet` and friends call into our DMA engine, not raw register writes. |
-| `gba/syscall.h` | BIOS calls become ordinary C function declarations. |
-| `gba/types.h` | `vu16`/`vs32` keep their meaning but drop GBA-specific assumptions. |
+| `EWRAM_START`, `IWRAM_START`, `PLTT`, `VRAM`, `OAM` | region bases point into the arena |
+| `REG_BASE` | the whole register file follows, since every `REG_ADDR_*` is `REG_BASE + offset` |
+| `SOUND_INFO_PTR`, `INTR_CHECK`, `INTR_VECTOR` | fixed IWRAM addresses become arena offsets |
+| `IWRAM_DATA`, `EWRAM_DATA`, `COMMON_DATA` | no-ops; the host linker places these freely |
+| `DmaSet`, `DmaStop` | call the DMA engine instead of writing registers |
 
-The other ~212 upstream headers are used verbatim.
+Everything derived from those — `EWRAM_END`, `BG_PLTT`, `OBJ_VRAM0`, `DmaCopy16`, `DmaFill32` —
+follows automatically, because macro bodies expand at the point of use rather than of definition.
+No upstream header is edited and no upstream header is replaced.
 
-Shadowing is invisible at the call site, which is its risk: if pret edits one of those five
-headers, we would silently diverge. `tools/check_drift.py` records the upstream hash of every
-shadowed header and every overridden `.c`, and CI fails when one moves. Bumping the submodule pin
-is always its own commit and always re-runs the check.
+**Path-order shadowing does not work here, and this was measured rather than assumed.** A quoted
+include resolves against the including file's own directory first, so `include/global.h` doing
+`#include "gba/gba.h"` finds vendor's copy immediately and never consults `-iquote`. A shadow
+directory earlier on the include path has no effect on headers that include each other.
+
+Two include-path hazards, both of which produced silent wrong behaviour before being pinned down:
+
+- **vendor/include must stay off the bracket chain.** The game ships its own `strings.h`; putting
+  its directory on the `-I` chain makes it hijack POSIX `<strings.h>` for every host header that
+  needs it, which silently changes which declarations a translation unit sees.
+- **The directory must not be named twice.** cpp de-duplicates the search path and keeps the later
+  entry, so `-iquote include` combined with `-idirafter include` silently discards the `-iquote`.
+
+The prelude is invisible at the call site, which is its risk: if pret changes one of the macros it
+overrides, we would diverge silently. `tools/check_drift.py` records the upstream hash of every
+header the prelude depends on and every overridden `.c`, and CI fails when one moves. Bumping the
+submodule pin is always its own commit and always re-runs the check.
 
 ### 4.2 Overrides
 
@@ -166,6 +183,21 @@ macro; reach for an override only when there is no macro seam.
 `crt0.s`, `rom_header.s`, `libagbsyscall.s`, `libgcnmultiboot.s` and `m4a_1.s` describe cartridge
 boot, the BIOS ABI and the ARM sound mixer. None apply to a native binary. `libagbsyscall` and
 `m4a_1` are reimplemented in C under `platform/agb/src/`.
+
+Five `.c` files carry ARM inline assembly and cannot be compiled for a host target. **278 of the
+283 game sources compile natively with no source change at all** — the exclusions are exactly
+these, and every one was already destined for an override for an independent reason:
+
+| Excluded | Assembly it carries | Already planned as |
+| --- | --- | --- |
+| `main.c` | IWRAM clear loop | override — the fiber frame loop ([§6.5](#65-interrupts-and-the-frame-loop)) |
+| `script.c` | `svc 2` (HALT) | override — the pointer accessor ([§12](#12-pointer-width)) |
+| `m4a.c` | `swi 0x2A` | override — the C mixer ([§6.7](#67-audio)) |
+| `multiboot.c` | ARM busy-wait | GameCube link, out of scope |
+| `librfu_intr.c` | naked ARM trampolines | RFU wireless, stubbed until link play ([§6.9](#69-serial-and-link-play)) |
+
+That the exclusion list and the already-planned override list turned out to be the same five files
+is the strongest evidence so far that the layering in [§2](#2-layer-model) cuts in the right place.
 
 ## 5. Game data
 
@@ -386,8 +418,14 @@ CMake ≥ 3.24 with Ninja, driven by `CMakePresets.json`. Cross-compilation uses
 `cmake/`; asset tools are always built for the host, never the target.
 
 The game's sources cannot be compiled directly — upstream's `tools/preproc` must run over every
-`.c` and `.s` first, to expand `_("…")` string literals into the game's character encoding. CMake
-reproduces that per file: `preproc` → C preprocessor → compiler.
+`.c` and `.s` first, to expand `_("…")` string literals into the game's character encoding and to
+resolve `INCBIN`. CMake reproduces that per file: C preprocessor → `preproc` → compiler, with the
+vendor tree as the working directory so `INCBIN` paths resolve.
+
+The preprocessing and compilation steps **must be given the same `-std`**. Preprocessing at a newer
+standard bakes host-header constructs into the output that the older standard then rejects — GCC 16
+defaults to gnu23, whose `stddef.h` emits `typedef __typeof__(nullptr) nullptr_t;`, which fails
+under `-std=gnu11`.
 
 Binary assets in the *developer* data path are produced by roughly 40 KiB of rules across
 upstream's five `*_rules.mk` files. **We do not reimplement those rules** — the build delegates to
