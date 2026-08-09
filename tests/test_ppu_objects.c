@@ -33,8 +33,14 @@
 #define ATTR1_VFLIP 0x2000
 #define ATTR1_SIZE(n) ((n) << 14)
 
+#define ATTR0_AFFINE (1 << 8)
+#define ATTR0_AFFINE_DOUBLE (3 << 8)
+#define ATTR1_AFFINE_GROUP(n) ((n) << 9)
+
 #define ATTR2_PRIORITY(n) ((n) << 10)
 #define ATTR2_PALETTE(n) ((n) << 12)
+
+#define ONE 0x100 // 1.0 in the matrix's 8.8 fixed point
 
 #define RED 0x001F
 #define GREEN 0x03E0
@@ -71,6 +77,15 @@ static void oam_write(int n, uint16_t attr0, uint16_t attr1, uint16_t attr2)
     entry[0] = attr0;
     entry[1] = attr1;
     entry[2] = attr2;
+}
+
+// Matrix group g is interleaved into the fourth halfword of OAM entries 4g..4g+3.
+static void oam_affine(int group, int pa, int pb, int pc, int pd)
+{
+    const int p[4] = {pa, pb, pc, pd};
+
+    for (int i = 0; i < 4; i++)
+        *(volatile uint16_t *)(agb_mem.oam + ((group * 4 + i) * 8) + 6) = (uint16_t)p[i];
 }
 
 static void obj_pal(int index, uint16_t colour)
@@ -261,11 +276,15 @@ static void test_skipped_modes(void)
 {
     reset("hidden objects are not drawn");
     io16w(DISPCNT, DISPCNT_OBJ | DISPCNT_1D);
+    // A usable matrix and opaque texels, so that mistaking mode 2 for one of the
+    // affine modes draws something instead of quietly sampling a zero.
+    oam_affine(0, ONE, 0, 0, ONE);
+    memset(agb_mem.vram + OBJ_VRAM, 0x55, 0x100);
     obj_pal(5, RED);
-    tile4(1, 0, 0, 5);
     oam_write(0, 50 | ATTR0_HIDDEN, 100, 1);
     agb_ppu_render_frame();
     CHECK(px(100, 50) == argb(0), "a hidden object was drawn");
+    CHECK(px(103, 53) == argb(0), "a hidden object was drawn through the affine path");
 
     reset("window objects contribute no pixels");
     io16w(DISPCNT, DISPCNT_OBJ | DISPCNT_1D);
@@ -282,6 +301,118 @@ static void test_skipped_modes(void)
     oam_write(0, 50, 100, 1);
     agb_ppu_render_frame();
     CHECK(px(100, 50) == argb(0), "objects drawn with DISPCNT bit 12 clear");
+}
+
+// The identity matrix must put an affine object exactly where the same object
+// would land with no transform at all — the check that anchors every other one.
+static void test_affine_identity(void)
+{
+    reset("affine identity");
+    io16w(DISPCNT, DISPCNT_OBJ | DISPCNT_1D);
+    oam_affine(0, ONE, 0, 0, ONE);
+    obj_pal(5, RED);
+    tile4(1, 2, 3, 5);
+    oam_write(0, 50 | ATTR0_AFFINE, 100, 1);
+    agb_ppu_render_frame();
+
+    CHECK(px(102, 53) == argb(RED), "identity moved the object: got %06X at (102,53)", px(102, 53));
+    CHECK(px(101, 53) == argb(0), "identity was not transparent where the texel is 0");
+
+    reset("affine double size centres the object");
+    io16w(DISPCNT, DISPCNT_OBJ | DISPCNT_1D);
+    oam_affine(0, ONE, 0, 0, ONE);
+    obj_pal(5, RED);
+    tile4(1, 2, 3, 5);
+    oam_write(0, 50 | ATTR0_AFFINE_DOUBLE, 100, 1);
+    agb_ppu_render_frame();
+
+    // The 8x8 object sits in the middle of a 16x16 box, so every pixel shifts
+    // by half the object's size.
+    CHECK(px(106, 57) == argb(RED), "double size did not centre the object in its box");
+    CHECK(px(102, 53) == argb(0), "double size drew at the single-size position");
+}
+
+// Rotation by 90 degrees: tx follows dy, ty follows -dx.
+static void test_affine_rotation(void)
+{
+    reset("affine 90 degree rotation");
+    io16w(DISPCNT, DISPCNT_OBJ | DISPCNT_1D);
+    oam_affine(0, 0, ONE, -ONE, 0);
+    obj_pal(5, GREEN);
+    tile4(1, 6, 7, 5); // texel (6,7) of a 16x16 falls in the first cell
+    oam_write(0, 50 | ATTR0_AFFINE, 100 | ATTR1_SIZE(1), 1);
+    agb_ppu_render_frame();
+
+    CHECK(px(109, 56) == argb(GREEN), "rotated texel did not land at (109,56)");
+    // Where the identity transform would have put it — proves a rotation ran.
+    CHECK(px(106, 57) == argb(0), "texel landed at its unrotated position");
+}
+
+// Doubling the matrix halves the object: two texels per screen pixel.
+static void test_affine_scale(void)
+{
+    reset("affine scale down");
+    io16w(DISPCNT, DISPCNT_OBJ | DISPCNT_1D);
+    oam_affine(0, 2 * ONE, 0, 0, 2 * ONE);
+    obj_pal(5, BLUE);
+    tile4(1 + 3, 4, 0, 5); // texel (12,8) of a 16x16: fourth cell, local (4,0)
+    oam_write(0, 50 | ATTR0_AFFINE, 100 | ATTR1_SIZE(1), 1);
+    agb_ppu_render_frame();
+
+    CHECK(px(110, 58) == argb(BLUE), "scaled texel did not land at (110,58)");
+}
+
+// A source coordinate outside the object must clip, not sample whatever tile
+// data happens to sit there. The object region is filled first, so an unclipped
+// read returns a real colour rather than passing by landing on zeroes -- which
+// is exactly how an earlier version of this check fooled itself.
+static void test_affine_source_bounds(void)
+{
+    reset("affine source coordinate bounds");
+    io16w(DISPCNT, DISPCNT_OBJ | DISPCNT_1D);
+    oam_affine(0, 2 * ONE, 0, 0, 2 * ONE);
+    memset(agb_mem.vram + OBJ_VRAM, 0x33, 0x8000); // every texel is colour 3
+    obj_pal(3, WHITE);
+    oam_write(0, 50 | ATTR0_AFFINE, 100 | ATTR1_SIZE(1), 1);
+    agb_ppu_render_frame();
+
+    // At 2x, screen columns 0-3 and 12-15 map outside the object's 16 pixels,
+    // and box rows 12-15 do the same vertically.
+    CHECK(px(100, 58) == argb(0), "sampled past the left edge of the object");
+    CHECK(px(103, 58) == argb(0), "sampled past the left edge of the object");
+    CHECK(px(104, 58) == argb(WHITE), "clipped a column that is inside the object");
+    CHECK(px(111, 58) == argb(WHITE), "clipped a column that is inside the object");
+    CHECK(px(112, 58) == argb(0), "sampled past the right edge of the object");
+    CHECK(px(115, 58) == argb(0), "sampled past the right edge of the object");
+    CHECK(px(108, 62) == argb(0), "sampled past the bottom edge of the object");
+}
+
+// The selector is 5 bits, and its top two are where a regular object keeps its
+// flip flags — so an affine object must read a matrix, never a flip.
+static void test_affine_group_selection(void)
+{
+    reset("affine group selector");
+    io16w(DISPCNT, DISPCNT_OBJ | DISPCNT_1D);
+    oam_affine(0, 0, 0, 0, 0); // group 0 left degenerate on purpose
+    oam_affine(3, ONE, 0, 0, ONE);
+    obj_pal(5, RED);
+    tile4(1, 2, 3, 5);
+    oam_write(0, 50 | ATTR0_AFFINE, 100 | ATTR1_AFFINE_GROUP(3), 1);
+    agb_ppu_render_frame();
+
+    CHECK(px(102, 53) == argb(RED), "group 3 was not the matrix that got used");
+    CHECK(px(101, 53) == argb(0), "a degenerate matrix flooded the box");
+
+    reset("flip bits are group bits on an affine object");
+    io16w(DISPCNT, DISPCNT_OBJ | DISPCNT_1D);
+    oam_affine(24, ONE, 0, 0, ONE); // 0x1000 | 0x2000 selects group 8 | 16
+    obj_pal(5, RED);
+    tile4(1, 2, 3, 5);
+    oam_write(0, 50 | ATTR0_AFFINE, 100 | ATTR1_HFLIP | ATTR1_VFLIP, 1);
+    agb_ppu_render_frame();
+
+    CHECK(px(102, 53) == argb(RED), "the flip bits were treated as flips, not as group 24");
+    CHECK(px(105, 54) == argb(0), "the object was flipped");
 }
 
 // The largest object at the last tile slot addresses past the object region.
@@ -307,6 +438,11 @@ int main(void)
     test_object_against_background();
     test_edge_wrapping();
     test_skipped_modes();
+    test_affine_identity();
+    test_affine_rotation();
+    test_affine_scale();
+    test_affine_source_bounds();
+    test_affine_group_selection();
     test_tile_index_bound();
 
     return test_report("ppu objects");

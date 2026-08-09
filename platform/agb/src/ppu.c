@@ -1,9 +1,10 @@
 // Scanline renderer.
 //
-// Phase 3 scope: text-mode backgrounds and regular objects. Affine backgrounds,
-// affine objects, windows and blending follow, in the order the game stresses
-// them. Anything not yet implemented is skipped rather than approximated, so a
-// missing feature reads as absent rather than as a subtly wrong picture.
+// Phase 3 scope: text-mode backgrounds and objects, both regular and affine.
+// Affine backgrounds, windows and blending follow, in the order the game
+// stresses them. Anything not yet implemented is skipped rather than
+// approximated, so a missing feature reads as absent rather than as a subtly
+// wrong picture.
 
 #include <string.h>
 
@@ -51,6 +52,8 @@
 #define OBJ_Y(a) ((a) & 0xFF)
 #define OBJ_MODE(a) (((a) >> 8) & 3)
 #define OBJ_MODE_NORMAL 0
+#define OBJ_MODE_HIDDEN 2
+#define OBJ_MODE_AFFINE_DOUBLE 3
 #define OBJ_GFX_MODE(a) (((a) >> 10) & 3)
 #define OBJ_GFX_WINDOW 2
 #define OBJ_256_COLOUR 0x2000
@@ -60,6 +63,13 @@
 #define OBJ_HFLIP 0x1000
 #define OBJ_VFLIP 0x2000
 #define OBJ_SIZE(a) (((a) >> 14) & 3)
+
+// An affine object replaces the two flip bits with a 5-bit selector. The matrix
+// itself is interleaved into the unused fourth halfword of four OAM entries, so
+// group g lives in entries 4g..4g+3 and costs those entries nothing.
+#define OBJ_AFFINE_GROUP(a) (((a) >> 9) & 0x1F)
+#define OBJ_AFFINE_PARAM(g, i) ((((g) * 4 + (i)) * 8) + 6)
+#define OBJ_AFFINE_FRACTION 8
 
 #define OBJ_TILE_INDEX(a) ((a) & 0x03FF)
 #define OBJ_PRIORITY(a) (((a) >> 10) & 3)
@@ -224,6 +234,34 @@ static void render_text_bg_line(int bg, int line, uint8_t *coverage)
     }
 }
 
+// Byte offset of texel (tx, ty) within an object's tile data. 1D mapping lays
+// an object's tiles out back to back; 2D mapping cuts them from a fixed
+// 32-tile-wide grid, which is the only difference between the two.
+static uint32_t obj_texel_offset(int tile, int one_d, int width, int is_256, int tx, int ty)
+{
+    int tile_size = is_256 ? TILE_SIZE_8BPP : TILE_SIZE_4BPP;
+    uint32_t row_stride = one_d ? (uint32_t)(width >> 3) * tile_size : OBJ_2D_ROW_STRIDE;
+
+    return (uint32_t)tile * TILE_SIZE_4BPP
+           + (uint32_t)(ty >> 3) * row_stride
+           + (uint32_t)(tx >> 3) * tile_size
+           + (uint32_t)(ty & 7) * (is_256 ? 8 : 4);
+}
+
+// Palette index for a texel, or 0 for transparent.
+static int obj_texel(uint32_t offset, int is_256, int tx, int palette)
+{
+    int index;
+
+    if (is_256)
+        return obj_vram(offset + (tx & 7));
+
+    uint8_t pair = obj_vram(offset + ((tx & 7) >> 1));
+
+    index = (tx & 1) ? (pair >> 4) : (pair & 0xF);
+    return index ? index + palette * 16 : 0;
+}
+
 // Objects are resolved into a line buffer ahead of the backgrounds, because
 // which object owns a pixel is settled among the objects alone: lowest priority
 // value wins, and OAM order breaks a tie. Only then does that pixel compete
@@ -244,45 +282,55 @@ static void render_obj_line(int line)
         uint16_t attr0 = oam16(n * 8);
         uint16_t attr1 = oam16(n * 8 + 2);
         uint16_t attr2 = oam16(n * 8 + 4);
+        int mode = OBJ_MODE(attr0);
         int shape = OBJ_SHAPE(attr0);
         int width = obj_dimensions[shape][OBJ_SIZE(attr1)][0];
         int height = obj_dimensions[shape][OBJ_SIZE(attr1)][1];
         int is_256 = (attr0 & OBJ_256_COLOUR) != 0;
-        int tile_size = is_256 ? TILE_SIZE_8BPP : TILE_SIZE_4BPP;
         int prio = OBJ_PRIORITY(attr2);
+        int palette = OBJ_PALETTE(attr2);
+        int tile = OBJ_TILE_INDEX(attr2);
+        int affine = mode != OBJ_MODE_NORMAL;
+        // Double size grows the area the object may draw into, not the object:
+        // a rotated sprite needs the corners its own box cannot hold.
+        int box_w = mode == OBJ_MODE_AFFINE_DOUBLE ? width * 2 : width;
+        int box_h = mode == OBJ_MODE_AFFINE_DOUBLE ? height * 2 : height;
         int x = OBJ_X(attr1);
         // Objects wrap at 256 rather than at the bottom of the screen, so one
         // placed low enough reappears at the top.
         int py = (line - OBJ_Y(attr0)) & 0xFF;
-        uint32_t row;
+        int16_t pa = 0, pb = 0, pc = 0, pd = 0;
 
-        // Mode 2 is hidden; 1 and 3 are affine, which is not built yet.
-        if (OBJ_MODE(attr0) != OBJ_MODE_NORMAL)
+        if (mode == OBJ_MODE_HIDDEN)
             continue;
         // A window object contributes a mask rather than pixels, and it is
         // never drawn on hardware either -- skipping it is exact, not partial.
         if (OBJ_GFX_MODE(attr0) == OBJ_GFX_WINDOW)
             continue;
-        if (py >= height || OBJ_TILE_INDEX(attr2) < min_tile)
+        if (py >= box_h || tile < min_tile)
             continue;
 
         if (x >= 0x100)
             x -= 0x200;
-        if (attr1 & OBJ_VFLIP)
+
+        if (affine)
+        {
+            int group = OBJ_AFFINE_GROUP(attr1);
+
+            pa = (int16_t)oam16(OBJ_AFFINE_PARAM(group, 0));
+            pb = (int16_t)oam16(OBJ_AFFINE_PARAM(group, 1));
+            pc = (int16_t)oam16(OBJ_AFFINE_PARAM(group, 2));
+            pd = (int16_t)oam16(OBJ_AFFINE_PARAM(group, 3));
+        }
+        else if (attr1 & OBJ_VFLIP)
+        {
             py = height - 1 - py;
+        }
 
-        // 1D mapping lays an object's tiles out back to back; 2D mapping cuts
-        // them from a fixed 32-tile-wide grid.
-        row = (uint32_t)OBJ_TILE_INDEX(attr2) * TILE_SIZE_4BPP
-              + (uint32_t)(py >> 3)
-                    * (one_d ? (uint32_t)(width >> 3) * tile_size : OBJ_2D_ROW_STRIDE)
-              + (uint32_t)(py & 7) * (is_256 ? 8 : 4);
-
-        for (int col = 0; col < width; col++)
+        for (int col = 0; col < box_w; col++)
         {
             int sx = x + col;
-            int px = (attr1 & OBJ_HFLIP) ? width - 1 - col : col;
-            uint32_t at = row + (uint32_t)(px >> 3) * tile_size;
+            int tx, ty;
             int index;
 
             if (sx < 0 || sx >= SCREEN_W)
@@ -290,21 +338,29 @@ static void render_obj_line(int line)
             if (obj_colour[sx] && obj_prio[sx] <= prio)
                 continue;
 
-            if (is_256)
+            if (affine)
             {
-                index = obj_vram(at + (px & 7));
-                if (index == 0)
+                // Screen offset from the centre of the box, transformed into
+                // texture space and re-centred on the object itself.
+                int dx = col - box_w / 2;
+                int dy = py - box_h / 2;
+
+                tx = ((pa * dx + pb * dy) >> OBJ_AFFINE_FRACTION) + width / 2;
+                ty = ((pc * dx + pd * dy) >> OBJ_AFFINE_FRACTION) + height / 2;
+
+                if (tx < 0 || tx >= width || ty < 0 || ty >= height)
                     continue;
             }
             else
             {
-                uint8_t pair = obj_vram(at + ((px & 7) >> 1));
-
-                index = (px & 1) ? (pair >> 4) : (pair & 0xF);
-                if (index == 0)
-                    continue;
-                index += OBJ_PALETTE(attr2) * 16;
+                tx = (attr1 & OBJ_HFLIP) ? width - 1 - col : col;
+                ty = py;
             }
+
+            index = obj_texel(obj_texel_offset(tile, one_d, width, is_256, tx, ty),
+                              is_256, tx, palette);
+            if (index == 0)
+                continue;
 
             obj_colour[sx] = (uint8_t)index;
             obj_prio[sx] = (uint8_t)prio;

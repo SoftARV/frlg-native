@@ -345,20 +345,27 @@ Per scanline it composes, in the GBA's order: four backgrounds (text and affine)
 from OAM, two windows plus the object window, then colour special effects (alpha blend, brightness
 increase/decrease) and mosaic. Output is a 32-bit XRGB framebuffer handed to the host layer.
 
-**Implemented so far: text backgrounds and regular objects.** Backgrounds: all four layers, 4bpp
-and 8bpp, both flips, all four map sizes with their multi-block layouts, priority ordering
+**Implemented so far: text backgrounds and the whole object layer.** Backgrounds: all four layers,
+4bpp and 8bpp, both flips, all four map sizes with their multi-block layouts, priority ordering
 front-to-back, and forced blank. Objects: all twelve sizes, 4bpp and 8bpp, both flips, 1D and 2D
-tile mapping, the 256-line vertical wrap, and priority against the backgrounds and against each
-other. Enough to render the intro cinematic and the title screen.
+tile mapping, the 256-line vertical wrap, priority against the backgrounds and against each other,
+and both affine modes. Enough to render the intro cinematic and the title screen.
 
 Objects resolve into a scanline buffer before any background is drawn, because which object owns a
 pixel is settled among the objects alone — lowest priority value wins, and OAM order breaks a tie.
 Only that winner then competes with the backgrounds, at the priority it carries. Objects in the
 OBJ-window graphics mode are skipped rather than drawn, which is what hardware does with them too.
 
-**Not yet: affine objects, affine backgrounds, windows, blending and mosaic.** Anything
-unimplemented is **skipped rather than approximated**, so a missing feature reads as absent rather
-than as a subtly wrong picture — which matters when the reference is a golden image.
+An affine object replaces its two flip bits with a 5-bit selector into 32 matrix groups, each
+interleaved into the unused fourth halfword of four OAM entries. Rendering runs the transform
+backwards — screen offset from the centre of the object's box, through the matrix, into texture
+space — so a source coordinate landing outside the object clips rather than sampling a neighbour.
+The double-size mode grows that box, not the object: a rotated sprite needs the corners its own
+box cannot hold.
+
+**Not yet: affine backgrounds, windows, blending and mosaic.** Anything unimplemented is **skipped
+rather than approximated**, so a missing feature reads as absent rather than as a subtly wrong
+picture — which matters when the reference is a golden image.
 
 The PPU composes on the game thread at V-blank, immediately after the game's own handler, so the
 register writes and DMA copies that handler performs appear in the same frame. The host thread

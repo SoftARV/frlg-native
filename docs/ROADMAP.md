@@ -146,8 +146,9 @@ Deferred to their own phases:
 
 **The title screen renders.** Text backgrounds are done: all four layers, 4bpp and 8bpp, both
 flips, all four map sizes with their multi-block layouts, priority ordering, and forced blank.
-Regular objects are done too: all twelve sizes, 4bpp and 8bpp, both flips, 1D and 2D tile mapping,
-the 256-line vertical wrap, and priority against the backgrounds and against each other.
+The object layer is done too: all twelve sizes, 4bpp and 8bpp, both flips, 1D and 2D tile mapping,
+the 256-line vertical wrap, priority against the backgrounds and against each other, and both
+affine modes with their 32 matrix groups.
 
 Frame captures across a run, by distinct colour count — a flat backdrop scores 1:
 
@@ -155,19 +156,20 @@ Frame captures across a run, by distinct colour count — a flat backdrop scores
 | --- | --- | --- |
 | 100 | 5 | copyright text on black |
 | 400 | 11 | dark blue screen |
-| 900 | 26 | intro cinematic, forest scene |
+| 900 | 32 | intro cinematic, forest scene |
 | 2400 | 166 | title screen |
 
 `FRLG_SHOT=<path>` captures a frame as PPM; `tools/ppm_to_png.py` converts for review. Captures are
 gitignored: they are ROM-derived imagery, and this project ships none.
 
-Remaining, in the order the game stresses them: **affine objects** → affine backgrounds → windows →
-blending and mosaic. Unimplemented features are skipped rather than approximated, so absence is
-visible rather than subtly wrong.
-
 The unit tier is up: `tests/` runs under CTest, and `test_ppu_objects` drives the object layer from
 hand-built OAM and VRAM to cover what a running frame does not reach — 8bpp, 2D tile mapping, the
-size table, the wrap rules and the priority ordering.
+size table, the wrap rules, the priority ordering, and the affine transform including its clipping
+and matrix-group selection.
+
+Remaining, in the order the game stresses them: **affine backgrounds** → windows → blending and
+mosaic. Unimplemented features are skipped rather than approximated, so absence is visible rather
+than subtly wrong.
 
 Still to build: the golden-image harness itself (two thresholds, diff artifacts, `--bless`) and
 mGBA reference captures to compare against. HBlank interrupts land here too, since per-scanline
