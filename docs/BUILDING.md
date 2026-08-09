@@ -18,7 +18,7 @@ every dependency is needed in its 32-bit form.
 | --- | --- | --- |
 | C compiler with multilib | the port itself | `gcc` + `lib32-glibc` |
 | CMake ≥ 3.24, Ninja | build system | `cmake`, `ninja` |
-| SDL3, 32-bit | host backend (not needed for `headless`) | `lib32-sdl3` |
+| SDL3, 32-bit | host backend (not needed for `headless`) | `lib32-sdl3`, `lib32-libpulse` |
 | `arm-none-eabi-gcc`, binutils | the reference ROM build | `arm-none-eabi-gcc`, `arm-none-eabi-binutils`, `arm-none-eabi-newlib` |
 | libpng | upstream's asset tools | `libpng` |
 

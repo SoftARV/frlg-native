@@ -20,6 +20,12 @@ message(STATUS "frlg-native: .text ends at ${text_end}")
 
 set(bindings "${CMAKE_CURRENT_BINARY_DIR}/bindings.rsp")
 
+# --whole-archive pulls every game object in regardless, so the trial link needs
+# no real entry point. Using the actual main.c would drag host and pthread into
+# the unresolved list and bind them as if they were missing game routines.
+set(trial_main "${CMAKE_CURRENT_BINARY_DIR}/trial_main.c")
+file(WRITE "${trial_main}" "int main(void) { return 0; }\n")
+
 # Symbols nothing defines: ROM data, RAM variables, and routines the port has not
 # written yet. Found by trial link, because only the linker knows what the host
 # C library already provides -- see tools/find_unbound.sh.
@@ -37,8 +43,7 @@ add_custom_command(
             multiboot.o libgcnmultiboot.o isagbprn.o
     COMMAND sh "${CMAKE_SOURCE_DIR}/tools/find_unbound.sh"
             "${CMAKE_CURRENT_BINARY_DIR}/missing.txt"
-            "${CMAKE_C_COMPILER}" -m32 "${CMAKE_CURRENT_SOURCE_DIR}/main.c"
-            -I "${CMAKE_SOURCE_DIR}/platform/agb/include"
+            "${CMAKE_C_COMPILER}" -m32 "${trial_main}"
             -Wl,--whole-archive "$<TARGET_FILE:game>" -Wl,--no-whole-archive
             "$<TARGET_FILE:agb>" -lm
             -o "${CMAKE_CURRENT_BINARY_DIR}/trial.out"
@@ -63,6 +68,6 @@ add_dependencies(frlg-native frlg_bindings)
 
 target_link_libraries(frlg-native PRIVATE
     -Wl,--whole-archive game -Wl,--no-whole-archive
-    agb)
+    agb host pthread)
 # -rdynamic so the unimplemented-stub backtrace resolves names.
 target_link_options(frlg-native PRIVATE "@${bindings}" -rdynamic)

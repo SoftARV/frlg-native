@@ -18,6 +18,9 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "FRLG_HOST_BACKEND": "sdl3"
+      },
+      "environment": {
+        "PKG_CONFIG_LIBDIR": "/usr/lib32/pkgconfig"
       }
     },
     {
@@ -27,12 +30,15 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "FRLG_HOST_BACKEND": "sdl3"
+      },
+      "environment": {
+        "PKG_CONFIG_LIBDIR": "/usr/lib32/pkgconfig"
       }
     },
     {
       "name": "headless",
       "inherits": "base",
-      "displayName": "Headless, no SDL — used by phase 1 and by CI",
+      "displayName": "Headless, no SDL \u2014 used by phase 1 and by CI",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "FRLG_HOST_BACKEND": "null"
@@ -40,8 +46,17 @@
     }
   ],
   "buildPresets": [
-    { "name": "linux-debug", "configurePreset": "linux-debug" },
-    { "name": "linux-release", "configurePreset": "linux-release" },
-    { "name": "headless", "configurePreset": "headless" }
+    {
+      "name": "linux-debug",
+      "configurePreset": "linux-debug"
+    },
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release"
+    },
+    {
+      "name": "headless",
+      "configurePreset": "headless"
+    }
   ]
 }

@@ -440,7 +440,18 @@ gracefully.
 | log | leveled diagnostics |
 
 Two implementations: `sdl3` (desktop, Android and iOS all come from this one) and `null` (headless,
-for deterministic tests and CI).
+for tests and CI). Both are built; the port selects one with `FRLG_HOST_BACKEND`.
+
+**Threading.** SDL owns the main thread, because macOS and iOS require windowing there. The game
+runs on its own thread, with `SIGALRM` unblocked only on that thread so the frame timer preempts
+game code and nothing else. A new thread inherits its creator's signal mask, so the game thread
+unblocks explicitly — without that, the signal is blocked everywhere and no frame ever advances.
+
+The main thread is the hardware side: it pumps events, writes the key register and presents the
+framebuffer. It never runs game code, so it races with nothing — and a real GBA updates its key
+register asynchronously too. This is not in tension with
+[ADR 0009](adr/0009-preemptive-interrupts.md), which rejects threads for *interrupt delivery*;
+handlers still run on the game thread's own stack.
 
 ## 8. Mods
 

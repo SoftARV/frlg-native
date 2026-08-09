@@ -10,7 +10,7 @@ Update the status column when a milestone lands.
 | --- | --- | --- |
 | 0 | Foundations: repo, pinned submodule, docs, reference ROM builds | **done** |
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
-| 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **mostly done** — ticking headless; window pending |
+| 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | |
 | 4 | Audio — the m4a mixer in C | |
 | 5 | Saves — flash backed by a host file | |
@@ -118,14 +118,27 @@ The delivery mechanism changed: **interrupts preempt via signal, they are not fi
 calls nothing, so there is no yield point a cooperative switch could use. A signal handler runs on
 the interrupted context's own stack, which is what hardware does.
 
-Remaining:
+**A window opens and the game drives it.** The SDL3 and `null` backends both build behind `host.h`;
+SDL owns the main thread, the game runs on its own with the frame timer routed there, and keyboard
+input reaches `REG_KEYINPUT`.
 
-- A window. Needs `lib32-sdl3`, packaged but not installed.
-- Input plumbed from the host into `REG_KEYINPUT`. The register is initialised correctly; nothing
-  writes to it yet.
-- HBlank and V-count interrupts; only V-blank is raised so far.
-- **Determinism is now an open problem** ([ADR 0009](adr/0009-preemptive-interrupts.md)). The phase
-  6 harness cannot assume reproducible frame boundaries from a wall-clock timer.
+The first real pixels came from palette memory. Capturing the backdrop across a run:
+
+| Frame | Backdrop |
+| --- | --- |
+| 1 | RGB(255,255,255) — the `RGB_WHITE` `AgbMain` writes to `BG_PLTT` before anything else |
+| 60, 300, 900 | RGB(0,0,0) — the intro screen |
+
+Game-driven colour, changing over time, read back through the prelude's palette redirection. It is
+one colour rather than a picture because the PPU is phase 3, but it proves the path end to end.
+`FRLG_SHOT=<path>` dumps the framebuffer as PPM — the seed of the phase 3 golden-image harness.
+
+Deferred to their own phases:
+
+- HBlank and V-count interrupts; only V-blank is raised so far. Phase 3 needs HBlank for
+  per-scanline effects.
+- **Determinism is an open problem** ([ADR 0009](adr/0009-preemptive-interrupts.md)). The phase 6
+  harness cannot assume reproducible frame boundaries from a wall-clock timer.
 
 ## Phase 3 — It draws
 
