@@ -35,7 +35,7 @@ makes the project unmaintainable within months.
 | [0001](adr/0001-source-port.md) | Source port, not emulation or recompilation |
 | [0002](adr/0002-upstream-submodule.md) | Upstream as a pinned submodule with shadow headers and overrides |
 | [0003](adr/0003-pointer-width.md) | 32-bit first, 64-bit ready |
-| [0004](adr/0004-fiber-frame-loop.md) | The game runs on a fiber |
+| [0004](adr/0004-fiber-frame-loop.md) | The game runs on a fiber *(superseded by 0009)* |
 | [0005](adr/0005-sdl3-software-ppu.md) | SDL3 backend, software PPU |
 | [0006](adr/0006-rom-supplied-data.md) | Game data comes from the player's ROM |
 | [0007](adr/0007-lua-mod-registries.md) | Embedded Lua with schema-driven registries |

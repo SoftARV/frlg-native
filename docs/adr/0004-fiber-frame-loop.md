@@ -1,6 +1,12 @@
 # ADR 0004 — The game runs on a fiber
 
-**Status:** accepted
+**Status:** superseded in part by [ADR 0009](0009-preemptive-interrupts.md)
+
+The analysis below — that a "call the game once per frame" loop cannot express a blocked
+`VBlankIntrWait` or run HBlank handlers — held up. The proposed *mechanism* did not: `AgbMain`'s
+main loop busy-waits on a memory flag and calls nothing, so a cooperative switch has no yield point
+to use. Interrupts are delivered by signal instead. The claim of frame-for-frame deterministic
+headless runs does not survive that change; see ADR 0009.
 
 ## Context
 
