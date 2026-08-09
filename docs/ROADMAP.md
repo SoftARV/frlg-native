@@ -191,6 +191,15 @@ determinism harness runs in CI over a scripted input trace, and the autopilot ca
 
 This is the point the project becomes something a person can play.
 
+**Blocked on the cart region having bytes in it.** The game already crashes on the controls guide,
+the first screen that reads text out of `data/*.s`: the symbols are bound, but nothing has filled
+the region behind them, and a run of `0x00` is `CHAR_SPACE` rather than `EOS`. Evidence, and the
+three ways out, in [spike 0003](spikes/0003-empty-cart-region.md). The cheapest unblocks this phase
+without touching Phase 7's shipping story.
+
+Worth carrying into the scripted-input harness: frame-count runs cannot see this class of bug at
+all, because the game parks on the first screen that waits for a button.
+
 ## Phase 7 — It ships clean
 
 The shipping model ([ADR 0006](adr/0006-rom-supplied-data.md)): generate the manifest from the ROM

@@ -100,3 +100,8 @@ emits it into the binary from source, and excluding it needs more than a linker 
 
 Full extraction is therefore proven for script and map data, and still unproven for `.c`-defined
 tables. This does not block Phases 1–6.
+
+> **Corrected by [spike 0003](0003-empty-cart-region.md).** The closing sentence was measured
+> against linking and rendering, not against running. Binding the symbols is not enough on its own:
+> until something puts ROM bytes behind them, a string read from `data/*.s` is a run of `0x00` —
+> which is `CHAR_SPACE`, not `EOS` — and the game crashes on the controls guide. Phase 6 is blocked.
