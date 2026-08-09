@@ -40,9 +40,12 @@ Three known gaps, none on the critical path:
 
 - **32-bit SDL3 is not installed.** `lib32-sdl3 3.4.14-1` is in the enabled multilib repo, one
   `pacman -S` away. Phase 1 does not need it — the game links against the `null` host backend.
-- `agbcc` is absent, so the *byte-matching* ROM build is unavailable. The modern ROM is a valid
-  behavioural reference and generates the manifest; it just has a different checksum.
 - `emcc` is absent, which only matters at Phase 8.
+
+`agbcc` was listed here as a third gap "not on the critical path". **That was wrong**, and
+[spike 0001](spikes/0001-relocation-table.md) found out why: the manifest is layout-specific, so it
+must come from the byte-matching build. `agbcc` is a hard prerequisite of Phase 7. It has since
+been built and installed.
 
 ## Phase 1 — It compiles and links *(next)*
 
@@ -63,11 +66,12 @@ this is a guess. Expect a long tail of small incompatibilities, not one large pr
 to a single line of upstream source. The five exclusions are exactly the files carrying ARM inline
 assembly, and each was already on the override list for an independent reason.
 
-**Plus the relocation spike.** The importer does not land until Phase 7, but its unproven
-mechanism — deriving a relocation table from `--emit-relocs` or object-file relocation sections
-([ARCHITECTURE §5.3](ARCHITECTURE.md#53-relocation)) — is proven *now*, while it is still cheap to
-change course. Discovering at Phase 7 that the whole shipping model does not work is the single
-worst outcome available to this project.
+**The relocation spike is done** — [spike 0001](spikes/0001-relocation-table.md). Deriving the
+table from `--emit-relocs` works: 61,137 embedded pointers, every offset inside the image, 100% of
+sites holding a valid address. It also found that one pointer in five is a function pointer, making
+import a patch pass rather than symbol binding, and that the manifest must come from the
+byte-matching build. Running it before the rest of Phase 1 was the right call: both findings would
+have been far more expensive to discover at Phase 7.
 
 Expected friction, in the order it will probably appear: ARM-specific attributes and alignment
 assumptions; `#pragma`s and builtins modern x86 GCC rejects; `sizeof` and struct-layout assumptions

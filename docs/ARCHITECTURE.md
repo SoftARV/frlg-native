@@ -208,10 +208,17 @@ Rationale and risks: [ADR 0006](adr/0006-rom-supplied-data.md).
 
 We build the ROM ourselves, so the manifest is a build output rather than a reverse-engineering
 project. `make syms` emits **50,590 symbols with addresses and sizes** — 9,832 of them `g`-prefixed
-data symbols — and the linker map adds 35,037 lines of section detail. `tools/` turns those into
-the shipped manifest: symbol names, ROM offsets, sizes, and relocation entries.
+data symbols — the linker map adds section detail, and `--emit-relocs` adds 49,547 relocation
+records. `tools/` turns those into the shipped manifest: symbol names, ROM offsets, sizes,
+relocation entries, and the native symbol table the patch pass needs.
 
 It contains no ROM bytes, no graphics, no dialogue, no audio samples.
+
+**The manifest must be generated from the byte-matching build**, which needs `agbcc`. Addresses
+from the `MODERN=1` build describe a different layout — `ld_script.ld` pins object placement in 512
+explicit entries to reproduce retail, while `ld_script_modern.ld` is wildcards, and a modern-GCC
+`.text` is a different size, shifting everything after it. A manifest built from the modern ROM
+would describe addresses no player's cartridge has.
 
 ### 5.2 The cart region and symbol binding
 
@@ -225,13 +232,30 @@ into the loaded image and game code reaches its data unmodified.
 ### 5.3 Relocation
 
 Pointers embedded in ROM data are ROM addresses (`0x08xxxxxx`). After loading, the importer walks
-the relocation table and rewrites each to the corresponding host address.
+the relocation table and rewrites every one of them. **Import is a patch pass over the loaded
+image, not merely symbol binding.**
+
+The table is derived mechanically by relinking the ROM with `--emit-relocs` and reading back
+`.rel.rodata`, `.relscript_data` and `.rel.data`. Proven against a byte-identical retail ROM in
+[spike 0001](spikes/0001-relocation-table.md): **49,547 embedded pointers, every offset inside the
+image, 100% of sites holding a valid address**, and the ROM still matching `firered.sha1` with
+relocations emitted.
+
+Each record names its target symbol, which is what makes the three cases separable:
+
+| Target | Share | Resolved to |
+| --- | --- | --- |
+| Data | 87.65% | `cart_base + (rom_addr - 0x08000000)` |
+| Code | 11.15% | the **native** function of that name |
+| RAM variable | 1.20% | the **native** variable of that name |
+
+One pointer in nine is a function pointer, and native code does not live in the ROM image — so the
+importer needs a symbol-name → native-address table alongside the relocation table. Both are build
+outputs.
 
 This is the same seam the pointer-width strategy needs ([§12](#12-pointer-width)), which is why the
-two are one mechanism rather than two.
-
-Deriving the relocation table — from `--emit-relocs` on the ROM link, or from object-file
-relocation sections — is unproven and is the first spike of Phase 1.
+two are one mechanism rather than two: native function addresses must fit the ROM's 4-byte slots,
+which is 32-bit-only, exactly as ADR 0003 independently concluded.
 
 ### 5.4 The developer data path
 

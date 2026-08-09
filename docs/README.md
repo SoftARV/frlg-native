@@ -8,6 +8,7 @@
 | [required-to-function.md](required-to-function.md) | You want to know what the app needs from the player, and what it ships |
 | [new-features.md](new-features.md) | You want to know what this port does that the cartridge did not |
 | [adr/](adr/) | You want to know *why* something is the way it is |
+| [spikes/](spikes/) | You want the evidence behind a risky mechanism being called proven |
 
 There is deliberately no "known differences" document. Unlike a reimplementation, this port runs
 the original code, so faithful behaviour is not an achievement to track — it is the default.

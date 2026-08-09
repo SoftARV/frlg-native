@@ -54,8 +54,12 @@ the critical path for Phases 1–3.
 
 ## Risks
 
-- **Relocation table derivation** needs `--emit-relocs` on the ROM link, or reading relocation
-  sections from the object files. Unproven here; it is the first spike of Phase 1.
+- ~~**Relocation table derivation** needs `--emit-relocs` on the ROM link, or reading relocation
+  sections from the object files. Unproven here; it is the first spike of Phase 1.~~
+  **Resolved** by [spike 0001](../spikes/0001-relocation-table.md): proven against a byte-identical
+  retail ROM. Two consequences the decision above did not anticipate — import is a *patch pass*
+  because 11% of embedded pointers target code, and the manifest must be generated from the
+  byte-matching `agbcc` build rather than the modern one.
 - **The web target** may not support defining symbols at absolute addresses the way ELF does.
   Emscripten may need a pointer-indirection layer instead. Unresolved, and deliberately deferred —
   it affects Phase 7 only.

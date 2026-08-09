@@ -44,8 +44,23 @@ make -j"$(nproc)" modern
 ```
 
 This produces `pokefirered_modern.gba`. It is built with modern GCC, so it does **not** reproduce
-the original cartridge's checksum — byte-matching needs `agbcc`, which is a separate setup and is
-not required for this project. For behavioural reference, the modern ROM is equivalent.
+the original cartridge's checksum. For behavioural reference that is fine.
+
+## Build the byte-matching ROM
+
+Required from Phase 7 onward, because the shipped manifest is layout-specific and only the matching
+build describes the addresses a player's cartridge actually has
+([spike 0001](spikes/0001-relocation-table.md)):
+
+```sh
+git clone https://github.com/pret/agbcc
+cd agbcc && ./build.sh && ./install.sh /path/to/vendor/pokefirered
+cd /path/to/vendor/pokefirered && make -j"$(nproc)" compare
+```
+
+`compare` verifies the result against `firered.sha1`. Adding
+`LDFLAGS="-Map ../../pokefirered.map --emit-relocs"` emits the relocation table without changing a
+byte of the ROM.
 
 Upstream's `build_tools.sh` is stale: it references `tools/aif2pcm`, which no longer exists. Build
 via `make tools` instead if the script fails.
