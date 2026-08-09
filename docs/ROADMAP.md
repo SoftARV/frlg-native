@@ -165,6 +165,10 @@ Remaining, in the order the game stresses them: **affine objects** → affine ba
 blending and mosaic. Unimplemented features are skipped rather than approximated, so absence is
 visible rather than subtly wrong.
 
+The unit tier is up: `tests/` runs under CTest, and `test_ppu_objects` drives the object layer from
+hand-built OAM and VRAM to cover what a running frame does not reach — 8bpp, 2D tile mapping, the
+size table, the wrap rules and the priority ordering.
+
 Still to build: the golden-image harness itself (two thresholds, diff artifacts, `--bless`) and
 mGBA reference captures to compare against. HBlank interrupts land here too, since per-scanline
 effects depend on them.

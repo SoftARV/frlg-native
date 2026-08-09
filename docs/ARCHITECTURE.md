@@ -615,12 +615,19 @@ screen. Strategy and thresholds: [ADR 0008](adr/0008-testing-strategy.md).
 
 | Tier | What it covers |
 | --- | --- |
-| Unit | BIOS math against hardware-derived vectors; decompressors round-tripping real assets |
+| Unit | PPU rendering from hand-built register state; BIOS math against hardware-derived vectors; decompressors round-tripping real assets |
 | Golden screenshots | PPU output vs mGBA frame dumps, two thresholds, side-by-side diff artifacts |
 | Headless drivers | scripted scenarios on the `null` backend; an autopilot playthrough capturing shots |
 | Regression | **one driver per fixed bug, named after it, committed with the fix** |
 | Link | desync fuzzing across peers |
 | Build | ROM build, native build, and the shadow/override drift check |
+
+Unit tests live in `tests/`, are registered with CTest, and run with
+`ctest --test-dir build/headless`. Each links the `agb` archive directly; the linker pulls in only
+the objects a test actually references, so a PPU test costs nothing of the game library and needs
+none of the ROM pipeline. They spell out the hardware layout they drive rather than importing the
+renderer's own constants — a test built on the same macro as the code under test cannot catch that
+macro being wrong.
 
 Golden screenshots use two independent thresholds: a per-channel tolerance absorbing harmless
 driver drift, and a separate pixel budget that is what actually fails. A shot where one sprite moved

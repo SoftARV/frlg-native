@@ -27,6 +27,8 @@ elseif(NOT FRLG_PTR64_READY)
         "64-bit builds need the data pipeline migration (docs/ROADMAP.md phase 8).")
 endif()
 
+enable_testing()
+
 foreach(dir platform/agb platform/host ports/desktop tools tests)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${dir}/CMakeLists.txt")
         add_subdirectory("${dir}")
