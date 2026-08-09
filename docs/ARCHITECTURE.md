@@ -444,8 +444,29 @@ for tests and CI). Both are built; the port selects one with `FRLG_HOST_BACKEND`
 
 **Threading.** SDL owns the main thread, because macOS and iOS require windowing there. The game
 runs on its own thread, with `SIGALRM` unblocked only on that thread so the frame timer preempts
-game code and nothing else. A new thread inherits its creator's signal mask, so the game thread
-unblocks explicitly — without that, the signal is blocked everywhere and no frame ever advances.
+game code and nothing else.
+
+Two ordering rules govern that mask, and both were learned by getting them wrong:
+
+- **The game thread must unblock explicitly.** A new thread inherits its creator's mask, so
+  blocking on the main thread before `pthread_create` blocks it everywhere and no frame advances.
+- **The block must happen before anything else starts a thread** — in particular before SDL is
+  initialised. `ITIMER_REAL` is delivered to *any* thread that has not blocked it, and SDL's
+  backend threads inherit whatever mask was in force when they were created. Block after
+  `SDL_Init` and the V-blank handler eventually runs game code on an SDL thread, concurrently with
+  the game thread. That presents as a hang deep inside unrelated game code, and never reproduces
+  headless.
+
+The main thread is the hardware side: it pumps events, writes the key register and presents the
+framebuffer. It never runs game code, so it races with nothing — and a real GBA updates its key
+register asynchronously too. This is not in tension with
+[ADR 0009](adr/0009-preemptive-interrupts.md), which rejects threads for *interrupt delivery*;
+handlers still run on the game thread's own stack.
+
+**Known layering debt.** `platform/agb/src/frame.c` calls `setitimer` and `sigaction` directly, so
+the AGB layer currently depends on POSIX — which [§2](#2-layer-model) says it must not. It builds
+everywhere POSIX exists, so nothing is blocked today, but Windows and the web target cannot work
+until the timer and the preemption primitive move behind `host.h`. Tracked for phase 8.
 
 The main thread is the hardware side: it pumps events, writes the key register and presents the
 framebuffer. It never runs game code, so it races with nothing — and a real GBA updates its key

@@ -126,14 +126,17 @@ int main(int argc, char **argv)
     frame_limit = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 0;
     setvbuf(stdout, NULL, _IOLBF, 0);
 
-    if (!host_video_open("frlg-native", SCREEN_W, SCREEN_H, 3))
-        return 1;
-
-    // The frame timer must fire on the game thread, so the main thread refuses
-    // delivery before that thread exists.
+    // Block the frame timer before anything else starts a thread. ITIMER_REAL
+    // is delivered to any thread that has not blocked it, and threads inherit
+    // the mask in force when they are created -- so blocking after SDL_Init
+    // leaves SDL's own backend threads eligible, and the V-blank handler then
+    // runs game code on one of them, concurrently with the game thread.
     sigemptyset(&block);
     sigaddset(&block, SIGALRM);
     pthread_sigmask(SIG_BLOCK, &block, NULL);
+
+    if (!host_video_open("frlg-native", SCREEN_W, SCREEN_H, 3))
+        return 1;
 
     printf("frlg-native: starting, frame limit %u\n", frame_limit);
     if (pthread_create(&game, NULL, game_thread, NULL) != 0)

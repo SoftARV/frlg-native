@@ -133,10 +133,14 @@ Game-driven colour, changing over time, read back through the prelude's palette 
 one colour rather than a picture because the PPU is phase 3, but it proves the path end to end.
 `FRLG_SHOT=<path>` dumps the framebuffer as PPM — the seed of the phase 3 golden-image harness.
 
+Verified windowed: 2000 frames in 33.65 s against 33.49 s expected, 0.5% drift.
+
 Deferred to their own phases:
 
 - HBlank and V-count interrupts; only V-blank is raised so far. Phase 3 needs HBlank for
   per-scanline effects.
+- **`platform/agb` still calls POSIX directly** for the frame timer, which the layering rule
+  forbids. Harmless today, blocking for Windows and web. Phase 8.
 - **Determinism is an open problem** ([ADR 0009](adr/0009-preemptive-interrupts.md)). The phase 6
   harness cannot assume reproducible frame boundaries from a wall-clock timer.
 
