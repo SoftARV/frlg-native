@@ -22,6 +22,7 @@
 
 #include "agb/frame.h"
 #include "agb/memmap.h"
+#include "agb/ppu.h"
 #include "host.h"
 
 #define SCREEN_W 240
@@ -72,24 +73,13 @@ static void *game_thread(void *arg)
     return NULL;
 }
 
-// The backdrop is palette entry 0, in BGR555. Until the PPU exists this is the
-// only real pixel data the game produces, and it proves palette memory is live:
-// AgbMain writes it before anything else.
-static void fill_backdrop(void)
+// The PPU composes into its own buffer on the game thread; the main thread
+// copies it out to present. A torn copy costs one frame of tearing and never
+// blocks the game, which is the right trade for a display path.
+static void copy_frame(void)
 {
-    uint16_t bgr = *(const volatile uint16_t *)agb_mem.pltt;
-    uint32_t r = (bgr & 0x1F) << 3;
-    uint32_t g = ((bgr >> 5) & 0x1F) << 3;
-    uint32_t b = ((bgr >> 10) & 0x1F) << 3;
-    uint32_t argb;
-
-    r |= r >> 5;
-    g |= g >> 5;
-    b |= b >> 5;
-    argb = (r << 16) | (g << 8) | b;
-
-    for (int i = 0; i < SCREEN_W * SCREEN_H; i++)
-        framebuffer[i] = argb;
+    memcpy(framebuffer, agb_ppu_framebuffer(),
+           sizeof(uint32_t) * (size_t)(SCREEN_W * SCREEN_H));
 }
 
 // Framebuffer capture, seeded here because the phase 3 golden-image harness
@@ -155,7 +145,7 @@ int main(int argc, char **argv)
 
         *(volatile uint16_t *)(agb_mem.io + REG_OFF_KEYINPUT) = host_input_keys();
 
-        fill_backdrop();
+        copy_frame();
         host_video_present(framebuffer, SCREEN_W, SCREEN_H);
 
         // Stall detection by frame progress rather than CPU time: it means the
@@ -182,7 +172,7 @@ int main(int argc, char **argv)
     const char *shot = getenv("FRLG_SHOT");
     if (shot)
     {
-        fill_backdrop();
+        copy_frame();
         write_ppm(shot);
     }
 

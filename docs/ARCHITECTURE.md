@@ -338,11 +338,25 @@ in the shadow `macro.h`: the DMA control registers (writing the enable bit start
 ### 6.3 PPU
 
 A scanline renderer, resolution-parametric from its first line of code — widescreen is cheap now
-and expensive to retrofit. It never hardcodes 240 or 160.
+and expensive to retrofit. It never hardcodes 240 or 160; it reads `agb_ppu_width()` /
+`agb_ppu_height()`.
 
 Per scanline it composes, in the GBA's order: four backgrounds (text and affine), the object layer
 from OAM, two windows plus the object window, then colour special effects (alpha blend, brightness
-increase/decrease) and mosaic. Output is a 32-bit RGBA framebuffer handed to the host layer.
+increase/decrease) and mosaic. Output is a 32-bit XRGB framebuffer handed to the host layer.
+
+**Implemented so far: text backgrounds** — all four layers, 4bpp and 8bpp, both flips, all four map
+sizes with their multi-block layouts, priority ordering front-to-back, and forced blank. Enough to
+render the intro cinematic and the title screen.
+
+**Not yet: objects, affine backgrounds, windows, blending and mosaic.** Anything unimplemented is
+**skipped rather than approximated**, so a missing feature reads as absent rather than as a subtly
+wrong picture — which matters when the reference is a golden image.
+
+The PPU composes on the game thread at V-blank, immediately after the game's own handler, so the
+register writes and DMA copies that handler performs appear in the same frame. The host thread
+copies the finished buffer out to present; a torn copy costs one frame of tearing and never blocks
+the game.
 
 Rendering is software, deliberately ([ADR 0005](adr/0005-sdl3-software-ppu.md)): the GBA's blending
 and window rules are an accuracy risk on the GPU, the renderer is nowhere near fill-rate bound, and

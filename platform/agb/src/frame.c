@@ -19,9 +19,12 @@
 
 #include "agb/frame.h"
 #include "agb/irq.h"
+#include "agb/ppu.h"
 #include "agb/memmap.h"
 
 #define REG_OFF_KEYINPUT 0x130
+#define REG_OFF_VCOUNT 0x006
+#define SCREEN_LINES 160
 #define KEYS_RELEASED 0x03FF
 
 // The GBA's true refresh rate, not 60.
@@ -58,7 +61,18 @@ static void agb_on_vblank(int sig)
         siglongjmp(agb_exit_point, 1);
 
     agb_in_irq = 1;
+
+    // VCOUNT reads inside the handler must see the V-blank period; the game
+    // samples it around the sound mixer.
+    *(volatile uint16_t *)(agb_mem.io + REG_OFF_VCOUNT) = SCREEN_LINES;
+
     agb_irq_raise(AGB_IRQ_VBLANK);
+
+    // Composed after the handler, so the register writes and DMA copies it
+    // just performed are on screen this frame rather than the next.
+    agb_ppu_render_frame();
+
+    *(volatile uint16_t *)(agb_mem.io + REG_OFF_VCOUNT) = 0;
     agb_in_irq = 0;
 }
 

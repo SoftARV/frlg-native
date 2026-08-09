@@ -6,6 +6,7 @@ add_library(agb STATIC
     src/bios.c
     src/frame.c
     src/irq.c
+    src/ppu.c
     src/unimplemented.c)
 
 target_include_directories(agb PUBLIC include)

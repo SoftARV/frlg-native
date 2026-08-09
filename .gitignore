@@ -10,3 +10,5 @@ compile_commands.json
 CMakeUserPresets.json
 CLAUDE.local.md
 .DS_Store
+shots/
+*.ppm
