@@ -1,4 +1,6 @@
 #include <signal.h>
+#include <string.h>
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -39,10 +41,16 @@ int main(int argc, char **argv)
 
     setvbuf(stdout, NULL, _IOLBF, 0);
 
-    signal(SIGALRM, on_stall);
+    // The frame driver owns SIGALRM, so the watchdog runs on CPU time instead.
+    // A spin loop burns CPU, so a stall still trips it.
+    struct itimerval wd;
+    memset(&wd, 0, sizeof(wd));
+    wd.it_value.tv_sec = watchdog;
+
+    signal(SIGVTALRM, on_stall);
     signal(SIGSEGV, on_stall);
     signal(SIGBUS, on_stall);
-    alarm(watchdog);
+    setitimer(ITIMER_VIRTUAL, &wd, NULL);
 
     printf("frlg-native: entering AgbMain, stopping after %u frames\n", limit);
     frames = agb_frame_run(AgbMain, limit);

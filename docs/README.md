@@ -40,3 +40,4 @@ makes the project unmaintainable within months.
 | [0006](adr/0006-rom-supplied-data.md) | Game data comes from the player's ROM |
 | [0007](adr/0007-lua-mod-registries.md) | Embedded Lua with schema-driven registries |
 | [0008](adr/0008-testing-strategy.md) | Golden screenshots, headless drivers, one regression per bug |
+| [0009](adr/0009-preemptive-interrupts.md) | Interrupts preempt; fibers cannot deliver them |

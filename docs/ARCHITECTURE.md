@@ -357,26 +357,36 @@ from inside the PPU's scanline loop; FIFO DMA feeds the sound mixer.
 
 ### 6.5 Interrupts and the frame loop
 
-The subtlest part of the port, and the reason `host.h` exposes fibers.
-Full rationale: [ADR 0004](adr/0004-fiber-frame-loop.md).
+The subtlest part of the port. Full rationale: [ADR 0009](adr/0009-preemptive-interrupts.md),
+which supersedes the fiber mechanism originally proposed in
+[ADR 0004](adr/0004-fiber-frame-loop.md).
 
-`VBlankIntrWait` is called from deep inside nested game code, not only the top-level loop, and
-HBlank handlers must run *between* scanlines while the game is blocked. A "call the game once per
-frame" loop cannot express either.
+The game waits in two different ways, and only one of them can yield:
 
-So the game runs on its own **fiber**. The host drives:
+- `VBlankIntrWait` calls into us and can wait **cooperatively**.
+- `AgbMain`'s loop ends in a **busy-wait** on `gMain.intrCheck`, a plain memory flag set only by
+  the V-blank handler. It calls nothing, so there is no yield point at all.
 
-1. Begin a frame; poll input into the key registers.
-2. Per scanline: render it, and if the game enabled HBlank, switch to the game fiber for its
-   handler and back.
-3. At scanline 160, raise VBlank: switch to the game fiber, which returns from `VBlankIntrWait` and
-   runs a frame of logic until it blocks again.
-4. Present the framebuffer; mix audio.
+The second is why interrupts are delivered by **signal** rather than by a cooperative switch. A
+periodic timer at 59.7275 Hz raises `SIGALRM`; the handler dispatches through the game's own
+`gIntrTable`, honouring `REG_IME` and `REG_IE` as the BIOS vector would. `gIntrTable` is ordered by
+the vector's scan priority rather than by IE bit, so slot → flag needs an explicit mapping.
 
-Switching is explicit, so there are no data races on game state and headless runs are reproducible
-frame for frame — the property the whole test strategy rests on.
+A signal handler runs on the interrupted context's **own stack** — game code is paused, not run
+alongside — which is exactly hardware's behaviour, and is why this introduces none of the races a
+second thread would.
 
-The virtual clock runs at the GBA's true 59.7275 Hz, not 60.
+Everything the handler can reach must be async-signal-safe. The deferred-subsystem reporter uses
+`write()` rather than `stdio`, because taking the stdio lock inside a handler while the interrupted
+context already holds it deadlocks.
+
+The clock runs at the GBA's true 59.7275 Hz, not 60. Measured: 1200 frames in 20.10 s against
+20.09 s expected.
+
+**Determinism is an open problem**, not a solved one: interrupts arrive on wall-clock time, so the
+point in game code where a frame boundary lands varies. Boundaries that land inside the idle spin
+are deterministic in effect; ones landing mid-callback are not. The phase 6 harness will need a
+headless clock that advances only at known-safe points.
 
 ### 6.6 BIOS
 

@@ -10,7 +10,7 @@ Update the status column when a milestone lands.
 | --- | --- | --- |
 | 0 | Foundations: repo, pinned submodule, docs, reference ROM builds | **done** |
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
-| 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | |
+| 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **mostly done** — ticking headless; window pending |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | |
 | 4 | Audio — the m4a mixer in C | |
 | 5 | Saves — flash backed by a host file | |
@@ -104,11 +104,28 @@ something in a hardware region.
 
 Done when the binary runs to the main loop and exits without a crash. Nothing renders.
 
-## Phase 2 — It runs
+## Phase 2 — It runs *(mostly done)*
 
-Fiber-based frame loop ([ADR 0004](adr/0004-fiber-frame-loop.md)), interrupt controller, immediate
-DMA, BIOS calls, input polled into the key registers. A window opens, stays black, and the game
-ticks at the correct rate. First point at which the headless determinism harness can exist.
+**The game ticks.** `AgbMain`'s main loop runs at the GBA's true rate: 1200 frames in 20.10 s
+against an expected 20.09 s — 0.05% drift, no crashes. It is executing the intro sequence, calling
+into the deferred sound subsystem for cries and music as it goes.
+
+Done: the interrupt controller dispatching through the game's own `gIntrTable`, the frame driver,
+immediate DMA, the BIOS calls, and the key register in its hardware reset state.
+
+The delivery mechanism changed: **interrupts preempt via signal, they are not fiber switches**
+([ADR 0009](adr/0009-preemptive-interrupts.md)). The main loop busy-waits on a memory flag and
+calls nothing, so there is no yield point a cooperative switch could use. A signal handler runs on
+the interrupted context's own stack, which is what hardware does.
+
+Remaining:
+
+- A window. Needs `lib32-sdl3`, packaged but not installed.
+- Input plumbed from the host into `REG_KEYINPUT`. The register is initialised correctly; nothing
+  writes to it yet.
+- HBlank and V-count interrupts; only V-blank is raised so far.
+- **Determinism is now an open problem** ([ADR 0009](adr/0009-preemptive-interrupts.md)). The phase
+  6 harness cannot assume reproducible frame boundaries from a wall-clock timer.
 
 ## Phase 3 — It draws
 

@@ -23,8 +23,18 @@ set(bindings "${CMAKE_CURRENT_BINARY_DIR}/bindings.rsp")
 # Symbols nothing defines: ROM data, RAM variables, and routines the port has not
 # written yet. Found by trial link, because only the linker knows what the host
 # C library already provides -- see tools/find_unbound.sh.
+# Deferred subsystems, by defining source rather than by name. script.c is
+# deliberately absent: the script VM is game logic, and a silent no-op there
+# would corrupt state rather than skip a feature.
 add_custom_command(
     OUTPUT "${bindings}"
+    COMMAND sh "${CMAKE_SOURCE_DIR}/tools/gen_deferred_syms.sh"
+            "${FRLG_VENDOR_DIR}/build/firered_modern/src"
+            "${CMAKE_CURRENT_BINARY_DIR}/deferred.txt"
+            m4a.o m4a_1.o
+            agb_flash.o agb_flash_1m.o agb_flash_le.o agb_flash_mx.o
+            librfu_rfu.o librfu_stwi.o librfu_sio32id.o librfu_intr.o sloopsvc.o
+            multiboot.o libgcnmultiboot.o isagbprn.o
     COMMAND sh "${CMAKE_SOURCE_DIR}/tools/find_unbound.sh"
             "${CMAKE_CURRENT_BINARY_DIR}/missing.txt"
             "${CMAKE_C_COMPILER}" -m32 "${CMAKE_CURRENT_SOURCE_DIR}/main.c"
@@ -37,21 +47,7 @@ add_custom_command(
             "${sym}" "${CMAKE_CURRENT_BINARY_DIR}/missing.txt"
             -o "${bindings}" --text-end "${text_end}" --driver --report
             --stub-source "${CMAKE_CURRENT_BINARY_DIR}/agb_stubs.c"
-            # sound (phase 4), link/RFU (phase 10), GameCube multiboot (no phase)
-            --soft-prefix m4a --soft-prefix MPlay --soft-prefix Sound
-            --soft-prefix Midi --soft-prefix Cgb --soft-prefix Music
-            --soft-prefix rfu --soft-prefix Rfu --soft-prefix STWI
-            --soft-prefix AgbRFU --soft-prefix sio --soft-prefix Sio
-            --soft-prefix svc --soft-prefix MultiBoot
-            --soft-prefix GameCubeMultiBoot
-            # save flash (phase 5)
-            --soft-prefix Flash --soft-prefix ReadFlash --soft-prefix EraseFlash
-            --soft-prefix ProgramFlash --soft-prefix VerifyFlash
-            --soft-prefix IdentifyFlash --soft-prefix SetReadFlash
-            --soft-prefix SetFlash --soft-prefix StartFlash --soft-prefix StopFlash
-            --soft-prefix SwitchFlash --soft-prefix WaitForFlash
-            # debugger print facility
-            --soft-prefix AGBPrint --soft-prefix AGBAssert --soft-prefix NoCashGBA
+            --soft-list "${CMAKE_CURRENT_BINARY_DIR}/deferred.txt"
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     DEPENDS game agb "${CMAKE_SOURCE_DIR}/tools/gen_symbol_bindings.py"
     COMMENT "resolving unbound game symbols"
