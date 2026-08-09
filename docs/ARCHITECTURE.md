@@ -184,20 +184,38 @@ macro; reach for an override only when there is no macro seam.
 boot, the BIOS ABI and the ARM sound mixer. None apply to a native binary. `libagbsyscall` and
 `m4a_1` are reimplemented in C under `platform/agb/src/`.
 
-Five `.c` files carry ARM inline assembly and cannot be compiled for a host target. **278 of the
-283 game sources compile natively with no source change at all** — the exclusions are exactly
-these, and every one was already destined for an override for an independent reason:
+**271 of the 283 game sources compile natively with no source change at all.** The exclusions fall
+into two groups, and every one describes hardware rather than game logic.
 
-| Excluded | Assembly it carries | Already planned as |
+**Cannot be compiled** — ARM inline assembly:
+
+| Excluded | Assembly it carries | Owned by |
 | --- | --- | --- |
-| `main.c` | IWRAM clear loop | override — the fiber frame loop ([§6.5](#65-interrupts-and-the-frame-loop)) |
 | `script.c` | `svc 2` (HALT) | override — the pointer accessor ([§12](#12-pointer-width)) |
 | `m4a.c` | `swi 0x2A` | override — the C mixer ([§6.7](#67-audio)) |
 | `multiboot.c` | ARM busy-wait | GameCube link, out of scope |
-| `librfu_intr.c` | naked ARM trampolines | RFU wireless, stubbed until link play ([§6.9](#69-serial-and-link-play)) |
+| `librfu_intr.c` | naked ARM trampolines | link play ([§6.9](#69-serial-and-link-play)) |
 
-That the exclusion list and the already-planned override list turned out to be the same five files
-is the strongest evidence so far that the layering in [§2](#2-layer-model) cuts in the right place.
+**Cannot be executed** — drives hardware that does not exist natively, found by running:
+
+| Excluded | Why | Owned by |
+| --- | --- | --- |
+| `librfu_rfu.c`, `librfu_stwi.c`, `librfu_sio32id.c`, `sloopsvc.c` | spin on wireless-adapter registers that never change; reads as a hang | link play, phase 10 |
+| `agb_flash*.c` (4 files) | `ReadFlashId` copies Thumb code into a stack buffer and calls it | saves, phase 5 ([§6.8](#68-save-data)) |
+| `isagbprn.c` | writes to no$gba debug I/O addresses in no real region | a host-console version would improve on the original |
+
+`main.c` is **not** excluded. Its only ARM assembly is an IWRAM clear inside `#if MODERN`, so
+upstream's own non-modern path avoids it; `MODERN` gates nothing but `NOINLINE` and an `abs` macro,
+so no layout or ABI changes. The modern path exists to work around a `RegisterRamReset` hazard that
+does not apply when `RegisterRamReset` is ours.
+
+The exclusion list is almost exactly the set of files that were already going to be replaced for
+independent reasons, which is good evidence the layering in [§2](#2-layer-model) cuts in the right
+place. Unresolved symbols are bound by `tools/gen_symbol_bindings.py`: ROM data to the cart region,
+RAM variables to their true arena offsets, and routines the port has not written yet to generated
+per-name stubs. A stub for a *deferred subsystem* (sound, link, flash) warns once and returns;
+every other stub aborts. A silent no-op in game logic is worse than a crash, because it looks like
+it worked.
 
 ## 5. Game data
 

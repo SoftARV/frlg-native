@@ -9,7 +9,7 @@ Update the status column when a milestone lands.
 | Phase | Goal | Status |
 | --- | --- | --- |
 | 0 | Foundations: repo, pinned submodule, docs, reference ROM builds | **done** |
-| 1 | The game compiles and links natively and reaches `AgbMain` | **in progress** — 278/283 sources compile |
+| 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | |
 | 4 | Audio — the m4a mixer in C | |
@@ -68,9 +68,27 @@ this is a guess. Expect a long tail of small incompatibilities, not one large pr
 to a single line of upstream source. The five exclusions are exactly the files carrying ARM inline
 assembly, and each was already on the override list for an independent reason.
 
-Link progress: **1,295 unresolved symbols → 176**, after binding the script and map data into the
-cart region. The remainder are the seven excluded files' symbols — 17 BIOS syscalls and the rest
-from `main.c`, `script.c`, `m4a.c`, `multiboot.c`, `librfu_intr.c` and the GameCube multiboot stub.
+**Phase 1 is done.** `frlg-native` links and runs, and `AgbMain` executes its whole initialisation
+sequence — RAM reset, GPU register setup, key init, interrupt handler install, sound init, RFU
+init, flash detection — before reaching its main loop.
+
+Final link: 1,309 unbound symbols resolved as 1,120 ROM data bound into the cart region, 14 RAM
+variables bound to their arena offsets, 99 hard stubs, and 78 deferred-subsystem stubs.
+
+The main loop then spins in `WaitForVBlank`, which waits on a flag only the VBlank **interrupt
+handler** sets. That is exactly what phase 2 builds, so the boundary between the phases turned out
+to be where the code itself divides.
+
+Three findings worth carrying forward:
+
+- **Keys are active-low.** A zeroed `REG_KEYINPUT` reads as every button held, which the game sees
+  as the soft-reset combo — it reset before drawing anything. The register file needs its hardware
+  reset state, not zeros.
+- **Some files cannot be *executed* even though they compile**: the RFU drivers spin on adapter
+  registers forever, and the flash driver runs Thumb code from a stack buffer. Both were found by
+  running, not by reading.
+- **A stall and a crash need different diagnostics.** The desktop port installs a watchdog and a
+  fault handler that print backtraces; without them "it hangs" carried no information.
 
 **The relocation spike is done** — [spike 0001](spikes/0001-relocation-table.md). Deriving the
 table from `--emit-relocs` works: 61,137 embedded pointers, every offset inside the image, 100% of

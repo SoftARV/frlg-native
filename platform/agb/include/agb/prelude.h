@@ -49,6 +49,13 @@
 #define EWRAM_DATA
 #define COMMON_DATA
 
+// Save flash. The real driver executes Thumb code copied into a stack buffer,
+// so it is replaced wholesale (docs/ARCHITECTURE.md 6.8); this keeps every other
+// reader of FLASH_BASE pointed at real memory.
+#include "gba/flash_internal.h"
+#undef FLASH_BASE
+#define FLASH_BASE ((u8 *)agb_mem.sram)
+
 // Arming a DMA channel has an immediate side effect, so it cannot stay a plain
 // register write. DmaCopy/DmaFill/DmaClear all expand through DmaSet.
 #undef DmaSet

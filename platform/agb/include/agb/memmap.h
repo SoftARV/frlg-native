@@ -13,6 +13,7 @@ struct agb_memory
     uint8_t pltt[0x400];
     uint8_t vram[0x18000];
     uint8_t oam[0x400];
+    uint8_t sram[0x20000];
 } __attribute__((aligned(8)));
 
 extern struct agb_memory agb_mem;

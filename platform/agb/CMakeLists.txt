@@ -2,9 +2,17 @@ include(${CMAKE_SOURCE_DIR}/cmake/GamePipeline.cmake)
 
 add_library(agb STATIC
     src/memmap.c
-    src/dma.c)
+    src/dma.c
+    src/bios.c
+    src/frame.c
+    src/unimplemented.c)
 
 target_include_directories(agb PUBLIC include)
+
+# -iquote, not -I: vendor/include carries a strings.h that would hijack POSIX
+# <strings.h> for host headers. See docs/ARCHITECTURE.md 4.1.
+target_compile_options(agb PRIVATE -iquote "${FRLG_VENDOR_DIR}/include")
+target_link_libraries(agb PUBLIC m)
 
 frlg_collect_game_sources(game_rel_sources)
 
