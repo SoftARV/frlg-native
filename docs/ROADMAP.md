@@ -36,18 +36,15 @@ Two milestones matter more than the rest. **Phase 6** is when it becomes a game 
 Verified on this machine: `arm-none-eabi-gcc 16.1`, CMake 4.4, Ninja, clang 22, libpng, SDL3 3.4.14
 (64-bit), and `gcc -m32` against a working `/usr/lib32` multilib.
 
-Three known gaps, none on the critical path:
-
-- **32-bit SDL3 is not installed.** `lib32-sdl3 3.4.14-1` is in the enabled multilib repo, one
-  `pacman -S` away. Phase 1 does not need it — the game links against the `null` host backend.
-- `emcc` is absent, which only matters at Phase 8.
+One known gap: `emcc` is absent, which only matters at Phase 8. `lib32-sdl3` was missing at the
+time and has since been installed.
 
 `agbcc` was listed here as a third gap "not on the critical path". **That was wrong**, and
 [spike 0001](spikes/0001-relocation-table.md) found out why: the manifest is layout-specific, so it
 must come from the byte-matching build. `agbcc` is a hard prerequisite of Phase 7. It has since
 been built and installed.
 
-## Phase 1 — It compiles and links *(next)*
+## Phase 1 — It compiles and links *(done)*
 
 The riskiest phase, and first: until 320k lines compile for an x86 target, every estimate after
 this is a guess. Expect a long tail of small incompatibilities, not one large problem.
@@ -59,10 +56,11 @@ this is a guess. Expect a long tail of small incompatibilities, not one large pr
 4. ~~Assemble `data/*.s` with the host assembler.~~ **abandoned, correctly** — no host assembler
    can ([spike 0002](spikes/0002-host-assembly.md)). Those 1,107 symbols are bound into the cart
    region at link time instead, which is where they were always going to come from.
-5. Override the five ARM-assembly sources plus `libagbsyscall.s` and `m4a_1.s`
-   ([ARCHITECTURE §4.3](ARCHITECTURE.md#43-files-not-built)) — **176 symbols, next up**.
-6. Stub every hardware entry point — enough to link, nothing more.
-7. Link, run, reach `AgbMain`, exit cleanly.
+5. ~~Handle the ARM-assembly sources~~ **done** — `main.c` needed no override at all (its asm is
+   inside `#if MODERN`); the rest are excluded and their symbols stubbed
+   ([ARCHITECTURE §4.3](ARCHITECTURE.md#43-files-not-built)).
+6. ~~Stub every hardware entry point.~~ **done**
+7. ~~Link, run, reach `AgbMain`.~~ **done**
 
 **278 of 283 game sources now compile natively as x86-32** (`libgame.a`, 16.6 MB), with no change
 to a single line of upstream source. The five exclusions are exactly the files carrying ARM inline
@@ -104,7 +102,7 @@ something in a hardware region.
 
 Done when the binary runs to the main loop and exits without a crash. Nothing renders.
 
-## Phase 2 — It runs *(mostly done)*
+## Phase 2 — It runs *(done)*
 
 **The game ticks.** `AgbMain`'s main loop runs at the GBA's true rate: 1200 frames in 20.10 s
 against an expected 20.09 s — 0.05% drift, no crashes. It is executing the intro sequence, calling
