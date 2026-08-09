@@ -26,6 +26,10 @@ of pointers, and make the accessor add the arena base.
 ## Consequences
 
 - A playable build arrives far sooner; the host assembler consumes `data/*.s` unmodified.
+- This shares one mechanism with [ADR 0006](0006-rom-supplied-data.md): the importer's relocation
+  pass rewrites ROM-address pointers to host addresses in place, which works precisely because
+  32-bit host pointers fit the ROM's 4-byte slots. The 64-bit migration is therefore the same piece
+  of work for both decisions — regenerate the data into a native layout with wider slots.
 - macOS and iOS are deferred to Phase 8. This is the real cost, and it is accepted knowingly.
 - The accessor indirection must be applied with discipline from the start. If raw casts creep back
   in, this decision quietly degrades into "32-bit only" and nobody notices until Phase 8.

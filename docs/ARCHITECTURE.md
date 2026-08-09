@@ -8,14 +8,17 @@ same commit.
 - [2. Layer model](#2-layer-model)
 - [3. Repository layout](#3-repository-layout)
 - [4. Upstream integration](#4-upstream-integration)
-- [5. The virtual GBA (`platform/agb`)](#5-the-virtual-gba-platformagb)
-- [6. The host abstraction (`platform/host`)](#6-the-host-abstraction-platformhost)
-- [7. Ports (`ports/`)](#7-ports)
-- [8. Build system and asset pipeline](#8-build-system-and-asset-pipeline)
-- [9. Pointer width](#9-pointer-width)
-- [10. Enhancement hooks](#10-enhancement-hooks)
-- [11. Testing](#11-testing)
-- [12. Conventions](#12-conventions)
+- [5. Game data](#5-game-data)
+- [6. The virtual GBA](#6-the-virtual-gba)
+- [7. The host abstraction](#7-the-host-abstraction)
+- [8. Mods](#8-mods)
+- [9. Launcher, packaging and updates](#9-launcher-packaging-and-updates)
+- [10. Ports](#10-ports)
+- [11. Build system](#11-build-system)
+- [12. Pointer width](#12-pointer-width)
+- [13. Extension points](#13-extension-points)
+- [14. Testing](#14-testing)
+- [15. Conventions](#15-conventions)
 
 ---
 
@@ -30,55 +33,68 @@ That makes a **source port** the correct approach, and it rules out the alternat
 | Approach | Verdict |
 | --- | --- |
 | Emulation | Rejected — ships a CPU interpreter and gains nothing we can enhance. |
-| Static recompilation (N64Recomp-style) | Rejected — that technique exists for games *without* source. We have source. |
+| Static recompilation | Rejected — that technique exists for games *without* source. We have source. |
+| Reimplementation | Rejected — re-deriving 320k lines of behaviour by hand, then spending years documenting where it diverges. |
 | **Source port** | **Chosen.** Compile the game for the host CPU; reimplement the hardware beneath it. |
 
 The game code does not learn that it has been ported. It keeps calling `REG_DISPCNT`, `DmaCopy16`,
 `CpuFastSet` and `VBlankIntrWait`. We supply those.
 
-Two properties of the codebase make this tractable, and both were measured, not assumed:
+Two measured properties of the codebase make this tractable:
 
 - Hardware access is funnelled through five headers in `include/gba/`. Only **38** raw address
   literals exist in all of `src/`.
-- `data/*.s` (event scripts, battle scripts, map data) uses only portable GAS directives —
-  `.byte`, `.2byte`, `.4byte`, `.string`, `.align`, `.incbin`, `.section`. No ARM or Thumb
-  directives at all, so the host assembler consumes these files unmodified.
+- `data/*.s` uses only portable GAS directives — no ARM or Thumb directives at all — so the host
+  assembler consumes those files unmodified.
+
+**What we get for free.** Because the original code runs, battle formulas, trainer AI, encounter
+rates, growth curves, frame timing and the original games' own bugs are correct by construction.
+A reimplementation earns each of those and then maintains a register of where it still diverges.
+We have no such register and never will. This is the single largest advantage of the approach and
+it should shape where effort goes: not into parity, into everything above it.
+
+**What we ship.** Code and a generated manifest. No game data — that comes from the player's own
+ROM ([§5](#5-game-data)).
 
 ## 2. Layer model
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  vendor/pokefirered            game logic, 320k LOC, PRISTINE  │
+│  launcher            ROM import · mods · updates · shortcuts   │
+└───────────────────────▲────────────────────────────────────────┘
+┌───────────────────────┴────────────────────────────────────────┐
+│  mods                embedded Lua · schema registries          │
+│  patches data · hooks events · owns render pipelines           │
+└───────────────────────▲────────────────────────────────────────┘
+┌───────────────────────┴────────────────────────────────────────┐
+│  vendor/pokefirered  game logic, 320k LOC, PRISTINE            │
 │  thinks it is running on a Game Boy Advance                    │
 └───────────────────────▲────────────────────────────────────────┘
                         │  GBA hardware API
                         │  (shadowed headers + link-time overrides)
 ┌───────────────────────┴────────────────────────────────────────┐
-│  platform/agb                  the virtual GBA                 │
+│  platform/agb        the virtual GBA                           │
 │  memmap · io · ppu · dma · irq · timer · bios · m4a · flash    │
 │  NO OS CONDITIONALS — identical code on every target           │
 └───────────────────────▲────────────────────────────────────────┘
                         │  host.h  (one narrow interface)
 ┌───────────────────────┴────────────────────────────────────────┐
-│  platform/host                 backends                        │
-│  video · audio · input · vfs · clock · fiber · log             │
+│  platform/host       video · audio · input · vfs · clock ·     │
+│                      fiber · net · log                         │
 │  sdl3 implementation · null implementation (headless tests)    │
 └───────────────────────▲────────────────────────────────────────┘
-                        │
 ┌───────────────────────┴────────────────────────────────────────┐
-│  ports/desktop · ports/android · ports/ios · ports/web         │
-│  entry point, packaging, manifests, store metadata             │
+│  ports/  desktop · android · ios · web · switch                │
 └────────────────────────────────────────────────────────────────┘
 ```
 
 **The dependency rule is strictly downward.** No layer may reference anything above it. The PPU
-never calls SDL; it writes into a framebuffer that the host layer later presents. This is what
-keeps a new platform to "implement `host.h`" rather than "port the renderer".
+never calls SDL; it writes into a framebuffer the host layer later presents. This is what keeps a
+new platform to "implement `host.h`" rather than "port the renderer".
 
 The single most important consequence: **`platform/agb` contains zero `#ifdef _WIN32` /
 `__ANDROID__` / `__APPLE__`.** Every OS conditional lives under `platform/host/` or `ports/`. If a
-platform difference is leaking into the AGB layer, the `host.h` interface is wrong and gets fixed
-there instead.
+platform difference leaks into the AGB layer, the `host.h` interface is wrong and gets fixed there.
 
 ## 3. Repository layout
 
@@ -87,39 +103,41 @@ frlg-native/
 ├── vendor/pokefirered/          pinned submodule, never edited
 ├── platform/
 │   ├── agb/
-│   │   ├── include/gba/         shadow headers that replace upstream's five
-│   │   ├── include/agb/         our own interfaces (memmap, ppu, irq, …)
+│   │   ├── include/gba/         shadow headers replacing upstream's five
+│   │   ├── include/agb/         our own interfaces
 │   │   ├── src/                 the hardware reimplementation
-│   │   └── overrides/           .c files that replace an upstream .c
+│   │   └── overrides/           .c files replacing an upstream .c
 │   └── host/
 │       ├── include/host.h       the entire host interface
-│       └── src/sdl3/            SDL3 backend
-│       └── src/null/            headless backend for tests
-├── ports/desktop/               main(), packaging
+│       └── src/{sdl3,null}/     backends
+├── import/                      ROM validation, extraction, cache, relocation
+├── mods/                        Lua runtime, schema registries, loader
+├── launcher/                    first boot, mod manager, updates
+├── ports/                       entry points, packaging, manifests
 ├── cmake/                       toolchains, asset pipeline, drift check
-├── tools/                       our build-time tools (drift check, converters)
-├── tests/
+├── tools/                       manifest generation, drift check, golden differ
+├── tests/                       units, drivers, goldens
 └── docs/
 ```
 
 ## 4. Upstream integration
 
 `vendor/pokefirered` is pinned at commit `c75f3523` and **is never modified**. pret continues to
-fix decomp bugs; we want those for free. Every deviation is therefore expressed in one of exactly
-three ways, all of them explicit and greppable.
+fix decomp bugs; we want those for free. Every deviation is expressed in one of exactly three ways,
+all explicit and greppable.
 
 ### 4.1 Shadow headers
 
-CMake places `platform/agb/include` ahead of `vendor/pokefirered/include` on the include path. Five
-headers are fully replaced:
+CMake places `platform/agb/include` ahead of `vendor/pokefirered/include`. Five headers are fully
+replaced:
 
 | Header | Why it is replaced |
 | --- | --- |
 | `gba/defines.h` | Region base addresses point into our arena; `EWRAM_DATA`/`IWRAM_DATA` become no-ops. |
 | `gba/io_reg.h` | `REG_BASE` points at our register file. |
-| `gba/macro.h` | `DmaSet` and friends become calls into our DMA engine, not raw register writes. |
+| `gba/macro.h` | `DmaSet` and friends call into our DMA engine, not raw register writes. |
 | `gba/syscall.h` | BIOS calls become ordinary C function declarations. |
-| `gba/types.h` | `vu16`/`vs32` etc. keep their meaning but drop GBA-specific assumptions. |
+| `gba/types.h` | `vu16`/`vs32` keep their meaning but drop GBA-specific assumptions. |
 
 The other ~212 upstream headers are used verbatim.
 
@@ -130,31 +148,71 @@ is always its own commit and always re-runs the check.
 
 ### 4.2 Overrides
 
-A handful of upstream `.c` files describe hardware we cannot reproduce by redefining a macro —
-the interrupt dispatcher, save flash, the link cable. For those, CMake excludes the upstream file
-from the source list and compiles `platform/agb/overrides/<name>.c` instead.
+A few upstream `.c` files describe hardware we cannot reproduce by redefining a macro. For those,
+CMake excludes the upstream file and compiles `platform/agb/overrides/<name>.c` instead.
 
-Every override is listed in the table below, with the reason and the upstream file it forked from.
-**Adding an override without adding a row here is a defect.**
+Every override is listed here, with its reason and the upstream file it forked from.
+**Adding an override without adding a row is a defect.**
 
 | Override | Replaces | Reason |
 | --- | --- | --- |
 | _(none yet)_ | | |
 
-Overrides are a cost, not a tool of convenience: each one is a file that stops receiving upstream
-fixes. Prefer a shadow macro; reach for an override only when there is no macro seam.
+Overrides are a cost, not a convenience: each one stops receiving upstream fixes. Prefer a shadow
+macro; reach for an override only when there is no macro seam.
 
-### 4.3 Files simply not built
+### 4.3 Files not built
 
 `crt0.s`, `rom_header.s`, `libagbsyscall.s`, `libgcnmultiboot.s` and `m4a_1.s` describe cartridge
-boot, the BIOS ABI and the ARM sound mixer. None apply to a native binary. They are dropped from
-the source list; `libagbsyscall` and `m4a_1` are reimplemented in C under `platform/agb/src/`.
+boot, the BIOS ABI and the ARM sound mixer. None apply to a native binary. `libagbsyscall` and
+`m4a_1` are reimplemented in C under `platform/agb/src/`.
 
-## 5. The virtual GBA (`platform/agb`)
+## 5. Game data
 
-### 5.1 Memory map
+The port ships no graphics, audio, text or data tables. They come from the player's ROM.
+Rationale and risks: [ADR 0006](adr/0006-rom-supplied-data.md).
 
-One contiguous arena is allocated at startup, carved into the GBA's regions:
+### 5.1 The manifest
+
+We build the ROM ourselves, so the manifest is a build output rather than a reverse-engineering
+project. `make syms` emits **50,590 symbols with addresses and sizes** — 9,832 of them `g`-prefixed
+data symbols — and the linker map adds 35,037 lines of section detail. `tools/` turns those into
+the shipped manifest: symbol names, ROM offsets, sizes, and relocation entries.
+
+It contains no ROM bytes, no graphics, no dialogue, no audio samples.
+
+### 5.2 The cart region and symbol binding
+
+The arena reserves a cart region at the GBA's `0x08000000`. At first boot the player's ROM is
+SHA-1 verified, loaded into that region, and released — never copied into the cache.
+
+Data symbols are **not compiled into the binary**. A generated linker fragment defines each one at
+its address inside the cart region, so `extern const struct SpeciesInfo gSpeciesInfo[]` resolves
+into the loaded image and game code reaches its data unmodified.
+
+### 5.3 Relocation
+
+Pointers embedded in ROM data are ROM addresses (`0x08xxxxxx`). After loading, the importer walks
+the relocation table and rewrites each to the corresponding host address.
+
+This is the same seam the pointer-width strategy needs ([§12](#12-pointer-width)), which is why the
+two are one mechanism rather than two.
+
+Deriving the relocation table — from `--emit-relocs` on the ROM link, or from object-file
+relocation sections — is unproven and is the first spike of Phase 1.
+
+### 5.4 The developer data path
+
+A developer build compiles the data in, exactly as upstream's ROM build does, so renderer work can
+proceed before the importer exists. This keeps the importer off the critical path for Phases 1–3.
+
+**Developer builds are never distributed.** They embed ROM-derived data.
+
+## 6. The virtual GBA
+
+### 6.1 Memory map
+
+One contiguous arena, carved into the GBA's regions:
 
 | Region | Size | Purpose |
 | --- | --- | --- |
@@ -164,218 +222,250 @@ One contiguous arena is allocated at startup, carved into the GBA's regions:
 | Palette | 1 KiB | 256 BG + 256 OBJ colours |
 | VRAM | 96 KiB | tiles, tilemaps, sprite graphics |
 | OAM | 1 KiB | 128 sprite entries |
+| Cart | 16 MiB | the loaded ROM image ([§5](#5-game-data)) |
 
-Addresses are *relocated*, not mapped at the GBA's real addresses. Region macros in the shadow
-`defines.h` resolve to offsets inside the arena, so no `mmap` at fixed low addresses is needed —
-that trick fails on macOS and iOS, where the low 4 GiB is reserved. The 38 raw address literals in
-upstream `src/` are handled individually and each one is recorded in the override table when it
-forces an override.
+Addresses are *relocated*, not mapped at the GBA's real addresses — that trick fails on macOS and
+iOS, where the low 4 GiB is reserved. Region macros in the shadow `defines.h` resolve to offsets
+inside the arena. The 38 raw address literals in upstream `src/` are handled individually.
 
 `EWRAM_DATA` and `IWRAM_DATA` become no-ops: the host linker places those variables wherever it
-likes. Nothing in the game depends on their addresses, only on their contents.
+likes. Nothing depends on their addresses, only their contents.
 
-### 5.2 Register file and I/O
+### 6.2 Register file and I/O
 
-The register file is a plain 1 KiB array, so the overwhelming majority of register writes are just
-memory writes and cost nothing. The PPU reads the register file when it renders rather than being
-notified on write.
+A plain 1 KiB array, so the overwhelming majority of register writes are just memory writes and
+cost nothing. The PPU reads the register file when it renders rather than being notified on write.
 
 Only registers with an *immediate side effect* are intercepted, by routing them through a function
-in the shadow `macro.h` instead of a raw store: the DMA control registers (writing the enable bit
-starts a transfer), and `REG_IME`/`REG_IE`/`REG_IF` (interrupt masking).
+in the shadow `macro.h`: the DMA control registers (writing the enable bit starts a transfer) and
+`REG_IME`/`REG_IE`/`REG_IF`.
 
-### 5.3 PPU
+### 6.3 PPU
 
-A scanline renderer, written to be resolution-parametric from the first line of code — the
-widescreen goal is cheap now and expensive to retrofit. It never hardcodes 240 or 160; it reads
-`agb_ppu_width()` / `agb_ppu_height()`.
+A scanline renderer, resolution-parametric from its first line of code — widescreen is cheap now
+and expensive to retrofit. It never hardcodes 240 or 160.
 
-Per scanline it composes, in the GBA's order: the four backgrounds (text and affine modes), the
-object layer from OAM, the two windows plus the object window, then colour special effects
-(alpha blend, brightness increase/decrease) and mosaic. Output is a 32-bit RGBA framebuffer handed
-to the host layer.
+Per scanline it composes, in the GBA's order: four backgrounds (text and affine), the object layer
+from OAM, two windows plus the object window, then colour special effects (alpha blend, brightness
+increase/decrease) and mosaic. Output is a 32-bit RGBA framebuffer handed to the host layer.
 
-Rendering is software, deliberately. A GPU implementation of the GBA's blending and window rules
-is a large accuracy risk for a game that is not fill-rate bound at this resolution. GPU-side
-upscaling and shader filters belong in the host layer, above the framebuffer.
+Rendering is software, deliberately ([ADR 0005](adr/0005-sdl3-software-ppu.md)): the GBA's blending
+and window rules are an accuracy risk on the GPU, the renderer is nowhere near fill-rate bound, and
+determinism is what makes golden-image testing viable. GPU work — upscaling, LCD filters, shaders —
+happens above the framebuffer.
 
-### 5.4 DMA
+### 6.4 DMA
 
-Four channels. Immediate transfers run synchronously the moment the enable bit is written — this
-covers the great majority of use, since `DmaCopy16`/`DmaFill32` are how the game moves everything
-into VRAM.
+Four channels. Immediate transfers run synchronously when the enable bit is written, covering the
+great majority of use. Beyond that: HBlank-triggered DMA drives per-scanline effects and must fire
+from inside the PPU's scanline loop; FIFO DMA feeds the sound mixer.
 
-The channels that matter beyond that are the timed ones: HBlank-triggered DMA is how the game
-produces per-scanline effects, and it must fire from inside the PPU's scanline loop; FIFO DMA
-feeds the sound mixer. Both are driven by the frame loop below, not by the game.
+### 6.5 Interrupts and the frame loop
 
-### 5.5 Interrupts and the frame loop
+The subtlest part of the port, and the reason `host.h` exposes fibers.
+Full rationale: [ADR 0004](adr/0004-fiber-frame-loop.md).
 
-This is the subtlest part of the port, and the reason for the fiber dependency in `host.h`.
-
-The game is written as `while (1) { callback1(); callback2(); VBlankIntrWait(); }`, but
-`VBlankIntrWait` is *also* called from deep inside nested game code, and HBlank interrupt handlers
-must run *between* scanlines while the game is blocked. A simple "call the game once per frame"
-loop cannot express that.
+`VBlankIntrWait` is called from deep inside nested game code, not only the top-level loop, and
+HBlank handlers must run *between* scanlines while the game is blocked. A "call the game once per
+frame" loop cannot express either.
 
 So the game runs on its own **fiber**. The host drives:
 
-1. Host loop begins a frame; polls input into the key registers.
-2. For each scanline: render it, then — if the game enabled the HBlank interrupt — switch to the
-   game fiber to run its handler, and switch back.
-3. At scanline 160, raise VBlank: switch to the game fiber, which returns from `VBlankIntrWait`
-   and runs a full frame of game logic until it blocks again.
-4. Present the framebuffer, mix audio.
+1. Begin a frame; poll input into the key registers.
+2. Per scanline: render it, and if the game enabled HBlank, switch to the game fiber for its
+   handler and back.
+3. At scanline 160, raise VBlank: switch to the game fiber, which returns from `VBlankIntrWait` and
+   runs a frame of logic until it blocks again.
+4. Present the framebuffer; mix audio.
 
-Fibers rather than a thread: switching is explicit and deterministic, so there are no data races
-on game state and a headless run is reproducible frame for frame. `host.h` exposes fiber
-create/switch, implemented per platform (`ucontext` on POSIX, Fibers on Windows, Asyncify on the
-web).
+Switching is explicit, so there are no data races on game state and headless runs are reproducible
+frame for frame — the property the whole test strategy rests on.
 
 The virtual clock runs at the GBA's true 59.7275 Hz, not 60.
 
-### 5.6 BIOS
+### 6.6 BIOS
 
-`libagbsyscall.s` becomes C. The arithmetic entry points (`Div`, `Sqrt`, `ArcTan2`,
-`BgAffineSet`, `ObjAffineSet`) must reproduce the BIOS's exact results, including its rounding and
-its quirks, because game logic depends on the values — these are unit-tested against known
-vectors rather than trusted. `CpuSet`/`CpuFastSet` become `memcpy`-class helpers honouring the
-fixed-source and 16/32-bit control bits. `LZ77UnComp`, `RLUnComp` and `HuffUnComp` are
-straightforward decompressors, exercised against real game assets.
+`libagbsyscall.s` becomes C. The arithmetic entry points (`Div`, `Sqrt`, `ArcTan2`, `BgAffineSet`,
+`ObjAffineSet`) must reproduce the BIOS's exact results including its rounding quirks, because game
+logic depends on the values — unit-tested against known vectors rather than trusted.
+`CpuSet`/`CpuFastSet` honour the fixed-source and 16/32-bit control bits. `LZ77UnComp`, `RLUnComp`
+and `HuffUnComp` are exercised against real game assets.
 
-### 5.7 Audio
+### 6.7 Audio
 
-`m4a.c` — the sequencer that reads the song format — is already C upstream and is used as-is.
-`m4a_1.s`, 1917 lines of ARM implementing `SoundMain`, `SoundMainRAM` and the reverb path, is the
-mixer, and is reimplemented in C.
+`m4a.c`, the sequencer, is already C upstream and used as-is. `m4a_1.s` — 1917 lines of ARM
+implementing `SoundMain`, `SoundMainRAM` and the reverb path — is the mixer, reimplemented in C.
 
-The mixer produces the GBA's native ~13.4 kHz PCM into a ring buffer; the host layer resamples to
-whatever rate the device wants. Mixing is driven from the frame loop rather than the audio
-callback, so audio stays in lockstep with game state.
+The mixer produces the GBA's native ~13.4 kHz PCM into a ring buffer; the host layer resamples.
+Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game
+state.
 
-### 5.8 Save data
+### 6.8 Save data
 
-`agb_flash*.c` emulate 128 KiB of flash backed by a host file. The on-disk layout is kept
-byte-identical to the `.sav` format emulators produce, so saves move in and out of mGBA and off
-real hardware without conversion. The path comes from `host_pref_dir()`.
+`agb_flash*.c` emulate 128 KiB of flash backed by a host file, byte-identical to the `.sav` format
+emulators produce, so saves move in and out of mGBA and off real hardware without conversion. The
+path comes from `host_pref_dir()`.
 
-### 5.9 Link cable
+### 6.9 Serial and link play
 
-Serial and the RFU wireless adapter are stubbed to "no peer connected" — the states the game
-already handles gracefully when nothing is plugged in. Real multiplayer is a post-1.0 subject and
-is out of scope for the architecture as described here.
+Peer-to-peer link play — trades and battles — is a committed feature, so the serial layer is
+designed for a real transport rather than permanently stubbed.
 
-## 6. The host abstraction (`platform/host`)
+The game drives serial through registers and the RFU wireless adapter. Our serial layer presents
+the same register behaviour and carries the payload over `host_net`. Link play is *lockstep*: both
+peers must agree on every frame, which is why the deterministic fiber loop is a prerequisite rather
+than a nicety, and why desync fuzzing is part of the test plan.
+
+Until the transport lands, the layer reports "no peer connected" — a state the game already handles
+gracefully.
+
+## 7. The host abstraction
 
 `host.h` is the whole porting surface. A new platform implements it and nothing else:
 
 | Group | Responsibility |
 | --- | --- |
 | video | create a window/surface, present an RGBA framebuffer, report the safe area |
-| audio | open an output stream at a requested rate, consume the mixer's ring buffer |
-| input | report a frame's button state, from keyboard, gamepad or touch |
+| audio | open an output stream, consume the mixer's ring buffer |
+| input | a frame's button state, from keyboard, gamepad or touch |
 | vfs | open assets, read files, resolve the writable preference directory |
 | clock | monotonic time and frame pacing |
 | fiber | create and switch execution contexts |
+| net | datagram transport for link play |
 | log | leveled diagnostics |
 
-Two implementations exist: `sdl3` (desktop, Android and iOS all come from this one), and `null`
-(headless, for deterministic tests and CI).
+Two implementations: `sdl3` (desktop, Android and iOS all come from this one) and `null` (headless,
+for deterministic tests and CI).
 
-SDL3 rather than SDL2: it is the version with a supported mobile story, a modern GPU abstraction
-and a sane audio stream API — and it is what is installed here (3.4.14).
+## 8. Mods
 
-## 7. Ports
+An embedded Lua layer. Design and rules: [ADR 0007](adr/0007-lua-mod-registries.md).
+
+**One schema table is the source of truth** for every registry — its merge semantics (`record`,
+`deep`, `compose`), the data path it writes, and the value schema every registration is validated
+against. The loader is built from that table and the reference documentation is generated from it,
+so engine and docs cannot drift. Registrations come in four modes: `register`, `override`, `patch`,
+`remove`.
+
+Mods act at three levels:
+
+- **Data** — patch the cart region after import, before the game starts.
+- **Hooks** — register callbacks on engine events.
+- **Render pipelines** — own a display mode outright, layered above the framebuffer. This is the
+  seam that makes an alternative renderer a mod rather than a fork.
+
+Two rules are non-negotiable, adopted from prior art because they are hard-won:
+
+- **A callback that throws retires only its own feature**, attributed to its mod; the frame falls
+  back to vanilla. A broken mod costs a display mode, never the game.
+- **Availability is re-read every frame**, so a pipeline that cannot run headless simply does not.
+
+Lua rather than LuaJIT: iOS forbids JIT, and performance-critical work is already in C.
+
+## 9. Launcher, packaging and updates
+
+The launcher owns everything around the game rather than inside it: first-boot ROM import, mod
+management and profiles, update checks, and direct-launch shortcuts for Steam entries and handheld
+frontends.
+
+It is a separate layer above the game, not a mode of it, so a corrupted mod set or a failed update
+never blocks booting.
+
+Packaging is per-platform and lives under `ports/`. Release pipelines are built early rather than
+retrofitted — shipping a binary is only possible at all because we ship no game data ([§5](#5-game-data)),
+so distribution is a first-class concern from the start.
+
+## 10. Ports
 
 Each directory under `ports/` holds only what is irreducibly platform-specific: the entry point,
-the packaging manifest and store metadata. `ports/desktop` is a `main()` and a CMake install rule.
-Android adds a Gradle project and an activity; iOS adds an Xcode target and `Info.plist`; web adds
-an Emscripten shell. **No game logic and no hardware logic lives here.**
+the packaging manifest, store metadata. **No game logic and no hardware logic lives here.**
 
-## 8. Build system and asset pipeline
+## 11. Build system
 
 CMake ≥ 3.24 with Ninja, driven by `CMakePresets.json`. Cross-compilation uses toolchain files in
-`cmake/`; the asset tools are always built for the host, never the target.
+`cmake/`; asset tools are always built for the host, never the target.
 
 The game's sources cannot be compiled directly — upstream's `tools/preproc` must run over every
-`.c` and `.s` first, to expand the `_("…")` string literals into the game's character encoding.
-CMake reproduces that as a per-file custom command: `preproc` → C preprocessor → compiler.
+`.c` and `.s` first, to expand `_("…")` string literals into the game's character encoding. CMake
+reproduces that per file: `preproc` → C preprocessor → compiler.
 
-Binary assets (`.png` → `.4bpp`/`.gbapal`/`.lz`, MIDI → song `.s`, maps → generated C) are
-produced by roughly 40 KiB of rules spread across upstream's five `*_rules.mk` files.
-**We do not reimplement those rules.** The build delegates asset generation to upstream's own
-Makefile and consumes the generated files. Reimplementing that pipeline in CMake would be a large
-transcription with a large bug surface, for no benefit while upstream's version already works and
-stays correct as pret changes it.
+Binary assets in the *developer* data path are produced by roughly 40 KiB of rules across
+upstream's five `*_rules.mk` files. **We do not reimplement those rules** — the build delegates to
+upstream's Makefile and consumes the generated files. Reimplementing them would be a large
+transcription with a large bug surface, for no benefit while upstream's version works and stays
+correct as pret changes it.
 
-The ROM build stays working and stays in CI. It is the reference: when the port renders something
-wrong, the question is always "what does the ROM do here", and a byte-comparable ROM keeps that
-question answerable. Note that `MODERN=1` (modern GCC) does not reproduce the original ROM's
-checksum; byte-matching requires `agbcc`, which is not currently installed here.
+The ROM build stays in CI, for two reasons. It is the **oracle** — when the port renders something
+wrong, "what does the ROM do here" must stay answerable. And it **generates the manifest**
+([§5.1](#51-the-manifest)), so it is load-bearing for shipping, not just for reference.
 
-## 9. Pointer width
+`MODERN=1` (modern GCC) does not reproduce the original ROM's checksum; byte-matching needs
+`agbcc`, which is not currently installed here and is not required.
 
-The one genuinely hard constraint. `data/*.s` contains **789 `.4byte` directives**, many of which
-are symbol references — pointers embedded directly in data blobs. The script VM reads them back
-with `ScriptReadWord` (`src/script.c:188`) and casts the result to a pointer. On a 64-bit build
-those pointers truncate, and the game's script engine breaks at the foundations.
+## 12. Pointer width
 
-The strategy is **32-bit first, 64-bit ready**:
+`data/*.s` contains **789 `.4byte` directives**, many of them symbol references — pointers embedded
+directly in data blobs. The script VM reads them back with `ScriptReadWord`
+(`vendor/pokefirered/src/script.c:188`) and casts the result to a pointer. On a 64-bit build those
+truncate, and the script engine breaks at the foundations.
 
-- Phase A builds 32-bit — `-m32` on x86, `armeabi-v7a` on Android, `wasm32` on the web. Embedded
-  pointers are correct with no changes, and the host assembler consumes `data/*.s` unmodified.
-- From the first commit, every read of a pointer embedded in game data goes through an accessor
-  rather than a raw cast. While 32-bit, the accessor is the identity function and costs nothing.
-- The 64-bit migration then changes the *data pipeline*, not the game code: emit 32-bit offsets
-  instead of pointers, and make the accessor add the arena base. macOS and iOS come online at that
-  point, since Apple platforms are 64-bit only.
+The strategy is **32-bit first, 64-bit ready** ([ADR 0003](adr/0003-pointer-width.md)):
 
-The alternative — going 64-bit-clean immediately — means writing an `.s`-to-C converter and
-auditing every struct layout and save serialisation before anything can render. That is weeks of
-pipeline work before the first pixel. Recorded in [ADR 0003](adr/0003-pointer-width.md).
+- Phase A builds 32-bit — `-m32` on x86, `armeabi-v7a` on Android, `wasm32` on the web. Relocated
+  host pointers fit the ROM's 4-byte slots, so the importer's relocation pass
+  ([§5.3](#53-relocation)) is sufficient and game code is untouched.
+- Every read of a pointer embedded in game data goes through an accessor from the first commit.
+  While 32-bit, it is the identity function.
+- The 64-bit migration changes the *data pipeline*: regenerate data into a native layout with wider
+  slots, and make the accessor add the arena base. macOS and iOS come online there, since Apple
+  platforms are 64-bit only.
 
-## 10. Enhancement hooks
+## 13. Extension points
 
-These are designed for now and built later. Designing them in costs almost nothing today;
-retrofitting any of them means rewriting the PPU.
+Designed now, built later. Each costs almost nothing today and would mean rewriting the PPU to
+retrofit. The full list of intended features is [new-features.md](new-features.md).
 
-**Widescreen / higher internal resolution.** The renderer is resolution-parametric (§5.3). Game
-logic still believes the screen is 240×160 and is not touched — the extra area is background and
-object overdraw, revealing more of the map. Anything the game positions in screen space (UI,
-textboxes, battle layouts) must be identified and anchored before this is switched on.
+**Display pipelines.** LCD filters, colour modes and shader effects attach above the framebuffer as
+post-process stages — the same seam mods use to own a display mode.
 
-**Smooth scrolling / high refresh.** Game logic stays locked to 59.7275 Hz — decoupling it would
-break every timing assumption in 320k lines of code. Instead the PPU becomes re-runnable between
-logic ticks with interpolated scroll offsets, so scrolling and sprite motion are resampled at the
-display's rate while logic ticks unchanged. This requires the PPU to keep the previous frame's
-scroll state, which is why it is a design constraint now.
+**Widescreen and higher internal resolution.** The renderer is resolution-parametric
+([§6.3](#63-ppu)). Game logic still believes the screen is 240×160 and is not touched; the extra
+area is background and object overdraw. Anything the game positions in screen space — UI,
+textboxes, battle layouts — must be identified and anchored before this is switched on.
 
-**Modding and asset hot-reload.** Assets currently reach the binary through `.incbin`, which bakes
-them in. The hook is that every such blob is reached through a resource-id → pointer table rather
-than by direct symbol reference, letting the VFS substitute a file from a `data/` override
-directory at runtime. The table is introduced early; the runtime substitution comes later.
+**Smooth scrolling / high refresh.** Logic stays locked to 59.7275 Hz; decoupling it would break
+timing assumptions across 320k lines. The PPU instead becomes re-runnable between logic ticks with
+interpolated scroll offsets, which requires it to retain the previous frame's scroll state — a
+design constraint now.
 
-Save states were considered and are **not** a goal. They would require all mutable state to live
-in one snapshottable arena, which constrains the memory map; that constraint is not being adopted.
+**Asset hot-reload.** Every asset is reached through a resource-id → pointer table rather than a
+direct symbol reference, letting the VFS substitute a file from a `data/` override directory. The
+importer already populates that table ([§5.2](#52-the-cart-region-and-symbol-binding)), so the two
+share a mechanism.
 
-## 11. Testing
+## 14. Testing
 
-320k lines of untouched game code cannot be reviewed, so correctness has to come from
-differential testing against the real thing.
+320k lines of untouched game code cannot be reviewed, and that is not where the bugs will be — they
+will be in the hardware layer, where a one-line blend mistake is invisible in review and obvious on
+screen. Strategy and thresholds: [ADR 0008](adr/0008-testing-strategy.md).
 
-| Layer | How it is tested |
+| Tier | What it covers |
 | --- | --- |
-| BIOS math | unit tests against known-good vectors from real hardware |
-| Decompressors | round-trip real game assets |
-| PPU | golden-image comparison against mGBA frame dumps at fixed points |
-| Full game | headless run, scripted inputs, hash the state each frame |
-| Build | ROM build and native build both in CI; drift check on shadowed files |
+| Unit | BIOS math against hardware-derived vectors; decompressors round-tripping real assets |
+| Golden screenshots | PPU output vs mGBA frame dumps, two thresholds, side-by-side diff artifacts |
+| Headless drivers | scripted scenarios on the `null` backend; an autopilot playthrough capturing shots |
+| Regression | **one driver per fixed bug, named after it, committed with the fix** |
+| Link | desync fuzzing across peers |
+| Build | ROM build, native build, and the shadow/override drift check |
 
-The headless determinism test is the load-bearing one: it turns "did we break something in the
-hardware layer" into a single hash comparison, which is the only way to refactor the AGB layer
-with confidence.
+Golden screenshots use two independent thresholds: a per-channel tolerance absorbing harmless
+driver drift, and a separate pixel budget that is what actually fails. A shot where one sprite moved
+trips the budget; a shot half a shade darker trips neither.
 
-## 12. Conventions
+CI gates expensive per-platform jobs behind change-detection jobs, and runs SDK-free self-tests
+everywhere, so platform count stays affordable.
+
+## 15. Conventions
 
 - C11. No compiler extensions outside `platform/host`.
 - Port code is `snake_case`, prefixed `agb_` or `host_`. The game's `PascalCase` namespace is left
