@@ -345,13 +345,20 @@ Per scanline it composes, in the GBA's order: four backgrounds (text and affine)
 from OAM, two windows plus the object window, then colour special effects (alpha blend, brightness
 increase/decrease) and mosaic. Output is a 32-bit XRGB framebuffer handed to the host layer.
 
-**Implemented so far: text backgrounds** — all four layers, 4bpp and 8bpp, both flips, all four map
-sizes with their multi-block layouts, priority ordering front-to-back, and forced blank. Enough to
-render the intro cinematic and the title screen.
+**Implemented so far: text backgrounds and regular objects.** Backgrounds: all four layers, 4bpp
+and 8bpp, both flips, all four map sizes with their multi-block layouts, priority ordering
+front-to-back, and forced blank. Objects: all twelve sizes, 4bpp and 8bpp, both flips, 1D and 2D
+tile mapping, the 256-line vertical wrap, and priority against the backgrounds and against each
+other. Enough to render the intro cinematic and the title screen.
 
-**Not yet: objects, affine backgrounds, windows, blending and mosaic.** Anything unimplemented is
-**skipped rather than approximated**, so a missing feature reads as absent rather than as a subtly
-wrong picture — which matters when the reference is a golden image.
+Objects resolve into a scanline buffer before any background is drawn, because which object owns a
+pixel is settled among the objects alone — lowest priority value wins, and OAM order breaks a tie.
+Only that winner then competes with the backgrounds, at the priority it carries. Objects in the
+OBJ-window graphics mode are skipped rather than drawn, which is what hardware does with them too.
+
+**Not yet: affine objects, affine backgrounds, windows, blending and mosaic.** Anything
+unimplemented is **skipped rather than approximated**, so a missing feature reads as absent rather
+than as a subtly wrong picture — which matters when the reference is a golden image.
 
 The PPU composes on the game thread at V-blank, immediately after the game's own handler, so the
 register writes and DMA copies that handler performs appear in the same frame. The host thread

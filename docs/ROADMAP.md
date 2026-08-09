@@ -11,7 +11,7 @@ Update the status column when a milestone lands.
 | 0 | Foundations: repo, pinned submodule, docs, reference ROM builds | **done** |
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
-| 3 | PPU — the first real frame, and the golden-screenshot harness | **in progress** — text backgrounds render |
+| 3 | PPU — the first real frame, and the golden-screenshot harness | **in progress** — backgrounds and objects render |
 | 4 | Audio — the m4a mixer in C | |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
@@ -145,25 +145,25 @@ Deferred to their own phases:
 ## Phase 3 — It draws *(in progress)*
 
 **The title screen renders.** Text backgrounds are done: all four layers, 4bpp and 8bpp, both
-flips, all four map sizes with their multi-block layouts, priority ordering, and forced blank. That
-is enough for the intro cinematic and the title screen to appear correctly.
+flips, all four map sizes with their multi-block layouts, priority ordering, and forced blank.
+Regular objects are done too: all twelve sizes, 4bpp and 8bpp, both flips, 1D and 2D tile mapping,
+the 256-line vertical wrap, and priority against the backgrounds and against each other.
 
 Frame captures across a run, by distinct colour count — a flat backdrop scores 1:
 
 | Frame | Colours | What it is |
 | --- | --- | --- |
 | 100 | 5 | copyright text on black |
-| 400 | 5 | dark blue screen |
-| 900 | 23 | intro cinematic, forest scene |
-| 2400 | 161 | title screen |
+| 400 | 11 | dark blue screen |
+| 900 | 26 | intro cinematic, forest scene |
+| 2400 | 166 | title screen |
 
 `FRLG_SHOT=<path>` captures a frame as PPM; `tools/ppm_to_png.py` converts for review. Captures are
 gitignored: they are ROM-derived imagery, and this project ships none.
 
-Remaining, in the order the game stresses them: **objects** → affine backgrounds → windows →
-blending and mosaic. Objects are the next and largest piece — nothing in the overworld draws
-without them. Unimplemented features are skipped rather than approximated, so absence is visible
-rather than subtly wrong.
+Remaining, in the order the game stresses them: **affine objects** → affine backgrounds → windows →
+blending and mosaic. Unimplemented features are skipped rather than approximated, so absence is
+visible rather than subtly wrong.
 
 Still to build: the golden-image harness itself (two thresholds, diff artifacts, `--bless`) and
 mGBA reference captures to compare against. HBlank interrupts land here too, since per-scanline

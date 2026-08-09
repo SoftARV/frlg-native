@@ -1,9 +1,9 @@
 // Scanline renderer.
 //
-// Phase 3 scope: text-mode backgrounds. Objects, affine backgrounds, windows
-// and blending follow, in the order the game stresses them. Anything not yet
-// implemented is skipped rather than approximated, so a missing feature reads
-// as absent rather than as a subtly wrong picture.
+// Phase 3 scope: text-mode backgrounds and regular objects. Affine backgrounds,
+// affine objects, windows and blending follow, in the order the game stresses
+// them. Anything not yet implemented is skipped rather than approximated, so a
+// missing feature reads as absent rather than as a subtly wrong picture.
 
 #include <string.h>
 
@@ -18,8 +18,10 @@
 #define REG_BG0HOFS 0x010
 
 #define DISPCNT_MODE_MASK 0x0007
+#define DISPCNT_OBJ_1D_MAP 0x0040
 #define DISPCNT_FORCED_BLANK 0x0080
 #define DISPCNT_BG_ENABLE(n) (0x0100 << (n))
+#define DISPCNT_OBJ_ENABLE 0x1000
 
 #define BGCNT_PRIORITY_MASK 0x0003
 #define BGCNT_CHAR_BASE(c) (((c) >> 2) & 3)
@@ -38,8 +40,45 @@
 #define MAP_VFLIP 0x0800
 #define MAP_PALETTE(e) (((e) >> 12) & 0xF)
 
+#define OBJ_COUNT 128
+#define OBJ_VRAM_BASE 0x10000
+#define OBJ_VRAM_SIZE 0x8000
+#define OBJ_PLTT_BASE 0x200
+#define OBJ_2D_ROW_STRIDE (32 * TILE_SIZE_4BPP)
+// In the bitmap modes the first 512 tile slots are the frame buffer's.
+#define OBJ_BITMAP_MIN_TILE 512
+
+#define OBJ_Y(a) ((a) & 0xFF)
+#define OBJ_MODE(a) (((a) >> 8) & 3)
+#define OBJ_MODE_NORMAL 0
+#define OBJ_GFX_MODE(a) (((a) >> 10) & 3)
+#define OBJ_GFX_WINDOW 2
+#define OBJ_256_COLOUR 0x2000
+#define OBJ_SHAPE(a) (((a) >> 14) & 3)
+
+#define OBJ_X(a) ((a) & 0x1FF)
+#define OBJ_HFLIP 0x1000
+#define OBJ_VFLIP 0x2000
+#define OBJ_SIZE(a) (((a) >> 14) & 3)
+
+#define OBJ_TILE_INDEX(a) ((a) & 0x03FF)
+#define OBJ_PRIORITY(a) (((a) >> 10) & 3)
+#define OBJ_PALETTE(a) (((a) >> 12) & 0xF)
+
+static const uint8_t obj_dimensions[4][4][2] = {
+    {{8, 8}, {16, 16}, {32, 32}, {64, 64}},
+    {{16, 8}, {32, 8}, {32, 16}, {64, 32}},
+    {{8, 16}, {8, 32}, {16, 32}, {32, 64}},
+    {{0, 0}, {0, 0}, {0, 0}, {0, 0}}, // prohibited; zero height draws nothing
+};
+
 static uint32_t framebuffer[SCREEN_W * SCREEN_H];
 static uint32_t frame_serial;
+
+// One scanline of the object layer, resolved before any background is drawn.
+// Index 0 means no object claimed the pixel.
+static uint8_t obj_colour[SCREEN_W];
+static uint8_t obj_prio[SCREEN_W];
 
 int agb_ppu_width(void)
 {
@@ -66,9 +105,27 @@ static uint16_t io16(int offset)
     return *(const volatile uint16_t *)(agb_mem.io + offset);
 }
 
+static uint16_t oam16(int offset)
+{
+    return *(const volatile uint16_t *)(agb_mem.oam + offset);
+}
+
 static uint16_t bg_palette(int index)
 {
     return *(const volatile uint16_t *)(agb_mem.pltt + index * 2);
+}
+
+static uint16_t obj_palette(int index)
+{
+    return *(const volatile uint16_t *)(agb_mem.pltt + OBJ_PLTT_BASE + index * 2);
+}
+
+// Tile index, mapping stride and 8bpp tile size can between them address past
+// the 32 KiB object region, so the offset is wrapped inside it rather than
+// allowed to walk into the neighbouring memory.
+static uint8_t obj_vram(uint32_t offset)
+{
+    return agb_mem.vram[OBJ_VRAM_BASE + (offset & (OBJ_VRAM_SIZE - 1))];
 }
 
 // BGR555 -> XRGB8888, replicating the high bits so white reaches 0xFF.
@@ -167,6 +224,108 @@ static void render_text_bg_line(int bg, int line, uint8_t *coverage)
     }
 }
 
+// Objects are resolved into a line buffer ahead of the backgrounds, because
+// which object owns a pixel is settled among the objects alone: lowest priority
+// value wins, and OAM order breaks a tie. Only then does that pixel compete
+// with the backgrounds, at the priority it carries.
+static void render_obj_line(int line)
+{
+    uint16_t dispcnt = io16(REG_DISPCNT);
+    int one_d = (dispcnt & DISPCNT_OBJ_1D_MAP) != 0;
+    int min_tile = (dispcnt & DISPCNT_MODE_MASK) >= 3 ? OBJ_BITMAP_MIN_TILE : 0;
+
+    memset(obj_colour, 0, sizeof(obj_colour));
+
+    if (!(dispcnt & DISPCNT_OBJ_ENABLE))
+        return;
+
+    for (int n = 0; n < OBJ_COUNT; n++)
+    {
+        uint16_t attr0 = oam16(n * 8);
+        uint16_t attr1 = oam16(n * 8 + 2);
+        uint16_t attr2 = oam16(n * 8 + 4);
+        int shape = OBJ_SHAPE(attr0);
+        int width = obj_dimensions[shape][OBJ_SIZE(attr1)][0];
+        int height = obj_dimensions[shape][OBJ_SIZE(attr1)][1];
+        int is_256 = (attr0 & OBJ_256_COLOUR) != 0;
+        int tile_size = is_256 ? TILE_SIZE_8BPP : TILE_SIZE_4BPP;
+        int prio = OBJ_PRIORITY(attr2);
+        int x = OBJ_X(attr1);
+        // Objects wrap at 256 rather than at the bottom of the screen, so one
+        // placed low enough reappears at the top.
+        int py = (line - OBJ_Y(attr0)) & 0xFF;
+        uint32_t row;
+
+        // Mode 2 is hidden; 1 and 3 are affine, which is not built yet.
+        if (OBJ_MODE(attr0) != OBJ_MODE_NORMAL)
+            continue;
+        // A window object contributes a mask rather than pixels, and it is
+        // never drawn on hardware either -- skipping it is exact, not partial.
+        if (OBJ_GFX_MODE(attr0) == OBJ_GFX_WINDOW)
+            continue;
+        if (py >= height || OBJ_TILE_INDEX(attr2) < min_tile)
+            continue;
+
+        if (x >= 0x100)
+            x -= 0x200;
+        if (attr1 & OBJ_VFLIP)
+            py = height - 1 - py;
+
+        // 1D mapping lays an object's tiles out back to back; 2D mapping cuts
+        // them from a fixed 32-tile-wide grid.
+        row = (uint32_t)OBJ_TILE_INDEX(attr2) * TILE_SIZE_4BPP
+              + (uint32_t)(py >> 3)
+                    * (one_d ? (uint32_t)(width >> 3) * tile_size : OBJ_2D_ROW_STRIDE)
+              + (uint32_t)(py & 7) * (is_256 ? 8 : 4);
+
+        for (int col = 0; col < width; col++)
+        {
+            int sx = x + col;
+            int px = (attr1 & OBJ_HFLIP) ? width - 1 - col : col;
+            uint32_t at = row + (uint32_t)(px >> 3) * tile_size;
+            int index;
+
+            if (sx < 0 || sx >= SCREEN_W)
+                continue;
+            if (obj_colour[sx] && obj_prio[sx] <= prio)
+                continue;
+
+            if (is_256)
+            {
+                index = obj_vram(at + (px & 7));
+                if (index == 0)
+                    continue;
+            }
+            else
+            {
+                uint8_t pair = obj_vram(at + ((px & 7) >> 1));
+
+                index = (px & 1) ? (pair >> 4) : (pair & 0xF);
+                if (index == 0)
+                    continue;
+                index += OBJ_PALETTE(attr2) * 16;
+            }
+
+            obj_colour[sx] = (uint8_t)index;
+            obj_prio[sx] = (uint8_t)prio;
+        }
+    }
+}
+
+static void blit_obj_line(int line, int priority, uint8_t *coverage)
+{
+    uint32_t *out = framebuffer + line * SCREEN_W;
+
+    for (int x = 0; x < SCREEN_W; x++)
+    {
+        if (!obj_colour[x] || obj_prio[x] != priority || coverage[x])
+            continue;
+
+        out[x] = to_argb(obj_palette(obj_colour[x]));
+        coverage[x] = 1;
+    }
+}
+
 void agb_ppu_render_frame(void)
 {
     uint16_t dispcnt = io16(REG_DISPCNT);
@@ -190,11 +349,15 @@ void agb_ppu_render_frame(void)
         for (int x = 0; x < SCREEN_W; x++)
             out[x] = backdrop;
         memset(coverage, 0, sizeof(coverage));
+        render_obj_line(line);
 
         // Front to back, so the first layer to claim a pixel keeps it: priority
-        // 0 is nearest, and among equal priorities the lower BG number wins.
+        // 0 is nearest, and among equal priorities objects sit above every
+        // background and the lower BG number wins.
         for (int priority = 0; priority < 4; priority++)
         {
+            blit_obj_line(line, priority, coverage);
+
             for (int bg = 0; bg < 4; bg++)
             {
                 uint16_t control;
