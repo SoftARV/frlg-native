@@ -1,0 +1,47 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "FRLG_32BIT": "ON",
+        "CMAKE_C_FLAGS": "-m32"
+      }
+    },
+    {
+      "name": "linux-debug",
+      "inherits": "base",
+      "displayName": "Linux 32-bit debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "FRLG_HOST_BACKEND": "sdl3"
+      }
+    },
+    {
+      "name": "linux-release",
+      "inherits": "base",
+      "displayName": "Linux 32-bit release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "FRLG_HOST_BACKEND": "sdl3"
+      }
+    },
+    {
+      "name": "headless",
+      "inherits": "base",
+      "displayName": "Headless, no SDL — used by phase 1 and by CI",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "FRLG_HOST_BACKEND": "null"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "linux-debug", "configurePreset": "linux-debug" },
+    { "name": "linux-release", "configurePreset": "linux-release" },
+    { "name": "headless", "configurePreset": "headless" }
+  ]
+}
