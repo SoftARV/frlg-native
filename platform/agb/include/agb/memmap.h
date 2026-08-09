@@ -17,4 +17,11 @@ struct agb_memory
 
 extern struct agb_memory agb_mem;
 
+// The player's ROM image. Data symbols the host cannot build — the scripts and
+// map data in data/*.s — are bound to offsets inside this array at link time by
+// tools/gen_cart_syms.py, so game code reaches them as the symbols it always used.
+#define AGB_CART_SIZE 0x1000000
+
+extern uint8_t agb_cart[AGB_CART_SIZE];
+
 #endif // GUARD_AGB_MEMMAP_H
