@@ -276,9 +276,30 @@ The order, and where it stands:
    of ARM, the two largest pieces left in the phase. `ply_note` also calls into the sequencer
    (`ClearChain`, `TrkVolPitSet`, `MidiKeyToFreq`), so it cannot be finished before step 5, although
    it can be written and tested against handlers a test supplies.
-5. Build upstream's `m4a.c` and drop the deferred entries. It is excluded for one line,
-   `asm("swi 0x2A")`, and a per-file `-Dasm(x)=` clears it — so the 1781-line sequencer keeps
-   receiving upstream fixes instead of being forked into an override.
+5. **Build upstream's `m4a.c` and drop the deferred entries.** Attempted, reverted, and **moved
+   after the driver** — the reason is worth writing down, because it was only visible by trying it.
+
+   Enabling it works mechanically: the sequencer compiles and links, the deferred-call log drops
+   from a dozen sound calls to one, and the unbound count falls from 1311 to 1249. Then the game
+   stops drawing entirely — forced blank from frame 30 onwards, every frame blank, the golden tier
+   failing on all four frames. The cause is not a translation error but a **dependency**: the real
+   sequencer waits on progress only `MPlayMain` and `SoundMain` can make, and with those still
+   stubbed it waits for ever. The old no-op stubs answered "done" immediately, which is what let the
+   intro through. So `m4a.c` has to be enabled *with* its driver, not before it.
+
+   Three things found on the way, all of which stand whenever this is picked up:
+
+   - **No override is needed, and the plan to define `asm` away was wrong.** The game's `global.h`
+     rewrites `asm` to `__asm__`, and `__asm__` appears twice in that file — the `swi`, and glibc's
+     asm label on `strerror_r`. A blanket erasure would have silently stripped the label. An exact
+     textual removal of `__asm__("swi 0x2A");` from the preprocessed copy is the right seam, and it
+     should fail the build when the statement is absent so a submodule bump is reported.
+   - **`MusicPlayerJumpTableCopy` is dead code in this game.** Nothing calls it, so its one statement
+     can go without a replacement. The table is filled by `MPlayJumpTableCopy`, which is now
+     implemented.
+   - **The link needs two of upstream's linker-script absolutes**: `gNumMusicPlayers = 4` and
+     `gMaxLines = 0`, both read through their addresses. `gMaxLines` matters — a non-zero value
+     switches on the mixer's scanline budget.
 6. Host audio: `host.h` gains an output stream, SDL3 implements it, `null` stays silent.
 
 Waiting at the end of it: [spike 0004](spikes/0004-mgba-frame-alignment.md) excluded frames 400 and

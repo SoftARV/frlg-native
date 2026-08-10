@@ -405,6 +405,35 @@ static void test_rept(void)
           (int)(track.cmdPtr - stream));
 }
 
+// -------------------------------------------------------------- jump table ---
+
+// The real template lives in the game's m4a_tables.c, which unit tests do not
+// link, so they supply their own -- the same arrangement as the interrupt table.
+static void marker_a(void) {}
+static void marker_b(void) {}
+
+void *const gMPlayJumpTableTemplate[36] = {
+    marker_a,
+    marker_b,
+    /* the rest stay null, which is enough to see the whole table copied */
+};
+
+static void test_jump_table_copy(void)
+{
+    MPlayFunc table[36];
+
+    TEST_CASE("jump table copy");
+    for (int i = 0; i < 36; i++)
+        table[i] = (MPlayFunc)marker_b; // something the copy has to replace
+
+    MPlayJumpTableCopy(table);
+
+    CHECK(table[0] == (MPlayFunc)marker_a, "entry 0 did not come from the template");
+    CHECK(table[1] == (MPlayFunc)marker_b, "entry 1 did not come from the template");
+    for (int i = 2; i < 36; i++)
+        CHECK(table[i] == NULL, "entry %d was not copied, it is %p", i, (void *)table[i]);
+}
+
 // ------------------------------------------------- stopping and note ends ---
 
 static int cgb_off_calls;
@@ -738,6 +767,7 @@ int main(void)
     test_goto();
     test_patt_and_pend();
     test_rept();
+    test_jump_table_copy();
     test_track_stop();
     test_chn_vol_set();
     test_endtie();

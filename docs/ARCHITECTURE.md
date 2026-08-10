@@ -192,7 +192,7 @@ into two groups, and every one describes hardware rather than game logic.
 | Excluded | Assembly it carries | Owned by |
 | --- | --- | --- |
 | `script.c` | `svc 2` (HALT) | override — the pointer accessor ([§12](#12-pointer-width)) |
-| `m4a.c` | `swi 0x2A` | override — the C mixer ([§6.7](#67-audio)) |
+| `m4a.c` | `swi 0x2A` | the mixer ([§6.7](#67-audio)) — a build seam, not an override |
 | `multiboot.c` | ARM busy-wait | GameCube link, out of scope |
 | `librfu_intr.c` | naked ARM trampolines | link play ([§6.9](#69-serial-and-link-play)) |
 
@@ -479,7 +479,12 @@ and `HuffUnComp` are exercised against real game assets.
 
 ### 6.7 Audio
 
-`m4a.c`, the sequencer, is already C upstream and used as-is. `m4a_1.s` — 1917 lines of ARM across
+`m4a.c`, the sequencer, is already C upstream and needs no override. One statement stops it
+compiling — `asm("swi 0x2A")` inside `MusicPlayerJumpTableCopy`, asking the BIOS to fill the
+sequencer's dispatch table — and **nothing in this game calls that function**: the table is filled by
+`MPlayJumpTableCopy`, which we supply. Removing that one statement from the preprocessed copy is
+enough, which keeps 1781 lines of sequencer receiving upstream decomp fixes. It is scheduled after
+the driver rather than before, for the reason in [ROADMAP phase 4](ROADMAP.md#phase-4--it-sounds). `m4a_1.s` — 1917 lines of ARM across
 36 routines — is reimplemented in C as `platform/agb/src/m4a_mixer.c`. It is two subsystems, not
 one: a track interpreter (`MPlayMain`, `TrackStop` and 24 `ply_*` opcode handlers) and the mixer
 proper (`SoundMain`, `SoundMainRAM`, `SoundMainBTM`, `m4aSoundVSync`).
@@ -517,6 +522,11 @@ handlers keep the game's own names rather than an `agb_` prefix, deliberately: t
 the sequencer's jump table names, and this is what supplies them. Each takes the player and the
 track, reads its operands from the track's command stream, and sets flags saying what it
 invalidated — the volume or the pitch has to be recomputed before the next note sounds.
+
+The sequencer's dispatch table is filled by `MPlayJumpTableCopy` from a template in the game's own
+`m4a_tables.c`. On hardware that template lives in the BIOS ROM and every entry is bounds-checked
+against it; here it is an ordinary array, so the copy is just a copy. `SoundInit` fills the table
+before `MPlayExtender` overrides nine of its entries, so the order matters and is preserved.
 
 **Done so far: the parameter opcodes and control flow** — priority, tempo, key shift, instrument
 select, volume, pan, bend, bend range, tune, both modulation controls and the delay, the direct

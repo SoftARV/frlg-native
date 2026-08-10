@@ -148,6 +148,30 @@ void ply_mod(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track)
         clear_modM(track);
 }
 
+// -------------------------------------------------------------- jump table ---
+
+// The template lives in the game's own m4a_tables.c and is not declared in any
+// header, so it is declared here.
+extern void *const gMPlayJumpTableTemplate[];
+
+#define MPLAY_JUMP_TABLE_ENTRIES 36
+
+// Fill the sequencer's dispatch table from the template.
+//
+// On hardware this reads the template out of the BIOS ROM, and the original
+// guards every entry against straying outside it. There is no BIOS ROM here and
+// the template is an ordinary array, so the copy is just a copy.
+//
+// Not to be confused with the sequencer's own MusicPlayerJumpTableCopy, which
+// asks the BIOS to do the same thing through a software interrupt. Nothing in
+// this game calls that one -- which is why the build can drop its one
+// instruction without supplying a replacement.
+void MPlayJumpTableCopy(MPlayFunc *dest)
+{
+    for (int i = 0; i < MPLAY_JUMP_TABLE_ENTRIES; i++)
+        dest[i] = (MPlayFunc)gMPlayJumpTableTemplate[i];
+}
+
 // ------------------------------------------------------------ control flow ---
 
 // Unlink a channel from the chain its track keeps, and let go of the track. The
