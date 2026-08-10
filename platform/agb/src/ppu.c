@@ -1,8 +1,8 @@
 // Scanline renderer.
 //
-// Phase 3 scope: text-mode backgrounds and objects, both regular and affine.
-// Affine backgrounds, windows and blending follow, in the order the game
-// stresses them. Anything not yet implemented is skipped rather than
+// Phase 3 scope: backgrounds, text and affine, and objects, regular and affine.
+// Windows, blending and mosaic follow, in the order the game stresses them, as
+// do the bitmap modes. Anything not yet implemented is skipped rather than
 // approximated, so a missing feature reads as absent rather than as a subtly
 // wrong picture.
 
@@ -17,6 +17,9 @@
 #define REG_DISPCNT 0x000
 #define REG_BG0CNT 0x008
 #define REG_BG0HOFS 0x010
+// BG2's affine block; BG3's follows 0x10 later.
+#define REG_BG2PA 0x020
+#define REG_AFFINE_BLOCK(bg) (REG_BG2PA + ((bg) - 2) * 0x10)
 
 #define DISPCNT_MODE_MASK 0x0007
 #define DISPCNT_OBJ_1D_MAP 0x0040
@@ -29,7 +32,12 @@
 #define BGCNT_MOSAIC 0x0040
 #define BGCNT_256_COLOUR 0x0080
 #define BGCNT_SCREEN_BASE(c) (((c) >> 8) & 0x1F)
+// Affine only: off the edge of the map is transparent unless this says to wrap.
+#define BGCNT_AFFINE_WRAP 0x2000
 #define BGCNT_SIZE(c) (((c) >> 14) & 3)
+
+// An affine map is square and sized in tiles: 16, 32, 64 or 128 a side.
+#define BGCNT_AFFINE_TILES(c) (16 << BGCNT_SIZE(c))
 
 #define CHAR_BLOCK_SIZE 0x4000
 #define SCREEN_BLOCK_SIZE 0x800
@@ -115,9 +123,24 @@ static uint16_t io16(int offset)
     return *(const volatile uint16_t *)(agb_mem.io + offset);
 }
 
+static uint32_t io32(int offset)
+{
+    return *(const volatile uint32_t *)(agb_mem.io + offset);
+}
+
 static uint16_t oam16(int offset)
 {
     return *(const volatile uint16_t *)(agb_mem.oam + offset);
+}
+
+// An affine background's reference point is 28 bits of signed 20.8 fixed point
+// sitting in a 32-bit register, so the unused top nibble has to be sign-extended
+// away rather than masked off.
+static int32_t bg_reference(uint32_t raw)
+{
+    int32_t value = (int32_t)(raw & 0x0FFFFFFF);
+
+    return (value & 0x08000000) ? value - 0x10000000 : value;
 }
 
 static uint16_t bg_palette(int index)
@@ -231,6 +254,57 @@ static void render_text_bg_line(int bg, int line, uint8_t *coverage)
 
         out[x] = to_argb(bg_palette(colour));
         coverage[x] = 1;
+    }
+}
+
+// Affine backgrounds are always 8bpp and their maps are one byte per tile --
+// no flip bits, no palette bank, so an entry is just a tile number.
+static void render_affine_bg_line(int bg, int line, uint8_t *coverage)
+{
+    uint16_t control = io16(REG_BG0CNT + bg * 2);
+    int params = REG_AFFINE_BLOCK(bg);
+    int16_t pa = (int16_t)io16(params);
+    int16_t pb = (int16_t)io16(params + 2);
+    int16_t pc = (int16_t)io16(params + 4);
+    int16_t pd = (int16_t)io16(params + 6);
+    int tiles = BGCNT_AFFINE_TILES(control);
+    int extent = tiles * 8;
+    int wrap = (control & BGCNT_AFFINE_WRAP) != 0;
+    const uint8_t *chars = agb_mem.vram + BGCNT_CHAR_BASE(control) * CHAR_BLOCK_SIZE;
+    const uint8_t *screen = agb_mem.vram + BGCNT_SCREEN_BASE(control) * SCREEN_BLOCK_SIZE;
+    uint32_t *out = framebuffer + line * SCREEN_W;
+
+    // The reference point walks down the screen by one column of the matrix per
+    // scanline, and across it by one row per pixel.
+    int32_t x = bg_reference(io32(params + 8)) + (int32_t)pb * line;
+    int32_t y = bg_reference(io32(params + 12)) + (int32_t)pd * line;
+
+    for (int i = 0; i < SCREEN_W; i++, x += pa, y += pc)
+    {
+        int tx = x >> 8;
+        int ty = y >> 8;
+        int colour;
+
+        if (coverage[i])
+            continue;
+
+        if (wrap)
+        {
+            tx &= extent - 1;
+            ty &= extent - 1;
+        }
+        else if (tx < 0 || tx >= extent || ty < 0 || ty >= extent)
+        {
+            continue;
+        }
+
+        colour = chars[screen[(ty >> 3) * tiles + (tx >> 3)] * TILE_SIZE_8BPP
+                       + (ty & 7) * 8 + (tx & 7)];
+        if (colour == 0)
+            continue;
+
+        out[i] = to_argb(bg_palette(colour));
+        coverage[i] = 1;
     }
 }
 
@@ -416,17 +490,20 @@ void agb_ppu_render_frame(void)
 
             for (int bg = 0; bg < 4; bg++)
             {
+                // Mode 0 is four text layers; mode 1 is two text plus BG2
+                // affine; mode 2 is BG2 and BG3 affine. A layer a mode does not
+                // define is not drawn at all.
+                int affine = (mode == 1 && bg == 2) || (mode == 2 && bg >= 2);
                 uint16_t control;
 
                 if (!(dispcnt & DISPCNT_BG_ENABLE(bg)))
                     continue;
 
-                // Only text backgrounds so far. In modes 1 and 2 the upper
-                // layers are affine and are skipped until they are written.
-                if (mode == 1 && bg >= 2)
+                if (mode == 1 && bg == 3)
                     continue;
                 if (mode == 2 && bg < 2)
                     continue;
+                // The bitmap modes are not written yet.
                 if (mode >= 3)
                     continue;
 
@@ -434,7 +511,10 @@ void agb_ppu_render_frame(void)
                 if ((control & BGCNT_PRIORITY_MASK) != priority)
                     continue;
 
-                render_text_bg_line(bg, line, coverage);
+                if (affine)
+                    render_affine_bg_line(bg, line, coverage);
+                else
+                    render_text_bg_line(bg, line, coverage);
             }
         }
     }

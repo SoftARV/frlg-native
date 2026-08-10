@@ -162,13 +162,19 @@ Frame captures across a run, by distinct colour count — a flat backdrop scores
 `FRLG_SHOT=<path>` captures a frame as PPM; `tools/ppm_to_png.py` converts for review. Captures are
 gitignored: they are ROM-derived imagery, and this project ships none.
 
-The unit tier is up: `tests/` runs under CTest, and `test_ppu_objects` drives the object layer from
-hand-built OAM and VRAM to cover what a running frame does not reach — 8bpp, 2D tile mapping, the
-size table, the wrap rules, the priority ordering, and the affine transform including its clipping
-and matrix-group selection.
+Affine backgrounds are done as well — all four map sizes, the 20.8 reference point, per-scanline
+matrix stepping and both overflow behaviours — which also settled which layers each display mode
+defines. **They change nothing on screen yet:** every frame reachable today is mode 0, and the three
+places FRLG asks for mode 1 (`oak_speech.c` past the controls guide, `credits.c`, `trade_scene.c`)
+all sit behind the Phase 6 blocker. The work is proven by the unit tier, not by a screenshot.
 
-Remaining, in the order the game stresses them: **affine backgrounds** → windows → blending and
-mosaic. Unimplemented features are skipped rather than approximated, so absence is visible rather
+The unit tier is up: `tests/` runs under CTest. `test_ppu_objects` and `test_ppu_bg_affine` drive
+the renderer from hand-built registers, VRAM and OAM to cover what a running frame does not reach —
+8bpp, 2D tile mapping, the size tables, the wrap and overflow rules, priority ordering, both affine
+transforms with their clipping, and the mode/layer table.
+
+Remaining, in the order the game stresses them: **windows** → blending and mosaic, plus the bitmap
+modes. Unimplemented features are skipped rather than approximated, so absence is visible rather
 than subtly wrong.
 
 Still to build: the golden-image harness itself (two thresholds, diff artifacts, `--bless`) and

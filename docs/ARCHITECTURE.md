@@ -345,11 +345,17 @@ Per scanline it composes, in the GBA's order: four backgrounds (text and affine)
 from OAM, two windows plus the object window, then colour special effects (alpha blend, brightness
 increase/decrease) and mosaic. Output is a 32-bit XRGB framebuffer handed to the host layer.
 
-**Implemented so far: text backgrounds and the whole object layer.** Backgrounds: all four layers,
-4bpp and 8bpp, both flips, all four map sizes with their multi-block layouts, priority ordering
-front-to-back, and forced blank. Objects: all twelve sizes, 4bpp and 8bpp, both flips, 1D and 2D
-tile mapping, the 256-line vertical wrap, priority against the backgrounds and against each other,
-and both affine modes. Enough to render the intro cinematic and the title screen.
+**Implemented so far: the background and object layers, in both their forms.** Text backgrounds:
+all four layers, 4bpp and 8bpp, both flips, all four map sizes with their multi-block layouts,
+priority ordering front-to-back, and forced blank. Affine backgrounds: all four map sizes, the
+20.8 reference point, per-scanline matrix stepping, and both overflow behaviours. Objects: all
+twelve sizes, 4bpp and 8bpp, both flips, 1D and 2D tile mapping, the 256-line vertical wrap,
+priority against the backgrounds and against each other, and both affine modes.
+
+Which layers exist is decided by the display mode — mode 0 is four text layers, mode 1 is two text
+plus BG2 affine, mode 2 is BG2 and BG3 affine — and a layer its mode does not define is not drawn
+at all. An affine map is square, always 8bpp, and one byte per entry: a tile number with no flip
+bits and no palette bank.
 
 Objects resolve into a scanline buffer before any background is drawn, because which object owns a
 pixel is settled among the objects alone — lowest priority value wins, and OAM order breaks a tie.
@@ -363,7 +369,7 @@ space — so a source coordinate landing outside the object clips rather than sa
 The double-size mode grows that box, not the object: a rotated sprite needs the corners its own
 box cannot hold.
 
-**Not yet: affine backgrounds, windows, blending and mosaic.** Anything unimplemented is **skipped
+**Not yet: windows, blending, mosaic and the bitmap modes.** Anything unimplemented is **skipped
 rather than approximated**, so a missing feature reads as absent rather than as a subtly wrong
 picture — which matters when the reference is a golden image.
 

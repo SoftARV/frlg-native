@@ -11,3 +11,5 @@ function(frlg_add_test name)
 endfunction()
 
 frlg_add_test(test_ppu_objects)
+
+frlg_add_test(test_ppu_bg_affine)
