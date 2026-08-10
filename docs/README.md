@@ -41,3 +41,4 @@ makes the project unmaintainable within months.
 | [0007](adr/0007-lua-mod-registries.md) | Embedded Lua with schema-driven registries |
 | [0008](adr/0008-testing-strategy.md) | Golden screenshots, headless drivers, one regression per bug |
 | [0009](adr/0009-preemptive-interrupts.md) | Interrupts preempt; fibers cannot deliver them |
+| [0010](adr/0010-goldens-are-generated.md) | Golden images are generated per machine, never committed |

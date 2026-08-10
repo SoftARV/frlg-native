@@ -1,0 +1,19 @@
+# Frames the golden harness captures and compares.
+#
+# This file is committed; the images are not. They are frames of a copyrighted
+# ROM and this project ships no game data, so each machine blesses its own from
+# a build it trusts -- see docs/adr/0010-goldens-are-generated.md.
+#
+# tolerance  largest per-channel difference absorbed as harmless
+# budget     how many pixels may differ beyond that before the frame fails
+#
+# Both are sized for goldens blessed from our own renderer, which is software
+# and deterministic: it reproduces a frame exactly, so anything at all differing
+# is a real change. They will need raising when the goldens come from mGBA
+# instead, where a shade of rounding is expected and a moved sprite is not.
+#
+# frame  tolerance  budget  name
+100      0          0       copyright text on black
+400      0          0       game freak logo, blending
+900      0          0       intro cinematic, objects and windows
+2400     0          0       title screen

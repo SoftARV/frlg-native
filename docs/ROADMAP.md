@@ -11,7 +11,7 @@ Update the status column when a milestone lands.
 | 0 | Foundations: repo, pinned submodule, docs, reference ROM builds | **done** |
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
-| 3 | PPU — the first real frame, and the golden-screenshot harness | **in progress** — renderer complete; harness and HBlank left |
+| 3 | PPU — the first real frame, and the golden-screenshot harness | **in progress** — renderer and harness done; mGBA references and HBlank left |
 | 4 | Audio — the m4a mixer in C | |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
@@ -197,9 +197,20 @@ backgrounds they change nothing reachable — FRLG's intro is mode 0 throughout.
 the renderer through: while it was being built, absence read as absence and the picture never lied
 about what existed.
 
-Still to build: the golden-image harness itself (two thresholds, diff artifacts, `--bless`) and
-mGBA reference captures to compare against. HBlank interrupts land here too, since per-scanline
-effects depend on them.
+The golden harness is built: `tools/golden.py` captures the frames in `tests/golden/manifest.txt`,
+compares each against a golden with its own two thresholds, and on failure writes a golden / actual
+/ difference panel. `ctest -L golden` runs it; `--bless` regenerates the references. It was proved
+by breaking the renderer on purpose — dropping the window mask on the object layer failed frame 900
+with 63 pixels over budget and a diff marking Gengar's feet.
+
+The goldens are generated per machine and never committed, because they are frames of a
+copyrighted ROM ([ADR 0010](adr/0010-goldens-are-generated.md)). That has a consequence worth
+stating plainly: **blessed from our own renderer, the tier catches regressions but not
+incorrectness.** It says "the same as yesterday", not "the same as the ROM".
+
+Still to build: **mGBA reference captures**, which is what turns the harness from a regression net
+into the milestone — the title screen, pixel-comparable to the ROM. mGBA is not installed on this
+machine. HBlank interrupts land here too, since per-scanline effects depend on them.
 
 Milestone: the title screen, pixel-comparable to the ROM.
 

@@ -669,16 +669,25 @@ screen. Strategy and thresholds: [ADR 0008](adr/0008-testing-strategy.md).
 | Link | desync fuzzing across peers |
 | Build | ROM build, native build, and the shadow/override drift check |
 
-Unit tests live in `tests/`, are registered with CTest, and run with
-`ctest --test-dir build/headless`. Each links the `agb` archive directly; the linker pulls in only
-the objects a test actually references, so a PPU test costs nothing of the game library and needs
-none of the ROM pipeline. They spell out the hardware layout they drive rather than importing the
-renderer's own constants — a test built on the same macro as the code under test cannot catch that
-macro being wrong.
+Tests live in `tests/` and are registered with CTest under two labels. `ctest -L unit` is the fast
+path — the PPU suites and the golden harness's own threshold check, well under a second. `ctest -L
+golden` runs the port for thousands of frames and takes about a minute. Plain `ctest` runs both.
+
+Unit tests link the `agb` archive directly; the linker pulls in only the objects a test actually
+references, so a PPU test costs nothing of the game library and needs none of the ROM pipeline.
+They spell out the hardware layout they drive rather than importing the renderer's own constants —
+a test built on the same macro as the code under test cannot catch that macro being wrong.
 
 Golden screenshots use two independent thresholds: a per-channel tolerance absorbing harmless
 driver drift, and a separate pixel budget that is what actually fails. A shot where one sprite moved
-trips the budget; a shot half a shade darker trips neither.
+trips the budget; a shot half a shade darker trips neither. `tools/golden.py` captures each frame in
+the manifest, compares it, and on failure writes a golden / actual / difference panel as a PNG.
+
+**The goldens themselves are generated per machine and never committed** — they are frames of a
+copyrighted ROM ([ADR 0010](adr/0010-goldens-are-generated.md)). `tests/golden/manifest.txt` is
+committed and carries the frame numbers, thresholds and descriptions; `--bless` fills
+`tests/golden/images/`, which is gitignored. A run with no goldens fails rather than passing
+quietly, because an absent reference is an unproven frame.
 
 CI gates expensive per-platform jobs behind change-detection jobs, and runs SDK-free self-tests
 everywhere, so platform count stays affordable.

@@ -12,3 +12,7 @@ CLAUDE.local.md
 .DS_Store
 shots/
 *.ppm
+
+# Golden images: frames of the player ROM, generated per machine (ADR 0010).
+tests/golden/images/
+__pycache__/
