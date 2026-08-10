@@ -400,6 +400,16 @@ The shipping model ([ADR 0006](adr/0006-rom-supplied-data.md)): generate the man
 build, bind data symbols into the cart region with a generated linker fragment, and write the
 first-boot importer — verify SHA-1, load, relocate, cache, release.
 
+**The loading and relocation half of this is being pulled forward into phase 4**, because the sound
+engine is the first subsystem to follow a pointer stored inside ROM data and nothing works without
+it. [Spike 0005](spikes/0005-relocation-classes.md) settles what each of the 61,142 records needs:
+79% are a base shift, 10% resolve to a native symbol, and **11% must be left alone** — jump tables
+inside ROM functions we never execute, which have no native counterpart and which nothing reads.
+
+What stays here is the shipping half: a *retail* cartridge rather than the development build, which
+means regenerating the manifest, the bindings and the relocation table together from the
+byte-matching build, plus SHA-1 verification, caching and the first-boot flow.
+
 Ends with a binary containing no game data. Until this lands, nothing can be distributed to anyone.
 
 ## Phase 8 — It travels
