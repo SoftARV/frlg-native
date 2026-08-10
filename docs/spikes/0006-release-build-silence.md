@@ -3,8 +3,9 @@
 **Question:** host audio works. The Debug build plays the game's music; the optimised build plays
 nothing. What differs?
 
-**Status: reproduced and scoped, not diagnosed.** Recorded now because the scoping rules out the
-obvious answers, and because it exposes a gap in what the test tiers actually cover.
+**Status: closed.** The cause was not a miscompile at all but a **memory overrun that has been
+corrupting whatever follows `gSaveBlock2` since phase 1** — the optimised build's layout simply put
+the music players there. Fixed; all three builds now produce identical audio, sample for sample.
 
 ## Reproduction
 
@@ -90,7 +91,56 @@ pointers the relocation pass rewrites**. That is the first thing to check, and i
 promising suspect than a miscompile: it would explain why the two builds differ at all, since each
 resolves the table's symbol targets to its own addresses.
 
-Next measurement: whether `MPlayStart` is called, and what song header it is handed, in both builds.
+## The cause
+
+`MPlayStart` *is* called in both builds, with the same valid song header — so the relocation was
+innocent, and so was every line we translated. The chain of music players is also correct in both
+builds immediately after initialisation: six players, same track counts.
+
+It is **truncated a few frames later**, and a watchpoint says by whom:
+
+```
+Hardware watchpoint: gMPlayInfo_SE3.musicPlayerNext
+#0  CpuSet (dest=0x88189e0 <gSaveBlock2>, control=0x10007D0)
+#1  ClearSav2 () at src/load_save.c:61
+```
+
+```c
+CpuFill16(0, &gSaveBlock2, sizeof(struct SaveBlock2) + sizeof(gSaveBlock2_DMA));
+```
+
+One destination, the size of **two** objects — 4,000 bytes. That is correct on the cartridge, where
+`ld_script.ld` places `gSaveBlock2` and `gSaveBlock2_DMA` adjacently so one fill covers both. Nothing
+places them adjacently here; they are ordinary globals the host linker orders as it likes:
+
+| | `-O0` | `-O2` |
+| --- | --- | --- |
+| `gSaveBlock2` | `0x8886260` +0xF20 | `0x88189e0` +0xF20 |
+| `gSaveBlock2_DMA` | `0x8887180` — **exactly adjacent** | `0x8818960` — **before it** |
+
+With the `_DMA` array placed first, the fill runs 0xF20 bytes off the end of the save block.
+`gMPlayInfo_SE3` sits 0xF20 past `gSaveBlock2`, inside the overrun, and gets zeroed — cutting the
+player chain and leaving the sequencer ticking players that were never told what to play.
+
+**The debug build was correct by accident**, having been handed an adjacent layout. `ClearSav1` has
+the same shape and the same latent fault.
+
+## The fix
+
+`tools/patch_layout_assumptions.py` rewrites each call into two, one per object, clearing exactly the
+same bytes without assuming where either one is. It matches the preprocessed text exactly and fails
+the build if either call is absent, so a submodule bump cannot silently reintroduce the corruption.
+
+Afterwards all three builds report `956 non-silent, peak 110` over 1,200 frames — identical — and the
+optimised build passes the golden tier as well.
+
+## The class of bug, which is the part worth keeping
+
+This is not really about optimisation. **Upstream code is entitled to assume its own linker script**,
+and any place it reasons across two symbols is a latent fault here. Only four such expressions exist
+in the tree; two were these, one indexes within `gHeap` (a single array, so safe) and one is in
+`librfu_rfu.c`, which is not built. That is a small enough set to have checked deliberately rather
+than to have found by listening for a missing cry.
 
 ## The gap this exposes, and what actually closes it
 

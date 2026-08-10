@@ -57,6 +57,12 @@ set(FRLG_GAME_EXCLUDED
 set(FRLG_GAME_STRIP_WAITS m4a.c)
 set(FRLG_STRIP_WAITS "${CMAKE_SOURCE_DIR}/tools/strip_hardware_waits.py")
 
+# load_save.c clears one variable using the combined size of two, which is only
+# correct because upstream's linker script places them adjacently. Nothing does
+# that here, so the fill runs off the end. See tools/patch_layout_assumptions.py.
+set(FRLG_GAME_PATCH_LAYOUT load_save.c)
+set(FRLG_PATCH_LAYOUT "${CMAKE_SOURCE_DIR}/tools/patch_layout_assumptions.py")
+
 # main.c's only ARM assembly is an IWRAM clear inside `#if MODERN`, so upstream's
 # own non-modern path avoids it. MODERN gates nothing but NOINLINE and an abs()
 # macro, so this changes no layout or ABI -- and RegisterRamReset is ours anyway,
@@ -96,6 +102,9 @@ function(frlg_preprocess_game rel out_var)
     if(base IN_LIST FRLG_GAME_STRIP_WAITS)
         set(post COMMAND "${CMAKE_COMMAND}" -E env python3 "${FRLG_STRIP_WAITS}" "${c}")
         set(extra_deps "${FRLG_STRIP_WAITS}")
+    elseif(base IN_LIST FRLG_GAME_PATCH_LAYOUT)
+        set(post COMMAND "${CMAKE_COMMAND}" -E env python3 "${FRLG_PATCH_LAYOUT}" "${c}")
+        set(extra_deps "${FRLG_PATCH_LAYOUT}")
     endif()
 
     add_custom_command(
