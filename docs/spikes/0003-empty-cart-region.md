@@ -46,13 +46,19 @@ down needs a debugger and was not necessary to establish the cause.
 ## Why the test tiers missed it
 
 Headless runs of 6,000, 9,000 and 12,000 frames all exit cleanly. The reason is not luck: with no
-input the game reaches controls-guide page 1 and **parks there forever**, because advancing a page
-needs a button press. Both host backends report `HOST_KEYS_RELEASED`, so nothing ever advances.
+input the game reaches the **title screen** and parks there on `PRESS START` forever. Both host
+backends report `HOST_KEYS_RELEASED`, so nothing ever advances. Frame 6,000 is the same title
+screen as frame 2,400, give or take its animation.
 
-Every frame-count-based check is blind to everything behind the first screen that waits for input.
+Reaching the crash takes two presses — Start, to leave the title screen for the controls guide,
+and then A, to turn to page 2 — so **no frame-count run of any length can arrive there**.
+
 That is an argument for the scripted-driver tier in [ADR 0008](../adr/0008-testing-strategy.md)
-being worth more than its position in the roadmap suggests: a driver that presses A would have
-caught this the day the controls guide first rendered.
+being worth more than its position in the roadmap suggests. It also sets the boundary on what the
+determinism harness can claim: the renderer is deterministic given identical input — repeated
+headless runs and a windowed run that was left alone all produce byte-identical frames — but a run
+that receives a keypress diverges legitimately, and comparing it against one that did not is a
+measurement error rather than a bug.
 
 ## What it changes
 
