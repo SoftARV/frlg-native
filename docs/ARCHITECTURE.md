@@ -636,6 +636,11 @@ The strategy is **32-bit first, 64-bit ready** ([ADR 0003](adr/0003-pointer-widt
 Designed now, built later. Each costs almost nothing today and would mean rewriting the PPU to
 retrofit. The full list of intended features is [new-features.md](new-features.md).
 
+Every one of these is a **layer over a reference configuration the port can always produce** —
+native 240×160, one frame per logic tick, nothing enhanced ([ADR 0011](adr/0011-reference-configuration.md)).
+That is what keeps the conformance comparison against mGBA alive past the point where the port
+stops looking like a Game Boy Advance. An enhancement that cannot be switched off is a defect.
+
 **Display pipelines.** LCD filters, colour modes and shader effects attach above the framebuffer as
 post-process stages — the same seam mods use to own a display mode.
 
