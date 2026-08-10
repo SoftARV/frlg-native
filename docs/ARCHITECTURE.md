@@ -714,12 +714,23 @@ needs no special case above it.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game
 state.
 
-**The PSG channels are not emulated.** The GBA has two sound systems and this section is only one of
-them: the m4a engine mixes direct sound in software, and separately drives four *hardware* channels
-— two squares, a programmable wave and noise — by writing registers. `CgbSound` runs every frame and
-writes them; nothing in the port reads them, so those channels are silent. It costs 88 of the 812
-instruments the song table reaches, about 11%, which is audible as parts of a tune missing rather
-than as silence. Implementing it is four channel generators mixed into the same PCM buffer.
+**The PSG channels** are the GBA's other sound system, and `platform/agb/src/psg.c` is it: two
+squares, a programmable wave and noise. The m4a engine does not mix these — it drives them by writing
+registers, `CgbSound` doing so every frame — so something has to turn those writes into samples.
+Without it, 88 of the 812 instruments the song table reaches are silent, about 11%, which is audible
+as parts of a tune missing rather than as no sound at all.
+
+The channels are the Game Boy's carried forward, so the timings are that hardware's: a frame
+sequencer at 512 Hz driving length counters at 256 Hz, channel one's sweep at 128 Hz and the
+envelopes at 64 Hz. Registers are read as they stand at the start of each frame, the way the PPU
+reads its own — the sequencer rewrites them that often. The trigger bit is write-only on hardware, so
+it is cleared once acted on, which is what a read-back would see there.
+
+Two deliberate departures. Sampling happens at the **software mixer's rate** rather than the
+hardware's, because the result is added to that mixer's buffer; point-sampling a square is not what
+the hardware does, but the host would resample one stage later regardless. And the final add
+**clamps** where the software mixer's own accumulate wraps: that one reproduces the m4a engine's
+register rotation, this one is the mix into the DAC, which saturates.
 
 ### 6.8 Save data
 

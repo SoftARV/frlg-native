@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | **done** — but the PSG channels are not emulated, so ~11% of instruments are silent |
+| 4 | Audio — the m4a mixer in C | **done** |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -368,7 +368,8 @@ The order, and where it stands:
    `bindings.rsp` as its output, so a build that newly implemented a stubbed symbol linked against
    the previous stub object and failed once before succeeding.
 
-7. **The PSG channels are not emulated**, and this is what is still missing by ear. The GBA has two
+7. **The PSG channels** — **done**, in `platform/agb/src/psg.c`. This was what was still missing by
+   ear after the mixer was finished. The GBA has two
    sound systems: the m4a engine mixes direct sound in software -- which is everything phase 4 built --
    and four **hardware PSG channels** (two squares, a programmable wave, noise) that it drives by
    writing registers. `m4a.c` writes 25 of them, `CgbSound` runs every frame doing so, and **nothing
@@ -380,8 +381,14 @@ The order, and where it stands:
    the title screen is missing parts. That is the shape you would expect when the sampled half works
    and the synthesised half does not.
 
-   This is a new subsystem rather than more of the mixer -- four channel generators with their own
+   It is a new subsystem rather than more of the mixer: four channel generators with their own
    envelopes, sweep and length counters, mixed into the same PCM buffer the host already consumes.
+   Sampling is at the mixer's rate rather than the hardware's, and the final add clamps where the
+   software mixer's own accumulate wraps -- one reproduces the m4a engine, the other is the DAC.
+
+   **Not yet judged by ear against the original.** The balance between the PSG and direct sound is a
+   choice this makes rather than one the hardware dictates, and it is the part most likely to be
+   wrong.
 
 6. **Host audio** — **done, with a caveat**. `host.h` gained an output stream, SDL3 implements it,
    and `null` stays silent. The mixer hands each finished frame to a sink the port installs, and the

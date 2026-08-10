@@ -16,6 +16,7 @@ function(frlg_add_test name)
 endfunction()
 
 frlg_add_test(test_cart)
+frlg_add_test(test_psg)
 frlg_add_test(test_ppu_objects)
 frlg_add_test(test_ppu_bg_affine)
 frlg_add_test(test_ppu_windows)
@@ -26,6 +27,9 @@ frlg_add_test(test_ppu_scanline_irq)
 
 # The mixer works on the game's own audio structures, so its test needs the
 # vendor headers -- by quote path only, as everywhere else.
+# The PSG test names the hardware registers, which live in the vendor headers.
+target_compile_options(test_psg PRIVATE -iquote "${FRLG_VENDOR_DIR}/include")
+
 foreach(m4a_test test_m4a_envelope test_m4a_mix test_m4a_frame test_m4a_track)
     frlg_add_test("${m4a_test}")
     target_compile_options("${m4a_test}" PRIVATE -iquote "${FRLG_VENDOR_DIR}/include")
