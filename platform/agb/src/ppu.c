@@ -1,10 +1,9 @@
 // Scanline renderer.
 //
-// Phase 3 scope: backgrounds, text and affine; objects, regular and affine; the
-// windows that mask them; the colour effects; and mosaic. The bitmap modes are
-// what remain. Anything not yet implemented is skipped rather than
-// approximated, so a missing feature reads as absent rather than as a subtly
-// wrong picture.
+// Every display mode and every layer feature the hardware has: backgrounds,
+// text, affine and bitmap; objects, regular and affine; the windows that mask
+// them; the colour effects; and mosaic. What is left of phase 3 is the
+// golden-image harness and the HBlank interrupt the per-scanline effects need.
 
 #include <string.h>
 
@@ -55,6 +54,7 @@
 #define BGR(r, g, b) ((uint16_t)((r) | ((g) << 5) | ((b) << 10)))
 
 #define DISPCNT_MODE_MASK 0x0007
+#define DISPCNT_FRAME_SELECT 0x0010
 #define DISPCNT_OBJ_1D_MAP 0x0040
 #define DISPCNT_FORCED_BLANK 0x0080
 #define DISPCNT_BG_ENABLE(n) (0x0100 << (n))
@@ -81,6 +81,12 @@
 
 // An affine map is square and sized in tiles: 16, 32, 64 or 128 a side.
 #define BGCNT_AFFINE_TILES(c) (16 << BGCNT_SIZE(c))
+
+// The bitmap modes define one layer, on BG2, and nothing else.
+#define BITMAP_BG 2
+#define BITMAP_FRAME_SIZE 0xA000
+#define BITMAP_MODE5_W 160
+#define BITMAP_MODE5_H 128
 
 #define CHAR_BLOCK_SIZE 0x4000
 #define SCREEN_BLOCK_SIZE 0x800
@@ -398,6 +404,76 @@ static void compute_window_mask(int line, uint16_t dispcnt)
     }
 }
 
+// Where an affine layer starts sampling on this scanline. The reference point
+// walks down the screen by one column of the matrix per line; the caller walks
+// across it by one row per pixel.
+static void affine_line_start(int bg, int line, int mos_v, int32_t *x, int32_t *y)
+{
+    int params = REG_AFFINE_BLOCK(bg);
+    int16_t pb = (int16_t)io16(params + 2);
+    int16_t pd = (int16_t)io16(params + 6);
+    int row = mosaic_snap(line, mos_v);
+
+    *x = bg_reference(io32(params + 8)) + (int32_t)pb * row;
+    *y = bg_reference(io32(params + 12)) + (int32_t)pd * row;
+}
+
+// The bitmap modes replace BG2's tiles and map with a frame buffer, transformed
+// by the same matrix. Mode 3 is one full-screen 16-bit frame; mode 4 drops to
+// 8-bit paletted and gains a second frame; mode 5 keeps 16-bit and shrinks to
+// 160x128 to afford one.
+static void render_bitmap_bg_line(int mode, int line)
+{
+    uint16_t control = io16(REG_BG0CNT + BITMAP_BG * 2);
+    uint16_t dispcnt = io16(REG_DISPCNT);
+    uint16_t mosaic = io16(REG_MOSAIC);
+    int16_t pa = (int16_t)io16(REG_AFFINE_BLOCK(BITMAP_BG));
+    int16_t pc = (int16_t)io16(REG_AFFINE_BLOCK(BITMAP_BG) + 4);
+    int mos_h = (control & BGCNT_MOSAIC) ? MOSAIC_BG_H(mosaic) : 1;
+    int mos_v = (control & BGCNT_MOSAIC) ? MOSAIC_BG_V(mosaic) : 1;
+    int width = mode == 5 ? BITMAP_MODE5_W : SCREEN_W;
+    int height = mode == 5 ? BITMAP_MODE5_H : SCREEN_H;
+    int paletted = mode == 4;
+    // Mode 3's frame fills the region on its own, so it has no second one to
+    // select between.
+    uint32_t base = (mode != 3 && (dispcnt & DISPCNT_FRAME_SELECT)) ? BITMAP_FRAME_SIZE : 0;
+    int32_t base_x, base_y;
+
+    affine_line_start(BITMAP_BG, line, mos_v, &base_x, &base_y);
+
+    for (int i = 0; i < SCREEN_W; i++)
+    {
+        int across = mosaic_snap(i, mos_h);
+        int tx = (base_x + (int32_t)pa * across) >> 8;
+        int ty = (base_y + (int32_t)pc * across) >> 8;
+        uint32_t pixel;
+
+        if (layer_count[i] >= 2 || !(window_mask[i] & (1 << BITMAP_BG)))
+            continue;
+        // A frame buffer does not wrap: off its edge there is nothing to draw.
+        if (tx < 0 || tx >= width || ty < 0 || ty >= height)
+            continue;
+
+        pixel = (uint32_t)(ty * width + tx);
+        if (paletted)
+        {
+            uint8_t index = agb_mem.vram[base + pixel];
+
+            if (index == 0)
+                continue;
+            deposit(i, bg_palette(index), BITMAP_BG);
+        }
+        else
+        {
+            // Direct colour: the frame buffer holds BGR555, and every pixel of
+            // it is opaque -- there is no index left to mean transparent.
+            uint32_t at = base + pixel * 2;
+
+            deposit(i, (uint16_t)(agb_mem.vram[at] | (agb_mem.vram[at + 1] << 8)), BITMAP_BG);
+        }
+    }
+}
+
 // Affine backgrounds are always 8bpp and their maps are one byte per tile --
 // no flip bits, no palette bank, so an entry is just a tile number.
 static void render_affine_bg_line(int bg, int line)
@@ -405,9 +481,7 @@ static void render_affine_bg_line(int bg, int line)
     uint16_t control = io16(REG_BG0CNT + bg * 2);
     int params = REG_AFFINE_BLOCK(bg);
     int16_t pa = (int16_t)io16(params);
-    int16_t pb = (int16_t)io16(params + 2);
     int16_t pc = (int16_t)io16(params + 4);
-    int16_t pd = (int16_t)io16(params + 6);
     int tiles = BGCNT_AFFINE_TILES(control);
     int extent = tiles * 8;
     int wrap = (control & BGCNT_AFFINE_WRAP) != 0;
@@ -418,10 +492,9 @@ static void render_affine_bg_line(int bg, int line)
     int mos_h = (control & BGCNT_MOSAIC) ? MOSAIC_BG_H(mosaic) : 1;
     int mos_v = (control & BGCNT_MOSAIC) ? MOSAIC_BG_V(mosaic) : 1;
 
-    // The reference point walks down the screen by one column of the matrix per
-    // scanline, and across it by one row per pixel.
-    int32_t base_x = bg_reference(io32(params + 8)) + (int32_t)pb * mosaic_snap(line, mos_v);
-    int32_t base_y = bg_reference(io32(params + 12)) + (int32_t)pd * mosaic_snap(line, mos_v);
+    int32_t base_x, base_y;
+
+    affine_line_start(bg, line, mos_v, &base_x, &base_y);
 
     for (int i = 0; i < SCREEN_W; i++)
     {
@@ -755,6 +828,7 @@ void agb_ppu_render_frame(void)
                 // Mode 0 is four text layers; mode 1 is two text plus BG2
                 // affine; mode 2 is BG2 and BG3 affine. A layer a mode does not
                 // define is not drawn at all.
+                int bitmap = mode >= 3 && mode <= 5;
                 int affine = (mode == 1 && bg == 2) || (mode == 2 && bg >= 2);
                 uint16_t control;
 
@@ -765,15 +839,19 @@ void agb_ppu_render_frame(void)
                     continue;
                 if (mode == 2 && bg < 2)
                     continue;
-                // The bitmap modes are not written yet.
-                if (mode >= 3)
+                if (bitmap && bg != BITMAP_BG)
+                    continue;
+                // Modes 6 and 7 are prohibited and define no layer at all.
+                if (mode >= 3 && !bitmap)
                     continue;
 
                 control = io16(REG_BG0CNT + bg * 2);
                 if ((control & BGCNT_PRIORITY_MASK) != priority)
                     continue;
 
-                if (affine)
+                if (bitmap)
+                    render_bitmap_bg_line(mode, line);
+                else if (affine)
                     render_affine_bg_line(bg, line);
                 else
                     render_text_bg_line(bg, line);

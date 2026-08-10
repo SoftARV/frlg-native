@@ -345,8 +345,7 @@ Per scanline it composes, in the GBA's order: four backgrounds (text and affine)
 from OAM, two windows plus the object window, then colour special effects (alpha blend, brightness
 increase/decrease) and mosaic. Output is a 32-bit XRGB framebuffer handed to the host layer.
 
-**Implemented so far: everything except the bitmap modes** — the background and object layers in
-both their forms, the windows, the colour effects and mosaic. Text backgrounds:
+**Implemented: every mode and every layer feature.** Text backgrounds:
 all four layers, 4bpp and 8bpp, both flips, all four map sizes with their multi-block layouts,
 priority ordering front-to-back, and forced blank. Affine backgrounds: all four map sizes, the
 20.8 reference point, per-scanline matrix stepping, and both overflow behaviours. Objects: all
@@ -396,9 +395,17 @@ rest. Backgrounds and objects have separate sizes in the one register and separa
 its block, so zero means a block of one pixel and no mosaic at all. Objects snap in their own space,
 before a flip turns the coordinate around, and always draw at the unsnapped screen position.
 
-**Not yet: the bitmap modes.** Anything unimplemented is **skipped rather than approximated**, so a
-missing feature reads as absent rather than as a subtly wrong picture — which matters when the
-reference is a golden image.
+**The bitmap modes** replace BG2's tiles and map with a frame buffer, transformed by the same
+matrix — mode 3 is one full-screen 16-bit frame, mode 4 drops to 8-bit paletted and gains a second,
+mode 5 keeps 16-bit and shrinks to 160×128 to afford one. A frame buffer does not wrap: off its
+edge nothing is drawn. Direct colour has no transparent index, so every pixel of a mode 3 or 5
+frame is opaque, while mode 4 keeps index 0 transparent as everywhere else. These modes define BG2
+and nothing else, and they take half the object tile region, so objects below tile 512 have nothing
+to draw from.
+
+**The whole PPU is now implemented.** Nothing in the renderer is skipped. That was the point of the
+rule while it was being built — a feature that was absent read as absent, so the picture never
+lied about what existed.
 
 The PPU composes on the game thread at V-blank, immediately after the game's own handler, so the
 register writes and DMA copies that handler performs appear in the same frame. The host thread

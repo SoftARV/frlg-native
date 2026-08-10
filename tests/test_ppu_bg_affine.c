@@ -299,8 +299,11 @@ static void test_mode_layer_matrix(void)
         {0, 0, 1}, {0, 1, 1}, {0, 2, 1}, {0, 3, 1}, // four text layers
         {1, 0, 1}, {1, 1, 1}, {1, 2, 1}, {1, 3, 0}, // two text, BG2 affine
         {2, 0, 0}, {2, 1, 0}, {2, 2, 1}, {2, 3, 1}, // BG2 and BG3 affine
-        {3, 2, 0}, {4, 2, 0}, {5, 2, 0},            // bitmap modes, not built
+        {6, 2, 0}, {7, 2, 0},                       // prohibited, no layer at all
     };
+    // Modes 3 to 5 put a frame buffer on BG2 and are covered by
+    // test_ppu_bitmap.c, which can read one back.
+
 
     for (int i = 0; i < (int)(sizeof cases / sizeof cases[0]); i++)
     {

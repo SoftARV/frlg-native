@@ -11,7 +11,7 @@ Update the status column when a milestone lands.
 | 0 | Foundations: repo, pinned submodule, docs, reference ROM builds | **done** |
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
-| 3 | PPU — the first real frame, and the golden-screenshot harness | **in progress** — every feature but the bitmap modes |
+| 3 | PPU — the first real frame, and the golden-screenshot harness | **in progress** — renderer complete; harness and HBlank left |
 | 4 | Audio — the m4a mixer in C | |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
@@ -179,18 +179,23 @@ collected two-deep per pixel, because a blend needs whatever sits under the top 
 first-writer-wins cannot supply it.
 
 The unit tier is up: `tests/` runs under CTest, with `test_ppu_objects`, `test_ppu_bg_affine`,
-`test_ppu_windows`, `test_ppu_blend` and `test_ppu_mosaic` driving the renderer from hand-built registers, VRAM and
+`test_ppu_windows`, `test_ppu_blend`, `test_ppu_mosaic` and `test_ppu_bitmap` driving the renderer from hand-built registers, VRAM and
 OAM to cover what a running frame does not reach — 8bpp, 2D tile mapping, the size tables, the wrap
 and overflow rules, priority ordering, both affine transforms with their clipping, the mode/layer
 table, the window regions with their precedence, the blend arithmetic against hand-computed colours,
-and the mosaic block snapping on every layer that has it.
+the mosaic block snapping on every layer that has it, and the three bitmap modes.
 
 Mosaic is in as well, for backgrounds and objects, each with its own enable and its own half of the
 size register. Like the affine backgrounds it changes nothing on a reachable frame — all four
 reference captures are byte-identical — because the game does not ask for it in the intro.
 
-Remaining: the **bitmap modes**. Unimplemented features are skipped rather than approximated, so
-absence is visible rather than subtly wrong.
+The bitmap modes finish the renderer: all three, both frames where there are two, the 160x128
+extent of mode 5, and the tile-512 floor they impose on objects. Like mosaic and the affine
+backgrounds they change nothing reachable — FRLG's intro is mode 0 throughout.
+
+**Every PPU feature is now implemented.** Nothing is skipped, which retires the rule that carried
+the renderer through: while it was being built, absence read as absence and the picture never lied
+about what existed.
 
 Still to build: the golden-image harness itself (two thresholds, diff artifacts, `--bless`) and
 mGBA reference captures to compare against. HBlank interrupts land here too, since per-scanline
