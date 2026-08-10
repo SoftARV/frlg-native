@@ -22,4 +22,16 @@
 // caller.
 bool agb_m4a_envelope_step(struct SoundInfo *info, struct SoundChannel *chan);
 
+// Mix one channel's samples into a frame's two PCM buffers, at the sample rate
+// the wave was recorded at -- the fixed-frequency path, taken when the tone
+// type has TONEDATA_TYPE_FIX set.
+//
+// `right` and `left` are the two halves of the sound header's PCM buffer, and
+// `samples` is how many the frame wants. The channel's own sample pointer and
+// remaining count are advanced, looping if the wave says to.
+//
+// Returns false when the wave ran out and does not loop: the channel is
+// released and the rest of the frame gets nothing from it.
+bool agb_m4a_mix_fixed(struct SoundChannel *chan, s8 *right, s8 *left, int samples);
+
 #endif // GUARD_AGB_M4A_H

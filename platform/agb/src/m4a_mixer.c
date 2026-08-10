@@ -171,3 +171,72 @@ bool agb_m4a_envelope_step(struct SoundInfo *info, struct SoundChannel *chan)
     envelope_apply(info, chan, volume);
     return true;
 }
+
+// Where a looping wave restarts, and how many samples it has from there. A
+// wave that does not loop reports a length of zero, which is what ends the
+// channel when its count runs out.
+static uint32_t loop_span(const struct SoundChannel *chan, const s8 **start)
+{
+    const struct WaveData *wav = chan->wav;
+
+    if (!(chan->statusFlags & SOUND_CHANNEL_SF_LOOP))
+        return 0;
+
+    *start = wav->data + wav->loopStart;
+    return wav->size - wav->loopStart;
+}
+
+// One sample's contribution to one side.
+//
+// The original keeps four output samples packed in a register and rotates them
+// past an accumulator, masking so that one sample's low bits cannot bleed into
+// its neighbour. What that computes, once unpacked, is a plain eight-bit
+// accumulate of (volume * sample) >> 8 -- and it wraps rather than clamping,
+// so a loud mix distorts the way the hardware does instead of flattening.
+static s8 mix_sample(s8 accumulated, int volume, int sample)
+{
+    return (s8)(accumulated + ((volume * sample) >> 8));
+}
+
+bool agb_m4a_mix_fixed(struct SoundChannel *chan, s8 *right, s8 *left, int samples)
+{
+    const s8 *src = chan->currentPointer;
+    const s8 *loop_start = NULL;
+    uint32_t remaining = chan->count;
+    uint32_t loop_length = loop_span(chan, &loop_start);
+    int volume_right = chan->envelopeVolumeRight;
+    int volume_left = chan->envelopeVolumeLeft;
+
+    for (int i = 0; i < samples; i++)
+    {
+        int sample = *src++;
+
+        right[i] = mix_sample(right[i], volume_right, sample);
+        left[i] = mix_sample(left[i], volume_left, sample);
+
+        // The count is spent after the sample is used, not before, so the last
+        // sample of a wave still sounds -- and a frame filled exactly still
+        // ends the channel.
+        //
+        // A channel handed in with a count of zero would wrap and read past the
+        // wave. The original does the same, and the sequencer never produces
+        // one, so the behaviour is kept rather than guarded.
+        if (--remaining == 0)
+        {
+            if (loop_length == 0)
+            {
+                chan->statusFlags = 0;
+                chan->currentPointer = (s8 *)src;
+                chan->count = 0;
+                return false;
+            }
+
+            src = loop_start;
+            remaining = loop_length;
+        }
+    }
+
+    chan->currentPointer = (s8 *)src;
+    chan->count = remaining;
+    return true;
+}

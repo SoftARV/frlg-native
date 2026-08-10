@@ -490,8 +490,14 @@ something a reader would take for a mistake, the comment says so and the code ke
 the envelope's master-volume fold reaches a `SoundInfo` byte through a `SoundChannel` offset, and
 that is load-bearing.
 
-**Done so far: the envelope** — attack, decay, sustain, release, the pseudo-echo tail, and the
-volume fold the mixing loop reads.
+**Done so far: the envelope and the fixed-frequency mixing path** — attack, decay, sustain,
+release, the pseudo-echo tail, the volume fold, and walking a wave one sample per output sample
+with its loop handling.
+
+The mixing accumulate **wraps at eight bits rather than clamping**. The original keeps four output
+samples packed in a register and rotates them past an accumulator, masking so one sample's low bits
+cannot reach its neighbour; nothing in that arrangement saturates, so a loud mix distorts the way
+the hardware does rather than flattening against a ceiling.
 
 The mixer produces the GBA's native ~13.4 kHz PCM into a ring buffer; the host layer resamples.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game

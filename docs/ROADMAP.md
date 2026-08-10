@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | **in progress** — envelope done |
+| 4 | Audio — the m4a mixer in C | **in progress** — envelope and fixed-rate mixing done |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -244,7 +244,9 @@ The order, and where it stands:
 
 1. **Envelope** — **done**. Attack, decay, sustain, release, the pseudo-echo tail and the volume
    fold, in `platform/agb/src/m4a_mixer.c`, driven directly by `test_m4a_envelope`.
-2. PCM mixing loop and the sample walk.
+2. **PCM mixing loop and the sample walk** — **done** for the fixed-frequency path: the sample
+   walk, loop handling and the eight-bit wrapping accumulate, in `test_m4a_mix`. The pitched path,
+   which resamples through a 32-bit step and `umul3232H32`, is still to come.
 3. `SoundMain`, the per-frame driver and buffer management.
 4. The track interpreter and its jump table.
 5. Build upstream's `m4a.c` and drop the deferred entries. It is excluded for one line,
