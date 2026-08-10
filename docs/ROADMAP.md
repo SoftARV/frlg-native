@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | **in progress** — mixer and interpreter done; reversed waves, sequencer and host output left |
+| 4 | Audio — the m4a mixer in C | **in progress** — `m4a_1.s` done bar compressed waves; sequencer and host output left |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -264,11 +264,17 @@ The order, and where it stands:
    pointer, which nothing noticed because it is only ever called through unprototyped table entries;
    ours lives in its own file so that declaration is not in scope.
 
-   **Reversed and compressed waves are still not mixed**, and a channel asking for one is skipped
-   with a warning rather than mixed wrongly. Walking the ROM's own instrument tables prices the gap:
-   of 66 tone tables reachable from the song table, two instruments are reversed -- voices 1 and 33 of
-   one table -- and none is compressed. `SoundMainRAM_Unk1` and `Unk2`, 237 lines of ARM between
-   them, are what is left.
+   **Reversed waves are mixed; compressed ones are not.** `SoundMainRAM_Unk1` covers three cases --
+   compressed forward, compressed reversed, and uncompressed reversed -- and only the last is reachable
+   in this game: walking the ROM's own instrument tables finds two reversed instruments across the 66
+   tone tables the song table reaches, both uncompressed, and nothing compressed anywhere. That path is
+   written and its 17 mutants are all caught. A channel asking for a compressed wave is skipped with a
+   warning rather than mixed wrongly, and `Unk2` -- the block decoder it would need -- is unwritten.
+
+   Two things about the reversed path are easy to get wrong and are pinned by tests. The play position
+   is turned round **once**, on the channel's first frame, and it mirrors the position rather than
+   simply moving to the end -- a note told to start partway in has to keep that offset. And a reversed
+   wave **does not loop**; running out ends the note, whatever the wave's own loop flag says.
 
    Found on the way: the original's scanline CPU budget **cannot fire**, because `gMaxLines` is
    absolute zero in every upstream linker script. Reproducing it would have meant inventing a

@@ -6,6 +6,7 @@
 // that is kept, because the sequencer above reads the same byte and expects the
 // numbering.
 
+#include <stddef.h>
 #include <string.h>
 
 #include "agb/m4a.h"
@@ -397,13 +398,101 @@ void agb_m4a_prepare_frame(const struct SoundInfo *info, s8 *frame, int samples)
     }
 }
 
+// ------------------------------------------------------------- reversed waves ---
+
+// Set once, the first time a reversed channel is mixed, so the play position is
+// turned round only once however many frames the note lasts.
+#define SOUND_CHANNEL_SF_SPECIAL 0x20
+
+// Turn the play position round: the same distance from the end of the wave that
+// it currently is from the start. Upstream reaches this with pointer arithmetic
+// that folds the wave's own address in twice; it comes to the same thing.
+static void reverse_position(struct SoundChannel *chan)
+{
+    struct WaveData *wav = chan->wav;
+    ptrdiff_t played = chan->currentPointer - wav->data;
+
+    chan->currentPointer = wav->data + wav->size - played;
+}
+
+// Mix a channel whose wave is played backwards. The resampling is the same as
+// the forward pitched path -- interpolate between neighbouring samples, carry
+// the fraction across frames -- but the walk runs down the wave rather than up,
+// and the sample pairs are read in the other order.
+//
+// Two things differ from the forward path beyond direction. A reversed wave
+// **does not loop**: running out of samples ends the note rather than rewinding.
+// And the fixed-frequency variant is handled here too, as a step of exactly one
+// sample, rather than in a separate routine.
+bool agb_m4a_mix_reversed(const struct SoundInfo *info, struct SoundChannel *chan,
+                          s8 *right, s8 *left, int samples)
+{
+    int32_t remaining = (int32_t)chan->count;
+    uint32_t phase = chan->fw;
+    uint32_t step;
+    int volume_right = chan->envelopeVolumeRight;
+    int volume_left = chan->envelopeVolumeLeft;
+    const s8 *p;
+    int current;
+    int delta;
+
+    if (!(chan->statusFlags & SOUND_CHANNEL_SF_SPECIAL))
+    {
+        chan->statusFlags |= SOUND_CHANNEL_SF_SPECIAL;
+        reverse_position(chan);
+    }
+
+    step = (chan->type & TONEDATA_TYPE_FIX) ? (1u << FW_FRACTION)
+                                            : (uint32_t)info->divFreq * (uint32_t)chan->frequency;
+
+    // The pointer addresses one past the sample being played, so the walk steps
+    // back before reading, and the far end of the interpolation is the sample
+    // before that.
+    p = chan->currentPointer;
+    current = *--p;
+    delta = p[-1] - current;
+
+    for (int i = 0; i < samples; i++)
+    {
+        int32_t between = ((int32_t)phase * (int32_t)delta) >> FW_FRACTION;
+
+        right[i] = mix_sample(right[i], volume_right, current + between);
+        left[i] = mix_sample(left[i], volume_left, current + between);
+
+        phase += step;
+        uint32_t whole = phase >> FW_FRACTION;
+
+        if (whole == 0)
+            continue;
+
+        phase &= ~FW_CONSUMED_MASK;
+        remaining -= (int32_t)whole;
+
+        if (remaining <= 0)
+        {
+            // The original abandons the frame here without writing the position
+            // back -- the channel is finished, so nothing reads it again.
+            chan->statusFlags = 0;
+            return false;
+        }
+
+        p -= whole;
+        current = *p;
+        delta = p[-1] - current;
+    }
+
+    chan->fw = phase;
+    chan->count = (u32)remaining;
+    chan->currentPointer = (s8 *)p + 1;
+    return true;
+}
+
 // ------------------------------------------------------------- the mixer driver ---
 
-// Reversed and compressed waves. Two of FireRed's instruments are reversed
-// (voices 1 and 33 of one tone table); nothing in the game is compressed. The
-// routine that walks a wave backwards is not written yet, and a channel asking
-// for one is skipped rather than mixed as though it were an ordinary wave --
-// silence is wrong, but audibly wrong beats quietly wrong.
+// Compressed waves. Nothing in FireRed uses one -- of the 66 tone tables the
+// song table reaches, not one instrument is compressed -- so the block decoder
+// is not written, and a channel asking for it is skipped rather than mixed as
+// though its wave were ordinary.
 #define TONEDATA_TYPE_REV 0x10
 #define TONEDATA_TYPE_CMP 0x20
 
@@ -435,8 +524,10 @@ void agb_m4a_mix_frame(struct SoundInfo *info, s8 *frame, int samples)
         // every one of upstream's linker scripts. See ARCHITECTURE.md 6.7.
         if (agb_m4a_envelope_step(info, chan))
         {
-            if (chan->type & (TONEDATA_TYPE_CMP | TONEDATA_TYPE_REV))
-                agb_deferred_named("reversed or compressed wave");
+            if (chan->type & TONEDATA_TYPE_CMP)
+                agb_deferred_named("compressed wave");
+            else if (chan->type & TONEDATA_TYPE_REV)
+                agb_m4a_mix_reversed(info, chan, frame, frame + PCM_DMA_BUF_SIZE, samples);
             else if (chan->type & TONEDATA_TYPE_FIX)
                 agb_m4a_mix_fixed(chan, frame, frame + PCM_DMA_BUF_SIZE, samples);
             else

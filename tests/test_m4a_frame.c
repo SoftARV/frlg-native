@@ -310,7 +310,7 @@ static void test_driver_dispatches_on_type(void)
 {
     s8 *frame;
 
-    reset("a reversed wave is skipped, not mixed");
+    reset("a reversed wave takes the reversed path");
     info.reverb = 0;
     info.maxChans = 1;
     info.divFreq = 1 << 4;
@@ -321,10 +321,13 @@ static void test_driver_dispatches_on_type(void)
 
     agb_m4a_mix_frame(&info, frame, SAMPLES);
 
-    CHECK(frame[0] == 0, "a reversed wave was mixed anyway, the frame is %d", frame[0]);
-    CHECK(info.chans[0].count == 32, "a skipped channel was advanced");
+    CHECK(frame[0] == CONTRIBUTION, "a reversed wave was not mixed, the frame is %d",
+          frame[0]);
+    // Turning the play position round is what only the reversed path does.
+    CHECK(info.chans[0].statusFlags & 0x20,
+          "the channel was mixed but not by the reversed path");
 
-    reset("a compressed wave is skipped too");
+    reset("a compressed wave is skipped");
     info.reverb = 0;
     info.maxChans = 1;
     info.divFreq = 1 << 4;

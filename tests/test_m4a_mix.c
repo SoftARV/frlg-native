@@ -372,6 +372,236 @@ static void test_pitched_loop_overrun_twice(void)
     CHECK(chan.statusFlags & SF_LOOP, "the loop flag was lost");
 }
 
+// ------------------------------------------------------------- reversed waves ---
+
+#define SF_SPECIAL 0x20
+#define TYPE_FIX 0x08
+#define TYPE_REV 0x10
+
+// A reversed channel starts where a forward one would and is turned round on
+// its first mix, so the fixture is the ordinary one plus the type bit.
+static void reset_reversed(const char *name, int count, uint32_t step)
+{
+    reset_pitched(name, count, step);
+    chan.type = TYPE_REV;
+}
+
+// The play position is turned round to the same distance from the end, and only
+// once however many frames the note lasts.
+static void test_reversed_turns_round_once(void)
+{
+    const int samples[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+
+    reset_reversed("a reversed wave is turned round on its first frame", 8, ONE_STEP);
+    set_samples(samples, 8);
+    CHECK(chan.currentPointer == sample_storage(), "the fixture did not start at the front");
+
+    agb_m4a_mix_reversed(&info, &chan, right, left, 2);
+
+    CHECK(chan.statusFlags & SF_SPECIAL, "the channel was not marked as turned round");
+    // Two samples in from the end, plus the one the pointer sits past.
+    CHECK(chan.currentPointer == sample_storage() + 8 - 2,
+          "the position came out %d samples in, not 6",
+          (int)(chan.currentPointer - sample_storage()));
+
+    // A second frame must carry on rather than turn round again.
+    agb_m4a_mix_reversed(&info, &chan, right, left, 2);
+    CHECK(chan.currentPointer == sample_storage() + 8 - 4,
+          "the second frame turned the position round again, it is at %d",
+          (int)(chan.currentPointer - sample_storage()));
+}
+
+// At the wave's own rate a reversed wave is the wave backwards.
+static void test_reversed_plays_backwards(void)
+{
+    const int samples[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+
+    reset_reversed("a reversed wave plays from the end", 8, ONE_STEP);
+    set_samples(samples, 8);
+
+    agb_m4a_mix_reversed(&info, &chan, right, left, 6);
+
+    for (int i = 0; i < 6; i++)
+    {
+        int expect = (255 * samples[7 - i]) >> 8;
+
+        CHECK(right[i] == expect, "sample %d was %d, expected %d (the wave backwards)",
+              i, right[i], expect);
+        CHECK(left[i] == expect, "the left side disagreed at sample %d", i);
+    }
+}
+
+// The fixed-frequency variant is handled here too, as a step of exactly one
+// sample whatever the channel's frequency says.
+static void test_reversed_fixed_ignores_frequency(void)
+{
+    const int samples[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+
+    reset_reversed("a fixed reversed wave steps one sample", 8, ONE_STEP * 4);
+    chan.type = TYPE_REV | TYPE_FIX;
+    set_samples(samples, 8);
+
+    agb_m4a_mix_reversed(&info, &chan, right, left, 4);
+
+    // A step of four would have taken samples 7, 3 and then run out.
+    for (int i = 0; i < 4; i++)
+    {
+        int expect = (255 * samples[7 - i]) >> 8;
+
+        CHECK(right[i] == expect, "sample %d was %d, expected %d", i, right[i], expect);
+    }
+}
+
+// Half the rate puts an interpolated sample between each pair, going backwards.
+static void test_reversed_interpolates(void)
+{
+    const int samples[4] = {0, 64, 0, -64};
+
+    reset_reversed("a reversed wave interpolates", 4, ONE_STEP / 2);
+    set_samples(samples, 4);
+
+    agb_m4a_mix_reversed(&info, &chan, right, left, 4);
+
+    // Backwards the wave is -64, 0, 64, 0; halfway between -64 and 0 is -32,
+    // and between 0 and 64 is 32.
+    const int expect[4] = {-64, -32, 0, 32};
+
+    for (int i = 0; i < 4; i++)
+    {
+        int want = (255 * expect[i]) >> 8;
+
+        CHECK(right[i] == want, "sample %d was %d, expected %d", i, right[i], want);
+    }
+}
+
+// A note can be told to start partway into its wave, and the turn-round has to
+// mirror that -- not simply drop the position at the end.
+static void test_reversed_turns_round_from_partway(void)
+{
+    const int samples[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+
+    reset_reversed("a reversed wave started partway in", 8, ONE_STEP);
+    set_samples(samples, 8);
+    // Two samples in, as ply_note leaves a channel given a start offset.
+    chan.currentPointer = sample_storage() + 2;
+    chan.count = 8 - 2;
+
+    agb_m4a_mix_reversed(&info, &chan, right, left, 2);
+
+    // Mirrored to two from the end, so the first sample played is 5, not 7.
+    CHECK(right[0] == ((255 * 5) >> 8), "the first sample was %d, expected %d",
+          right[0], (255 * 5) >> 8);
+    CHECK(right[1] == ((255 * 4) >> 8), "the second sample was %d, expected %d",
+          right[1], (255 * 4) >> 8);
+}
+
+// A step of more than one sample skips, rather than advancing one at a time.
+static void test_reversed_multi_sample_step(void)
+{
+    const int samples[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+
+    reset_reversed("a reversed wave at twice the rate", 8, ONE_STEP * 2);
+    set_samples(samples, 8);
+
+    agb_m4a_mix_reversed(&info, &chan, right, left, 4);
+
+    // Two samples back each time: 7, 5, 3, 1 -- not 7, 6, 5, 4.
+    const int expect[4] = {7, 5, 3, 1};
+
+    for (int i = 0; i < 4; i++)
+    {
+        int want = (255 * expect[i]) >> 8;
+
+        CHECK(right[i] == want, "sample %d was %d, expected %d", i, right[i], want);
+    }
+}
+
+// The remaining count is written back, so the next frame knows how much is left.
+static void test_reversed_count_carries(void)
+{
+    const int samples[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+
+    reset_reversed("a reversed wave carries its remaining count", 8, ONE_STEP);
+    set_samples(samples, 8);
+
+    agb_m4a_mix_reversed(&info, &chan, right, left, 3);
+
+    CHECK(chan.count == 8 - 3, "the count came out %u, not 5", (unsigned)chan.count);
+}
+
+// A reversed wave does not loop, however loud the wave's own flags are about it.
+static void test_reversed_does_not_loop(void)
+{
+    const int samples[4] = {10, 20, 30, 40};
+
+    reset_reversed("a reversed wave ends rather than looping", 4, ONE_STEP);
+    set_samples(samples, 4);
+    // Everything a forward wave would need to loop.
+    wave.header.status = SF_LOOP << 8;
+    wave.header.loopStart = 0;
+    chan.statusFlags |= SF_LOOP;
+
+    CHECK(!agb_m4a_mix_reversed(&info, &chan, right, left, FRAME),
+          "a reversed wave looped instead of ending");
+    CHECK(chan.statusFlags == 0, "the channel was not silenced, its flags are %02X",
+          chan.statusFlags);
+    // Exactly four samples, and the frame is abandoned there: a wave that ran one
+    // sample past its end would have written a fifth.
+    for (int i = 0; i < 4; i++)
+        CHECK(right[i] != 0, "sample %d was not mixed", i);
+    for (int i = 4; i < FRAME; i++)
+        CHECK(right[i] == 0, "sample %d was mixed past the end of the wave, it is %d",
+              i, right[i]);
+}
+
+// The end lands exactly on zero. Testing that needs a count shorter than the
+// distance to the start of the wave: when the two are coupled, running one
+// sample too far reads the wave header rather than a sample, and a zero there
+// looks the same as having stopped.
+static void test_reversed_stops_exactly_at_zero(void)
+{
+    const int samples[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+
+    reset_reversed("a reversed wave stops the moment its count runs out", 8, ONE_STEP);
+    set_samples(samples, 8);
+    chan.count = 4; // four samples' worth, though four more lie before them
+
+    CHECK(!agb_m4a_mix_reversed(&info, &chan, right, left, FRAME),
+          "the wave did not end when its count ran out");
+
+    const int expect[4] = {8, 7, 6, 5};
+
+    for (int i = 0; i < 4; i++)
+        CHECK(right[i] == ((255 * expect[i]) >> 8), "sample %d was %d, expected %d",
+              i, right[i], (255 * expect[i]) >> 8);
+    // A fifth sample was available and must not have been taken.
+    CHECK(right[4] == 0, "the wave ran one sample past its count, sample 4 is %d",
+          right[4]);
+}
+
+// The fraction carries from one frame to the next, as it does going forwards.
+static void test_reversed_phase_persists(void)
+{
+    // A ramp rather than a symmetric pair: with a symmetric wave the midpoint is
+    // the same whichever sample you resume from, which would hide a pointer left
+    // one place along.
+    const int samples[4] = {10, 20, 40, 80};
+
+    reset_reversed("a reversed wave carries its fraction", 4, ONE_STEP / 2);
+    set_samples(samples, 4);
+
+    agb_m4a_mix_reversed(&info, &chan, right, left, 1);
+    CHECK(chan.fw == ONE_STEP / 2, "expected a half-sample phase, got %u",
+          (unsigned)chan.fw);
+
+    // The buffers accumulate, so the second frame needs a clean one to be read.
+    memset(right, 0, sizeof(right));
+    agb_m4a_mix_reversed(&info, &chan, right, left, 1);
+    // Backwards from 80 towards 40, halfway is 60.
+    CHECK(right[0] == ((255 * 60) >> 8), "the second frame resumed in the wrong place,"
+          " got %d", right[0]);
+}
+
 int main(void)
 {
     test_scaling();
@@ -389,6 +619,17 @@ int main(void)
     test_pitched_end();
     test_pitched_loop_overrun();
     test_pitched_loop_overrun_twice();
+
+    test_reversed_turns_round_once();
+    test_reversed_plays_backwards();
+    test_reversed_fixed_ignores_frequency();
+    test_reversed_interpolates();
+    test_reversed_turns_round_from_partway();
+    test_reversed_multi_sample_step();
+    test_reversed_count_carries();
+    test_reversed_does_not_loop();
+    test_reversed_stops_exactly_at_zero();
+    test_reversed_phase_persists();
 
     return test_report("m4a mixing");
 }

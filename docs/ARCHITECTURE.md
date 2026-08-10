@@ -549,11 +549,18 @@ that reason: `SoundMainRAM` names a block of bytes upstream relocates, and this 
 upstream's header declares it `void SoundMainBTM(void)` while it in fact receives a pointer; nothing
 upstream noticed, because it is only ever reached through a table of unprototyped entries.
 
-**Reversed and compressed waves are not mixed.** A channel whose tone type asks for one is skipped
-with a warning rather than mixed as though its wave were ordinary — audibly wrong beats quietly
-wrong. Walking the ROM's instrument tables says what this costs: of 66 tone tables reachable from the
-song table, **two instruments are reversed** (voices 1 and 33 of one table) and **none is
-compressed**.
+**Reversed waves** are walked from the end of the wave towards its start. The resampling is the
+forward pitched path's — interpolate between neighbouring samples, carry the fraction across frames —
+but the pairs are read in the other order, and the fixed-frequency variant is handled here too rather
+than in a separate routine, as a step of exactly one sample. Two things differ beyond direction: the
+play position is turned round **once**, on the channel's first frame, to the same distance from the
+end that it was from the start; and a reversed wave **does not loop** — running out of samples ends
+the note.
+
+**Compressed waves are not mixed.** A channel asking for one is skipped with a warning rather than
+mixed as though its wave were ordinary. Walking the ROM's own instrument tables prices that gap at
+nothing: of the 66 tone tables the song table reaches, **not one instrument is compressed**. Two are
+reversed, which is why that path is written.
 
 **The interpreter half of `m4a_1.s` is fully translated.** The parameter opcodes — priority, tempo, key shift, instrument
 select, volume, pan, bend, bend range, tune, both modulation controls and the delay, and the direct

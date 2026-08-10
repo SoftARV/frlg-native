@@ -55,6 +55,13 @@ struct SoundInfo *agb_sound_info(void);
 // comment on the definition for why.
 void agb_m4a_mix_frame(struct SoundInfo *info, s8 *frame, int samples);
 
+// The reversed path, taken when the tone type has TONEDATA_TYPE_REV: the wave
+// is walked from its end towards its start, resampling as the forward pitched
+// path does. Covers the fixed-frequency variant too, as a step of exactly one
+// sample. A reversed wave does not loop -- running out of samples ends the note.
+bool agb_m4a_mix_reversed(const struct SoundInfo *info, struct SoundChannel *chan,
+                          s8 *right, s8 *left, int samples);
+
 // Where in the PCM area this frame writes. The area holds several frames and
 // the DMA counter says which one is free, so the mixer writes ahead of what the
 // hardware is reading out.
