@@ -552,9 +552,14 @@ static struct SoundChannel *claim_mixed_channel(struct SoundInfo *info,
 static void attach_channel(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track,
                            struct SoundChannel *chan)
 {
-    struct SoundChannel *head = track->chan;
+    struct SoundChannel *head;
 
     ClearChain(chan);
+
+    // Read after the unhook, not before. If this channel was already the head of
+    // this track's chain, unhooking moved the head on; taking it first would
+    // chain the channel to itself and the next frame would walk it forever.
+    head = track->chan;
 
     chan->prevChannelPointer = NULL;
     chan->nextChannelPointer = head;

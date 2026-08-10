@@ -398,6 +398,16 @@ void agb_m4a_prepare_frame(const struct SoundInfo *info, s8 *frame, int samples)
     }
 }
 
+// The sequencer's one arithmetic helper: the high half of a 64-bit product.
+// `umull` gives both halves in a pair of registers and the original keeps the
+// high one, which is a fixed-point multiply by a fraction -- MidiKeyToFreq uses
+// it to interpolate between two entries of the frequency table, so every pitched
+// note's frequency goes through it.
+u32 umul3232H32(u32 multiplier, u32 multiplicand)
+{
+    return (u32)(((uint64_t)multiplier * (uint64_t)multiplicand) >> 32);
+}
+
 // ------------------------------------------------------------- reversed waves ---
 
 // Set once, the first time a reversed channel is mixed, so the play position is

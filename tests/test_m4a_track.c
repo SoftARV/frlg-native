@@ -1329,6 +1329,36 @@ static void test_note_chains_and_delay(void)
     CHECK(pool[0].prevChannelPointer == &pool[1], "the old head does not point back");
     CHECK(pool[1].prevChannelPointer == NULL, "the head has something before it");
 
+    // Stealing the channel that is already this track's head. The chain is
+    // rebuilt from what the unhook left behind, so taking the head before
+    // unhooking would leave the channel pointing at itself -- and the next
+    // frame's walk down the chain would never end.
+    note_reset("re-taking the head does not chain it to itself", s, 1);
+    pool[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    pool[0].priority = 0; // the least worthy, so it is the one stolen
+    pool[0].track = &track;
+    pool[1].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    pool[1].priority = 200;
+    pool[1].track = &track;
+    pool[2].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    pool[2].priority = 200;
+    pool[2].track = &track;
+    // A two-deep chain whose head is the channel about to be taken.
+    track.chan = &pool[0];
+    pool[0].nextChannelPointer = &pool[1];
+    pool[1].prevChannelPointer = &pool[0];
+    track.priority = 100;
+
+    ply_note(1, &player, &track);
+
+    CHECK(track.chan == &pool[0], "the stolen channel is not at the head");
+    CHECK(pool[0].nextChannelPointer != &pool[0],
+          "the channel was chained to itself");
+    CHECK(pool[0].nextChannelPointer == &pool[1],
+          "the rest of the chain was lost, next is %p",
+          (void *)pool[0].nextChannelPointer);
+    CHECK(pool[0].prevChannelPointer == NULL, "the head has something before it");
+
     note_reset("a modulation delay restarts and clears the sweep", s, 1);
     track.lfoDelay = 4;
     track.modM = 20;

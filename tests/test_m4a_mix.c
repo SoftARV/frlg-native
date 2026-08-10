@@ -372,6 +372,25 @@ static void test_pitched_loop_overrun_twice(void)
     CHECK(chan.statusFlags & SF_LOOP, "the loop flag was lost");
 }
 
+// The sequencer's fixed-point multiply: the high half of the 64-bit product.
+static void test_umul_high_half(void)
+{
+    TEST_CASE("the high half of a 64-bit product");
+
+    CHECK(umul3232H32(0, 12345) == 0, "zero times anything is not zero");
+    // Anything times less than 2^32 that does not reach 2^32 has no high half.
+    CHECK(umul3232H32(0xFFFF, 0xFFFF) == 0, "a product below 2^32 had a high half");
+    // 2^16 * 2^16 is exactly 2^32, so the high half is one.
+    CHECK(umul3232H32(0x10000, 0x10000) == 1, "2^16 squared did not carry into the high half");
+    CHECK(umul3232H32(0xFFFFFFFF, 0xFFFFFFFF) == 0xFFFFFFFE,
+          "the largest product came out %08X", umul3232H32(0xFFFFFFFF, 0xFFFFFFFF));
+    // A half in 0.32 fixed point: multiplying by it halves the other operand.
+    CHECK(umul3232H32(0x12345678, 0x80000000) == 0x091A2B3C,
+          "multiplying by a half came out %08X", umul3232H32(0x12345678, 0x80000000));
+    // The result is unsigned: a top-bit-set operand must not be taken as negative.
+    CHECK(umul3232H32(0x80000000, 2) == 1, "a high operand was treated as signed");
+}
+
 // ------------------------------------------------------------- reversed waves ---
 
 #define SF_SPECIAL 0x20
@@ -620,6 +639,7 @@ int main(void)
     test_pitched_loop_overrun();
     test_pitched_loop_overrun_twice();
 
+    test_umul_high_half();
     test_reversed_turns_round_once();
     test_reversed_plays_backwards();
     test_reversed_fixed_ignores_frequency();

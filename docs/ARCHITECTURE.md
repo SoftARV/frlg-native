@@ -247,6 +247,11 @@ Data symbols are **not compiled into the binary**. A generated linker fragment d
 its address inside the cart region, so `extern const struct SpeciesInfo gSpeciesInfo[]` resolves
 into the loaded image and game code reaches its data unmodified.
 
+Those definitions are **absolute** symbols, which a position-independent executable does not rebase
+when the loader moves the image — so the port links at a fixed load address
+([ADR 0012](adr/0012-fixed-load-address.md)). Android and the web cannot do that, and need the
+pointer-indirection alternative the ADR sets out; desktop keeps the direct load.
+
 ### 5.3 Relocating what the image points at
 
 Loading the image is not enough, because the data in it holds pointers, and they are the addresses
@@ -509,14 +514,22 @@ and `HuffUnComp` are exercised against real game assets.
 
 ### 6.7 Audio
 
-`m4a.c`, the sequencer, is already C upstream and needs no override. One statement stops it
-*compiling* — `asm("swi 0x2A")` inside `MusicPlayerJumpTableCopy`, asking the BIOS to fill the
-sequencer's dispatch table — and **nothing in this game calls that function**: the table is filled by
-`MPlayJumpTableCopy`, which we supply. Removing that one statement from the preprocessed copy makes
-it build and link, which keeps 1781 lines of sequencer receiving upstream decomp fixes. It does not
-yet make it *run*: three separate dependencies stand behind it, set out in
-[ROADMAP phase 4](ROADMAP.md#phase-4--it-sounds), and one of them — following a pointer stored inside
-ROM data — belongs to phase 7.
+`m4a.c`, the sequencer, **is built**, and needs no override. Two statements in it are hardware that
+no host can run, and both are removed from the preprocessed copy by `tools/strip_hardware_waits.py`,
+which fails the build if either is absent so a submodule bump is reported rather than silently
+changing what compiles:
+
+- `asm("swi 0x2A")` inside `MusicPlayerJumpTableCopy`, asking the BIOS to fill the dispatch table.
+  **Nothing in this game calls that function** — the table is filled by `MPlayJumpTableCopy`, which
+  we supply. A blanket erasure of `asm` would be wrong: `global.h` rewrites it to `__asm__`, and the
+  preprocessed file carries a second one, glibc's asm label on `strerror_r`.
+- `SampleFreqSet`'s spin until the display reaches scanline 159, which phase-aligns timer 0. A whole
+  frame is rendered inside one signal handler here, so the game thread is suspended for the entire
+  sweep and reads 0 whenever it resumes — the wait can never end. Nothing is lost: the host reads the
+  mixer's PCM buffer directly rather than through timer 0.
+
+The link also needs two of upstream's linker-script absolutes, `gNumMusicPlayers = 4` and
+`gMaxLines = 0`. Keeping 1781 lines of sequencer as upstream C means it keeps receiving decomp fixes.
 
 `m4a_1.s` — 1917 lines of ARM across 36 routines — is reimplemented in C across
 `platform/agb/src/m4a_mixer.c` and `platform/agb/src/m4a_track.c`. It is two subsystems, not one: a

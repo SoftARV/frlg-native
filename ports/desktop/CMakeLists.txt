@@ -54,8 +54,11 @@ file(WRITE "${trial_main}" "int main(void) { return 0; }\n")
 # Deferred subsystems, by defining source rather than by name. script.c is
 # deliberately absent: the script VM is game logic, and a silent no-op there
 # would corrupt state rather than skip a feature.
+# Both files are outputs. Declaring only the response file leaves the stub
+# source undeclared, so a build that newly implements a stubbed symbol links
+# against the previous stub object and fails once before succeeding.
 add_custom_command(
-    OUTPUT "${bindings}"
+    OUTPUT "${bindings}" "${CMAKE_CURRENT_BINARY_DIR}/agb_stubs.c"
     COMMAND sh "${CMAKE_SOURCE_DIR}/tools/gen_deferred_syms.sh"
             "${FRLG_VENDOR_DIR}/build/firered_modern/src"
             "${CMAKE_CURRENT_BINARY_DIR}/deferred.txt"
@@ -98,4 +101,14 @@ target_link_libraries(frlg-native PRIVATE
 target_compile_definitions(frlg-native PRIVATE
     FRLG_DEFAULT_ROM="${FRLG_VENDOR_DIR}/pokefirered_modern.gba")
 
-target_link_options(frlg-native PRIVATE "@${bindings}" -rdynamic)
+# Two of the sequencer's tuning values are absolutes from upstream's linker
+# script rather than variables, declared `extern char []` and read as their own
+# address. Same values it uses. gMaxLines matters: non-zero would switch on the
+# mixer's scanline budget, which cannot work here (ARCHITECTURE.md 6.7).
+set(FRLG_SOUND_DEFSYMS -Wl,--defsym,gNumMusicPlayers=4 -Wl,--defsym,gMaxLines=0)
+
+# -no-pie because the bindings are absolute symbols. `--defsym sym=agb_cart+N`
+# defines an ABSOLUTE address, which a position-independent executable does not
+# rebase when the loader moves the image -- so every bound symbol would point at
+# unmapped memory. This is the absolute-symbol-binding risk ADR 0006 records.
+target_link_options(frlg-native PRIVATE "@${bindings}" -rdynamic -no-pie ${FRLG_SOUND_DEFSYMS})

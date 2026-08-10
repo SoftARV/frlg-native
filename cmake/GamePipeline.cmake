@@ -23,7 +23,6 @@ set(FRLG_GAME_CPPFLAGS
 # See the override table in docs/ARCHITECTURE.md.
 set(FRLG_GAME_EXCLUDED
     script.c          # svc 2 (HALT); overridden anyway for the pointer accessor
-    m4a.c             # swi 0x2A; overridden anyway for the C mixer
     multiboot.c       # ARM busy-wait; GameCube link, out of scope
     librfu_intr.c     # naked ARM trampolines; RFU wireless, stubbed until phase 10
 
@@ -49,6 +48,14 @@ set(FRLG_GAME_EXCLUDED
     # improvement over the original; tracked as a later enhancement.
     isagbprn.c
 )
+
+# m4a.c is upstream C and needs no override, but two statements in it are
+# hardware that no host can run: a BIOS call, and a busy-wait on a scanline our
+# frame model can never present. Both are removed from the preprocessed copy by
+# a script that fails when either is absent, so a submodule bump is reported
+# rather than silently changing what gets built. See docs/ARCHITECTURE.md 6.7.
+set(FRLG_GAME_STRIP_WAITS m4a.c)
+set(FRLG_STRIP_WAITS "${CMAKE_SOURCE_DIR}/tools/strip_hardware_waits.py")
 
 # main.c's only ARM assembly is an IWRAM clear inside `#if MODERN`, so upstream's
 # own non-modern path avoids it. MODERN gates nothing but NOINLINE and an abs()
@@ -84,13 +91,21 @@ function(frlg_preprocess_game rel out_var)
         list(TRANSFORM cppflags REPLACE "^-DMODERN=1$" "-DMODERN=0")
     endif()
 
+    set(post "")
+    set(extra_deps "")
+    if(base IN_LIST FRLG_GAME_STRIP_WAITS)
+        set(post COMMAND "${CMAKE_COMMAND}" -E env python3 "${FRLG_STRIP_WAITS}" "${c}")
+        set(extra_deps "${FRLG_STRIP_WAITS}")
+    endif()
+
     add_custom_command(
         OUTPUT "${c}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${stage_dir}"
         COMMAND "${CMAKE_C_COMPILER}" ${cppflags} "${rel}" -o "${i}"
         COMMAND sh -c "'${FRLG_PREPROC}' '${i}' charmap.txt > '${c}'"
+        ${post}
         WORKING_DIRECTORY "${FRLG_VENDOR_DIR}"
-        DEPENDS "${FRLG_VENDOR_DIR}/${rel}" "${FRLG_PREPROC}"
+        DEPENDS "${FRLG_VENDOR_DIR}/${rel}" "${FRLG_PREPROC}" ${extra_deps}
         COMMENT "preproc ${rel}"
         VERBATIM)
 
