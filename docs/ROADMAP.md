@@ -265,11 +265,16 @@ The order, and where it stands:
    ours lives in its own file so that declaration is not in scope.
 
    **Reversed waves are mixed; compressed ones are not.** `SoundMainRAM_Unk1` covers three cases --
-   compressed forward, compressed reversed, and uncompressed reversed -- and only the last is reachable
-   in this game: walking the ROM's own instrument tables finds two reversed instruments across the 66
-   tone tables the song table reaches, both uncompressed, and nothing compressed anywhere. That path is
-   written and its 17 mutants are all caught. A channel asking for a compressed wave is skipped with a
-   warning rather than mixed wrongly, and `Unk2` -- the block decoder it would need -- is unwritten.
+   compressed forward, compressed reversed, and uncompressed reversed. The uncompressed reversed walk
+   is written and its 17 mutants are all caught. A channel asking for a compressed wave is skipped with
+   a warning rather than mixed wrongly, and `Unk2` -- the block decoder it would need -- is unwritten.
+
+   **That gap is real, not theoretical.** This step originally recorded that no instrument in the game
+   is compressed, from a scan of the tone tables the song table reaches. The claim was wrong twice
+   over: the scan never followed the sub-tables a rhythm or key-split instrument points at, and a
+   static reading was taken for a complete one. Running the game says otherwise -- a channel of type
+   `0x20`, wave header type 1, appears during the intro, and it is currently silent. Two instruments
+   are reversed, which is why that path exists; at least one is compressed, and that path does not.
 
    Two things about the reversed path are easy to get wrong and are pinned by tests. The play position
    is turned round **once**, on the channel's first frame, and it mirrors the position rather than

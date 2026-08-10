@@ -499,10 +499,10 @@ bool agb_m4a_mix_reversed(const struct SoundInfo *info, struct SoundChannel *cha
 
 // ------------------------------------------------------------- the mixer driver ---
 
-// Compressed waves. Nothing in FireRed uses one -- of the 66 tone tables the
-// song table reaches, not one instrument is compressed -- so the block decoder
-// is not written, and a channel asking for it is skipped rather than mixed as
-// though its wave were ordinary.
+// Compressed waves. The game does use them -- a channel of type 0x20 turns up
+// during the intro -- and the block decoder is not written yet, so such a channel
+// is skipped rather than mixed as though its wave were ordinary. That instrument
+// is silent until SoundMainRAM_Unk2 exists.
 #define TONEDATA_TYPE_REV 0x10
 #define TONEDATA_TYPE_CMP 0x20
 

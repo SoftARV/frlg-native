@@ -600,10 +600,15 @@ play position is turned round **once**, on the channel's first frame, to the sam
 end that it was from the start; and a reversed wave **does not loop** — running out of samples ends
 the note.
 
-**Compressed waves are not mixed.** A channel asking for one is skipped with a warning rather than
-mixed as though its wave were ordinary. Walking the ROM's own instrument tables prices that gap at
-nothing: of the 66 tone tables the song table reaches, **not one instrument is compressed**. Two are
-reversed, which is why that path is written.
+**Compressed waves are not mixed**, and the game does use them. A channel asking for one is skipped
+with a warning rather than mixed as though its wave were ordinary, so that instrument is silent until
+the block decoder (`SoundMainRAM_Unk2`) is written.
+
+An earlier note here claimed nothing in the game was compressed, from a scan of the tone tables the
+song table reaches directly. **That was wrong**: the scan never followed the sub-tables a rhythm or
+key-split instrument points at, and it took a static reading for a complete one. A channel of type
+`0x20`, with a wave header saying compressed, turns up during the intro. The reversed path is written
+because two instruments need it; the compressed one is the same kind of gap, still open.
 
 **The interpreter half of `m4a_1.s` is fully translated.** The parameter opcodes — priority, tempo, key shift, instrument
 select, volume, pan, bend, bend range, tune, both modulation controls and the delay, and the direct
