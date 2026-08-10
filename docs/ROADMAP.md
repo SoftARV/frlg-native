@@ -13,7 +13,7 @@ Update the status column when a milestone lands.
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
 | 4 | Audio — the m4a mixer in C | **done** |
-| 5 | Saves — flash backed by a host file | |
+| 5 | Saves — flash backed by a host file | **done** |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
 | 8 | Windows, Android, web; launcher, packaging and updates | |
@@ -406,10 +406,31 @@ Waiting at the end of it: [spike 0004](spikes/0004-mgba-frame-alignment.md) excl
 900 from the mGBA oracle **because** audio is stubbed and scene pacing drifts. They are the measure
 of whether this phase worked.
 
-## Phase 5 — It remembers
+## Phase 5 — It remembers *(done)*
 
 Flash emulation over a host file in the `.sav` layout emulators use, so saves interchange with mGBA
 and real hardware.
+
+`platform/agb/src/flash.c` supplies **the chip, not the driver**. Upstream's `agb_flash*.c` talk to
+real flash through timed command sequences and one of them runs code copied onto the stack, so they
+are not built; what they drive is 128 KiB in thirty-two 4 KiB sectors, and that is what this is. The
+save code above them is upstream's and cannot tell the difference — it now identifies the chip, reads
+it and programs it, and none of `IdentifyFlash`, `ReadFlash` or `SetFlashTimerIntr` is deferred any
+more.
+
+Two behaviours are the chip's rather than a convenience, and the save code depends on both: an erased
+cell reads `0xFF`, and programming can only clear bits. The file is written after each sector is
+programmed rather than at exit, so a save survives the program being killed, and a short file is
+padded with erased cells so a save from a smaller part still loads.
+
+Eleven mutants, all caught. One of them needed a sharper test than the obvious: reading at exactly
+the end of a sector proves nothing, because the clip yields a size of zero there anyway. The guard
+only earns its place *beyond* the end, where the subtraction underflows and asks for a copy of nearly
+four gigabytes.
+
+**Not yet exercised by the game itself.** Saving needs a player to reach a save point, which no test
+does; what is verified is the chip's behaviour and that the game accepts it at boot. Phase 6's
+determinism harness is where a real save round trip belongs.
 
 ## Phase 6 — It plays
 

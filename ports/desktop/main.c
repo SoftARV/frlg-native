@@ -23,6 +23,7 @@
 #include "agb/frame.h"
 #include "agb/audio.h"
 #include "agb/cart.h"
+#include "agb/flash.h"
 #include "agb/memmap.h"
 #include "agb/ppu.h"
 #include "host.h"
@@ -152,6 +153,7 @@ static void audio_sink(const int8_t *right, const int8_t *left, int samples, int
     // FRLG_PCM dumps what the mixer produced, in the same raw signed 16-bit
     // stereo mgba-audio writes, so the two can be compared directly. Audio is
     // the one subsystem a screenshot cannot check.
+    agb_flash_close();
     if (audio_dump != NULL)
     {
         for (int i = 0; i < samples; i++)
@@ -164,6 +166,23 @@ static void audio_sink(const int8_t *right, const int8_t *left, int samples, int
 
     if (opened_rate != 0)
         host_audio_submit(right, left, samples);
+}
+
+// The save chip is backed by a file, in the layout emulators use, so a save
+// moves between this port, mGBA and a cartridge unchanged. Phase 7 gives it a
+// proper home next to the player's own data; until then it sits where the port
+// was started, or wherever FRLG_SAV says.
+static void load_save(void)
+{
+    const char *path = getenv("FRLG_SAV");
+
+    if (path == NULL)
+        path = "frlg-native.sav";
+
+    if (agb_flash_open(path))
+        printf("frlg-native: save file %s\n", path);
+    else
+        fprintf(stderr, "frlg-native: no save file; nothing will be kept\n");
 }
 
 // The game's own data lives in the player's ROM, not in this binary
@@ -216,6 +235,7 @@ int main(int argc, char **argv)
         return 1;
 
     load_cart();
+    load_save();
 
     {
         const char *dump = getenv("FRLG_PCM");

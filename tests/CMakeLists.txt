@@ -16,6 +16,8 @@ function(frlg_add_test name)
 endfunction()
 
 frlg_add_test(test_cart)
+frlg_add_test(test_flash)
+target_compile_options(test_flash PRIVATE -iquote "${FRLG_VENDOR_DIR}/include")
 frlg_add_test(test_psg)
 frlg_add_test(test_ppu_objects)
 frlg_add_test(test_ppu_bg_affine)

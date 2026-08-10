@@ -9,6 +9,7 @@ add_library(agb STATIC
     src/ppu.c
     src/psg.c
     src/cart.c
+    src/flash.c
     src/m4a_clear.c
     src/m4a_mixer.c
     src/m4a_track.c

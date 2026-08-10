@@ -749,9 +749,25 @@ register rotation, this one is the mix into the DAC, which saturates.
 
 ### 6.8 Save data
 
-`agb_flash*.c` emulate 128 KiB of flash backed by a host file, byte-identical to the `.sav` format
-emulators produce, so saves move in and out of mGBA and off real hardware without conversion. The
-path comes from `host_pref_dir()`.
+`platform/agb/src/flash.c` is 128 KiB of flash backed by a host file, byte-identical to the `.sav`
+format emulators produce, so saves move in and out of mGBA and off real hardware without conversion.
+
+**It replaces the chip, not the driver.** Upstream's `agb_flash*.c` talk to real flash through timed
+command sequences — write `0xAA` here, `0x55` there, poll until the chip stops toggling — and
+`ReadFlashId` runs code it has copied onto the stack, which no host target can do. They are not
+built ([§4.3](#43-files-not-built)). What they drive is a chip, and that is what this supplies: the
+save code above them is upstream's and cannot tell the difference.
+
+The chip lives in the arena's SRAM region, which is exactly the 131,072 bytes of a 1 Mbit part, so a
+sector is addressed the way the hardware addresses it: thirty-two sectors of 4 KiB. Two behaviours
+are the chip's rather than a convenience, and the save code depends on both — an erased cell reads
+`0xFF`, and programming can only *clear* bits, never set them, which is why the save code erases
+before it writes.
+
+The file is written after each sector is programmed rather than at exit, so a save survives the
+program being killed. A file shorter than the chip fills what it can and leaves the rest erased,
+which is what a save from a smaller part looks like. The path comes from `FRLG_SAV`, or the working
+directory, until phase 7 gives it a proper home.
 
 ### 6.9 Serial and link play
 
