@@ -689,6 +689,19 @@ committed and carries the frame numbers, thresholds and descriptions; `--bless` 
 `tests/golden/images/`, which is gitignored. A run with no goldens fails rather than passing
 quietly, because an absent reference is an unproven frame.
 
+The oracle is mGBA running our own reference ROM build. `tools/mgba_capture.c` drives it headlessly
+and writes the same PPM the port's `FRLG_SHOT` does, so the harness reads either without knowing
+which produced it; `--bless-reference` fills the goldens from it. It is a host tool built outside
+the port's `-m32` world, because the system libmgba is 64-bit, and it is optional — without it the
+tier still runs, blessed from our own renderer, as a regression net rather than an oracle.
+
+mGBA's frame numbers run 38 ahead of ours, since it boots through the BIOS and `crt0` where the
+port enters `AgbMain` directly, so the manifest carries a reference frame per row. At that offset
+the port reproduces mGBA **exactly** on settled screens. Frames caught mid-transition carry `-`
+instead: their backgrounds match, but scene pacing diverges wherever the game waits on the stubbed
+audio subsystem, so animated sprites sit at a different phase
+([spike 0004](spikes/0004-mgba-frame-alignment.md)).
+
 CI gates expensive per-platform jobs behind change-detection jobs, and runs SDK-free self-tests
 everywhere, so platform count stays affordable.
 

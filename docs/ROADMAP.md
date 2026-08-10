@@ -11,7 +11,7 @@ Update the status column when a milestone lands.
 | 0 | Foundations: repo, pinned submodule, docs, reference ROM builds | **done** |
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
-| 3 | PPU — the first real frame, and the golden-screenshot harness | **in progress** — renderer and harness done; mGBA references and HBlank left |
+| 3 | PPU — the first real frame, and the golden-screenshot harness | **in progress** — title screen matches the ROM exactly; HBlank left |
 | 4 | Audio — the m4a mixer in C | |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
@@ -208,9 +208,21 @@ copyrighted ROM ([ADR 0010](adr/0010-goldens-are-generated.md)). That has a cons
 stating plainly: **blessed from our own renderer, the tier catches regressions but not
 incorrectness.** It says "the same as yesterday", not "the same as the ROM".
 
-Still to build: **mGBA reference captures**, which is what turns the harness from a regression net
-into the milestone — the title screen, pixel-comparable to the ROM. mGBA is not installed on this
-machine. HBlank interrupts land here too, since per-scanline effects depend on them.
+**The milestone is met: the title screen is pixel-identical to the ROM.** `tools/mgba_capture.c`
+runs the reference build under mGBA and dumps frames in the same PPM format, and the port matches
+it on frame 2400 at **0 of 38,400 pixels**, with both thresholds at zero. The copyright screen
+matches exactly too.
+
+mGBA's frame numbers run 38 ahead of ours, because it boots through the BIOS and `crt0` where the
+port enters `AgbMain` directly. The offset was found by sweeping rather than assumed, and it is
+recorded per frame in the manifest.
+
+Frames 400 and 900 are still self-blessed, and the reason is not the renderer: their backgrounds
+match mGBA exactly and only animated sprites sit at a different phase, because scene pacing
+diverges wherever the game waits on the stubbed audio subsystem. Full evidence in
+[spike 0004](spikes/0004-mgba-frame-alignment.md); they are worth re-testing once phase 4 lands.
+
+Still to build: HBlank interrupts, since per-scanline effects depend on them.
 
 Milestone: the title screen, pixel-comparable to the ROM.
 

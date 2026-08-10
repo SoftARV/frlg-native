@@ -33,10 +33,13 @@ DEFAULT_MANIFEST = os.path.join(ROOT, "tests", "golden", "manifest.txt")
 
 
 class Frame:
-    def __init__(self, number, tolerance, budget, name):
+    def __init__(self, number, tolerance, budget, reference, name):
         self.number = number
         self.tolerance = tolerance
         self.budget = budget
+        # The mGBA frame showing the same moment, or None where our pacing has
+        # drifted too far for one to exist.
+        self.reference = reference
         self.name = name
 
 
@@ -47,8 +50,9 @@ def read_manifest(path):
             line = line.split("#", 1)[0].strip()
             if not line:
                 continue
-            number, tolerance, budget, name = line.split(None, 3)
-            frames.append(Frame(int(number), int(tolerance), int(budget), name))
+            number, tolerance, budget, reference, name = line.split(None, 4)
+            frames.append(Frame(int(number), int(tolerance), int(budget),
+                                None if reference == "-" else int(reference), name))
     return frames
 
 
@@ -114,6 +118,30 @@ def capture(binary, frame, out_dir):
             f"frame {frame.number} ({frame.name}) did not capture; "
             f"exit {result.returncode}\n  " + "\n  ".join(tail))
     return path
+
+
+def bless_from_reference(args, frames):
+    """Bless from mGBA running the reference ROM -- the only source that makes a
+    golden mean "matches the ROM" rather than "matches yesterday"."""
+    referenced = [f for f in frames if f.reference is not None]
+    skipped = [f for f in frames if f.reference is None]
+
+    if not referenced:
+        raise SystemExit("no frame in the manifest has a reference frame")
+
+    os.makedirs(args.goldens, exist_ok=True)
+    subprocess.run([args.reference_tool, args.rom, args.out]
+                   + [str(f.reference) for f in referenced],
+                   check=True, stdout=subprocess.DEVNULL, timeout=1800)
+
+    for frame in referenced:
+        src = os.path.join(args.out, f"frame{frame.reference}.ppm")
+        shutil.copyfile(src, os.path.join(args.goldens, f"frame{frame.number}.ppm"))
+        print(f"  blessed frame {frame.number:<5} from mGBA frame "
+              f"{frame.reference:<5} {frame.name}")
+    for frame in skipped:
+        print(f"  SKIPPED frame {frame.number:<5} no reference frame: {frame.name}")
+    return 0
 
 
 def run(args):
@@ -226,12 +254,21 @@ def main():
     ap.add_argument("--frames", help="comma-separated subset of frame numbers")
     ap.add_argument("--bless", action="store_true",
                     help="replace the goldens with what the port renders now")
+    ap.add_argument("--bless-reference", action="store_true",
+                    help="replace the goldens with mGBA's frames of the reference ROM")
+    ap.add_argument("--rom", help="reference ROM, for --bless-reference")
+    ap.add_argument("--reference-tool", help="the mgba-capture binary")
     ap.add_argument("--self-test", action="store_true",
                     help="check the comparison thresholds and exit")
     args = ap.parse_args()
 
     if args.self_test:
         return self_test()
+    if args.bless_reference:
+        if not (args.rom and args.reference_tool):
+            ap.error("--bless-reference needs --rom and --reference-tool")
+        os.makedirs(args.out, exist_ok=True)
+        return bless_from_reference(args, read_manifest(args.manifest))
     if not args.binary:
         ap.error("--binary is required unless --self-test is given")
     return run(args)
