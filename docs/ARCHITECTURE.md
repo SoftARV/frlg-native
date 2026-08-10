@@ -688,7 +688,19 @@ as alive when the tick began.
 `MidiKeyToFreq`, `FadeOutBody` and `Clear64byte` — so both are inert until step 5 builds `m4a.c`.
 They are tested against handlers the test supplies, the way the PPU tests supply the interrupt table.
 
-The mixer produces the GBA's native ~13.4 kHz PCM into a ring buffer; the host layer resamples.
+**Getting it heard.** The mixer produces the GBA's native 8-bit signed stereo at its own rate —
+13,379 Hz as the game configures it — and does not call the host itself. The port installs an
+`agb_audio_sink` and the mixer hands each finished frame to it, the same arrangement as the PPU,
+which composes into a buffer the port presents. `agb/audio.h` is deliberately separate from
+`agb/m4a.h` so a port needs none of the sequencer's types to listen.
+
+SDL3 opens a stream in the mixer's own format and resamples to whatever the device runs at, so the
+port converts nothing. The stream is reopened if the game changes the rate, which `m4aSoundMode`
+can do at any time. If the queue runs long — the device stopped consuming — it is dropped rather
+than allowed to grow, because falling behind is better than blocking the game thread. The `null`
+backend refuses to open, and submitting to a closed device is ignored, so a platform with no audio
+needs no special case above it.
+
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game
 state.
 

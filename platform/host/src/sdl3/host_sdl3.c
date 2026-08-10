@@ -127,3 +127,80 @@ void host_log(const char *msg)
 {
     SDL_Log("%s", msg);
 }
+
+// ---------------------------------------------------------------------- audio ---
+
+static SDL_AudioStream *audio;
+static int audio_rate;
+
+// SDL resamples from the mixer's rate to whatever the device runs at, so the
+// port hands over the GBA's own 8-bit stereo and does no conversion itself.
+bool host_audio_open(int sample_rate)
+{
+    SDL_AudioSpec spec;
+
+    if (sample_rate <= 0)
+        return false;
+
+    if (audio != NULL && sample_rate == audio_rate)
+        return true;
+
+    host_audio_close();
+
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO))
+    {
+        host_log(SDL_GetError());
+        return false;
+    }
+
+    spec.format = SDL_AUDIO_S8;
+    spec.channels = 2;
+    spec.freq = sample_rate;
+
+    audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
+    if (audio == NULL)
+    {
+        host_log(SDL_GetError());
+        return false;
+    }
+
+    audio_rate = sample_rate;
+    SDL_ResumeAudioStreamDevice(audio);
+    return true;
+}
+
+void host_audio_close(void)
+{
+    if (audio != NULL)
+    {
+        SDL_DestroyAudioStream(audio);
+        audio = NULL;
+        audio_rate = 0;
+    }
+}
+
+void host_audio_submit(const int8_t *right, const int8_t *left, int samples)
+{
+    // One frame is 8 samples at the slowest rate and a few hundred at the
+    // fastest, so interleaving on the stack costs nothing and avoids a lock.
+    int8_t frame[2048];
+
+    if (audio == NULL || samples <= 0)
+        return;
+
+    if (samples > (int)(sizeof(frame) / 2))
+        samples = (int)(sizeof(frame) / 2);
+
+    for (int i = 0; i < samples; i++)
+    {
+        frame[i * 2] = left[i];
+        frame[i * 2 + 1] = right[i];
+    }
+
+    // Falling behind is better than blocking the game thread: if the device has
+    // stopped consuming, the queue is dropped rather than allowed to grow.
+    if (SDL_GetAudioStreamQueued(audio) > (int)(sizeof(frame) * 8))
+        SDL_ClearAudioStream(audio);
+
+    SDL_PutAudioStreamData(audio, frame, samples * 2);
+}

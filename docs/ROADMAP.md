@@ -359,6 +359,16 @@ The order, and where it stands:
    `bindings.rsp` as its output, so a build that newly implemented a stubbed symbol linked against
    the previous stub object and failed once before succeeding.
 
+6. **Host audio** — **done, with a caveat**. `host.h` gained an output stream, SDL3 implements it,
+   and `null` stays silent. The mixer hands each finished frame to a sink the port installs, and the
+   game's music reaches the device at its own 13,379 Hz.
+
+   The caveat is [spike 0006](spikes/0006-release-build-silence.md): audio is produced by the
+   **Debug** build and not by the optimised one, while both render identically. It is real, it
+   reproduces, and it is not yet diagnosed.
+
+   Superseded plan text follows:
+
 6. Host audio: `host.h` gains an output stream, SDL3 implements it, `null` stays silent.
 
 Waiting at the end of it: [spike 0004](spikes/0004-mgba-frame-alignment.md) excluded frames 400 and

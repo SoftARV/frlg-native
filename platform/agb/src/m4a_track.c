@@ -12,6 +12,7 @@
 
 #include <stdint.h>
 
+#include "agb/audio.h"
 #include "agb/m4a.h"
 #include "agb/memmap.h"
 
@@ -965,12 +966,24 @@ done:
 
 // ------------------------------------------------------------ the mixer driver ---
 
+// Where a mixed frame goes. Installed by the port, or left null when nothing is
+// listening -- the mixer does not call the host itself, the same arrangement as
+// the PPU, which composes into a buffer the port presents.
+static agb_audio_sink audio_sink;
+
+void agb_m4a_set_audio_sink(agb_audio_sink sink)
+{
+    audio_sink = sink;
+}
+
+
 // Called once a frame by the sequencer. Drives the music players, then the
 // compatible-sound channels, then mixes everything into the frame the sound DMA
 // is not currently reading out.
 void SoundMain(void)
 {
     struct SoundInfo *info = agb_sound_info();
+    s8 *frame;
 
     // The ident is a signature and a lock, exactly as the sequencer's is.
     if (info->ident != ID_NUMBER)
@@ -983,7 +996,11 @@ void SoundMain(void)
 
     info->CgbSound();
 
-    agb_m4a_mix_frame(info, agb_m4a_frame_buffer(info), info->pcmSamplesPerVBlank);
+    frame = agb_m4a_frame_buffer(info);
+    agb_m4a_mix_frame(info, frame, info->pcmSamplesPerVBlank);
+
+    if (audio_sink != NULL)
+        audio_sink(frame, frame + PCM_DMA_BUF_SIZE, info->pcmSamplesPerVBlank, info->pcmFreq);
 
     // The original releases the lock at the end of the routine it tail-calls and
     // never returns from. Ours returns, so the pair sits together.

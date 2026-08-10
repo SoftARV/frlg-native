@@ -40,3 +40,20 @@ void host_log(const char *msg)
 {
     fprintf(stderr, "host: %s\n", msg);
 }
+
+bool host_audio_open(int sample_rate)
+{
+    (void)sample_rate;
+    return false;
+}
+
+void host_audio_close(void)
+{
+}
+
+void host_audio_submit(const int8_t *right, const int8_t *left, int samples)
+{
+    (void)right;
+    (void)left;
+    (void)samples;
+}

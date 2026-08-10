@@ -21,6 +21,7 @@
 #endif
 
 #include "agb/frame.h"
+#include "agb/audio.h"
 #include "agb/cart.h"
 #include "agb/memmap.h"
 #include "agb/ppu.h"
@@ -106,6 +107,43 @@ static void write_ppm(const char *path)
     fprintf(stderr, "frlg-native: wrote %s\n", path);
 }
 
+// Called from the game thread every frame with the buffer the mixer has just
+// filled. The device opens on the first frame and reopens if the game changes
+// the mixer's rate, which m4aSoundMode can do at any time.
+static void audio_sink(const int8_t *right, const int8_t *left, int samples, int rate)
+{
+    static int opened_rate;
+    static bool heard_sound;
+
+    if (rate != opened_rate)
+    {
+        opened_rate = host_audio_open(rate) ? rate : 0;
+        if (opened_rate != 0)
+            printf("frlg-native: audio at %d Hz\n", opened_rate);
+    }
+
+    if (opened_rate == 0)
+        return;
+
+    // Audio leaves no trace if it is wrong, so say once that something other
+    // than silence arrived: a mixer that runs but produces nothing looks exactly
+    // like a host that is not listening.
+    if (!heard_sound)
+    {
+        for (int i = 0; i < samples; i++)
+        {
+            if (right[i] != 0 || left[i] != 0)
+            {
+                heard_sound = true;
+                printf("frlg-native: first non-silent audio frame\n");
+                break;
+            }
+        }
+    }
+
+    host_audio_submit(right, left, samples);
+}
+
 // The game's own data lives in the player's ROM, not in this binary
 // (docs/adr/0006-rom-supplied-data.md). Until the phase 7 importer exists, the
 // path comes from the environment, falling back to the build the port is bound
@@ -157,6 +195,8 @@ int main(int argc, char **argv)
 
     load_cart();
 
+    agb_m4a_set_audio_sink(audio_sink);
+
     printf("frlg-native: starting, frame limit %u\n", frame_limit);
     if (pthread_create(&game, NULL, game_thread, NULL) != 0)
     {
@@ -205,6 +245,7 @@ int main(int argc, char **argv)
         write_ppm(shot);
     }
 
+    host_audio_close();
     host_video_close();
 
     printf("frlg-native: ran %u frames\n", frames_ran);

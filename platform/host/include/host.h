@@ -30,6 +30,19 @@ bool host_pump_events(void);
 
 uint16_t host_input_keys(void);
 
+// Audio output. The GBA's mixer produces 8-bit signed stereo at its own rate --
+// about 13.4 kHz -- and the host resamples to whatever the device wants.
+//
+// `open` may be called again with a different rate: the game changes it through
+// m4aSoundMode. Submitting before opening, or after a failed open, is silently
+// ignored, so a platform with no audio needs no special case above it.
+bool host_audio_open(int sample_rate);
+void host_audio_close(void);
+
+// One frame's worth. The two sides arrive as separate buffers, the way the
+// mixer keeps them.
+void host_audio_submit(const int8_t *right, const int8_t *left, int samples);
+
 void host_log(const char *msg);
 
 #endif // GUARD_HOST_H
