@@ -59,13 +59,38 @@ active channel mixes at zero volume. That points at note allocation or the envel
 the mixing loop, and the two `-O0` builds agreeing to the sample says the pipeline is otherwise
 deterministic.
 
-Next measurement, not next guess: count channels that pass `agb_m4a_envelope_step` per frame in both
-builds. If it is zero at `-O2`, the fault is in `ply_note` or `MPlayMain`; if it is non-zero, it is in
-the envelope's volume fold.
+## Narrowed to one field
 
-If that is it, the fix is a deliberate decision rather than a patch: make the shared state volatile
-in our own code, or route the mixer off the signal handler. It should not be reached for before the
-measurement.
+Counting each stage in both builds over 1,200 frames walks the fault backwards:
+
+| Stage | `-O0` | `-O2` |
+| --- | --- | --- |
+| `MPlayMain` entered | 7,194 | 4,083 |
+| `run_tick` (a sequencer tick) | **1,171** | **22** |
+| `ply_note` | 808 | **1** |
+| notes allocated a channel | 808 | 1 |
+| channels passing the envelope | 4,745 | 50 |
+
+Ticks are what collapse: 22 instead of 1,171. A tick happens when the tempo accumulator reaches 150,
+so the accumulator is the thing not working. Sampling an *active* player — one whose status is not
+paused, which the first attempt missed by sampling paused cry players — says why:
+
+| | `-O0` | `-O2` |
+| --- | --- | --- |
+| `tempoI` / `tempoU` / `tempoD` | 150 / 256 / 150 | **0 / 0 / 0** |
+| `status` | `0x1F` — five live tracks | `0` |
+
+**The player is never initialised.** `MPlayStart` sets `tempoD`, `tempoI`, `tempoU` and the track
+count when a song begins; at `-O2` an active player has none of them. So the fault is upstream of
+everything we translated: nothing is wrong with the interpreter or the mixer, they are faithfully
+sequencing a player that was never told what to play.
+
+`MPlayStart` is reached through `m4aSongNumStart`, which indexes `gSongTable` — **cart data, whose
+pointers the relocation pass rewrites**. That is the first thing to check, and it is a much more
+promising suspect than a miscompile: it would explain why the two builds differ at all, since each
+resolves the table's symbol targets to its own addresses.
+
+Next measurement: whether `MPlayStart` is called, and what song header it is handed, in both builds.
 
 ## The gap this exposes, and what actually closes it
 
