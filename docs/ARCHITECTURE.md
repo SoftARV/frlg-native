@@ -529,10 +529,10 @@ The sequencer's dispatch table is filled by `MPlayJumpTableCopy` from a template
 against it; here it is an ordinary array, so the copy is just a copy. `SoundInit` fills the table
 before `MPlayExtender` overrides nine of its entries, so the order matters and is preserved.
 
-**Done so far: the parameter opcodes, control flow and the note allocator** — priority, tempo, key
-shift, instrument select, volume, pan, bend, bend range, tune, both modulation controls and the
-delay, the direct write to a compatible-sound register, then the jump, the three-deep pattern call
-stack, the repeat counter and the end of a track, and then `ply_note` itself.
+**`m4a_1.s` is now fully translated.** The parameter opcodes — priority, tempo, key shift, instrument
+select, volume, pan, bend, bend range, tune, both modulation controls and the delay, and the direct
+write to a compatible-sound register; control flow — the jump, the three-deep pattern call stack, the
+repeat counter and the end of a track; and then `ply_note` and `MPlayMain`.
 
 Ending a track releases the channels it owns rather than cutting them off, so their envelopes
 finish, and unlinks each from the chain the track keeps. The chain's head lives in the track rather
@@ -576,10 +576,41 @@ copies gate time, key, velocity and running status across as a single word, whic
 running status in the channel's priority — immediately overwritten by the computed one. Here the four
 are assigned separately, which is identical in effect and says what it means.
 
-What remains is the driver, `MPlayMain` — 338 lines of ARM, the last large piece in the phase.
-`ply_note` reaches into the sequencer for `ClearChain`, `TrkVolPitSet` and `MidiKeyToFreq`, so it is
-inert until step 5 builds `m4a.c`; it is tested against handlers the test supplies, the way the PPU
-tests supply the interrupt table.
+**The driver**, `MPlayMain`, is what a frame of music actually is. It begins by taking a lock: the
+player's `ident` doubles as a signature and a busy flag, so a player caught mid-update is left alone
+and the flag is released however the call leaves. Players form a chain, and each drives the next
+before doing its own work, so the whole chain is serviced from one call on the head.
+
+How many sequencer ticks a frame is worth comes from a **tempo accumulator** — it climbs by the
+player's increment and spends 150 per tick, carrying the remainder into the next frame. Each tick
+walks every track: the channels it owns are counted one step closer to their release, a track flagged
+as just started is given its defaults, and its command stream runs until the wait counter is
+non-zero.
+
+A command byte splits three ways at exact boundaries: from `0xCF` up it is a note, `0xB1` to `0xCE`
+indexes the dispatch table, and `0x80` to `0xB0` is a wait taken from the clock table. Below `0x80`
+it is not a command at all but the operands of the previous one — running status — and the driver
+leaves the pointer sitting on it for the handler to consume. Only commands from `0xBD` up are
+remembered that way.
+
+Then the **modulation sweep** steps, as a triangle: a counter climbs and the half of its range past
+the midpoint is read back down. The counter is kept in a byte but the sum is not truncated before it
+is used, so a large speed folds past the midpoint against the wide value — kept, because it is
+audible. A step that lands where the sweep already was invalidates nothing.
+
+What the ticks invalidated is recomputed **once at the end** rather than inside each handler that
+invalidated it: a track may be told to change volume several times in one tick and its channels only
+need to hear about it once. That pass consumes the flags, which is why the flag itself is never
+observable after the call — only its effect is.
+
+Two of upstream's shapes are preserved rather than tidied. Both track loops are `do`/`while`, so a
+player claiming **no tracks still has its first one run**. And a track whose handler ended it mid-tick
+is dropped immediately, without spending its wait or stepping its modulation, though it still counted
+as alive when the tick began.
+
+`ply_note` and `MPlayMain` both reach into the sequencer — for `ClearChain`, `TrkVolPitSet`,
+`MidiKeyToFreq`, `FadeOutBody` and `Clear64byte` — so both are inert until step 5 builds `m4a.c`.
+They are tested against handlers the test supplies, the way the PPU tests supply the interrupt table.
 
 The mixer produces the GBA's native ~13.4 kHz PCM into a ring buffer; the host layer resamples.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game

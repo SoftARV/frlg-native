@@ -656,7 +656,11 @@ static void test_endtie(void)
 // so the test stands in for all of them -- and being spies, they also record
 // that the note went through the steps in the right order.
 
-const u8 gClockTable[] = {0, 3, 6, 12, 24, 48, 96};
+// The driver indexes this with a command byte less 0x80, so all 49 entries
+// have to be here. The first few are the ones the note tests name; the rest
+// are distinct so a wrong index shows up as a wrong wait.
+const u8 gClockTable[49] = {0, 3, 6, 12, 24, 48, 96,
+                            107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148};
 
 static int clear_chain_calls;
 static void *clear_chain_arg;
@@ -1342,6 +1346,627 @@ static void test_note_chains_and_delay(void)
     CHECK(track.modM == 20, "the sweep was cleared with no delay set");
 }
 
+// ----------------------------------------------------------------- the driver ---
+
+// Two more the sequencer would supply.
+static int clear64_calls;
+static int fade_calls;
+static int fade_pauses; // make the fade end the song, as a real one can
+
+void Clear64byte(void *addr)
+{
+    clear64_calls++;
+    memset(addr, 0, 64);
+}
+
+void FadeOutBody(struct MusicPlayerInfo *p)
+{
+    fade_calls++;
+    if (fade_pauses)
+        p->status = MUSICPLAYER_STATUS_PAUSE;
+}
+
+static struct MusicPlayerTrack mtracks[3];
+static MPlayFunc jump_table[36];
+
+static int plynote_calls;
+static u32 plynote_arg;
+static const u8 *plynote_ptr;
+static int handler_calls;
+static int handler_ends_track;
+static struct MusicPlayerInfo *chained_with;
+static int chain_calls;
+
+static void spy_plynote(u32 clock, struct MusicPlayerInfo *p, struct MusicPlayerTrack *t)
+{
+    (void)p;
+    plynote_calls++;
+    plynote_arg = clock;
+    plynote_ptr = t->cmdPtr;
+
+    // The real allocator eats its operand bytes, and the command run only moves on
+    // because it does -- a spy that left them would spin on them forever.
+    for (int i = 0; i < 3 && *t->cmdPtr < 0x80; i++)
+        t->cmdPtr++;
+}
+
+static int marked_handler_calls;
+
+// Installed at one known index, so which entry the driver reached can be told
+// apart from which command it recorded.
+static void spy_marked_handler(struct MusicPlayerInfo *p, struct MusicPlayerTrack *t)
+{
+    (void)p;
+    (void)t;
+    marked_handler_calls++;
+}
+
+static void spy_handler(struct MusicPlayerInfo *p, struct MusicPlayerTrack *t)
+{
+    (void)p;
+    handler_calls++;
+    if (handler_ends_track)
+        t->flags = 0;
+}
+
+static u32 ident_during_chain;
+
+static void spy_chain(struct MusicPlayerInfo *p)
+{
+    chain_calls++;
+    chained_with = p;
+    // The chain runs mid-update, which is the only moment the lock is visible.
+    ident_during_chain = player.ident;
+}
+
+// The driver walks the player's own track array, so that is what has to be set up
+// -- and the tempo has to be low enough that a test runs the number of ticks it
+// means to.
+static void driver_reset(const char *name)
+{
+    TEST_CASE(name);
+    memset(&player, 0, sizeof(player));
+    memset(mtracks, 0, sizeof(mtracks));
+    memset(stream, 0, sizeof(stream));
+    install_sound_header();
+    sound_header.maxChans = 3;
+    sound_header.cgbChans = cgb_chans;
+    sound_header.MidiKeyToCgbFreq = fake_cgb_freq;
+    sound_header.plynote = spy_plynote;
+    sound_header.MPlayJumpTable = jump_table;
+    memset(cgb_chans, 0, sizeof(cgb_chans));
+
+    for (int i = 0; i < 36; i++)
+        jump_table[i] = (MPlayFunc)spy_handler;
+    jump_table[4] = (MPlayFunc)spy_marked_handler;
+
+    player.ident = ID_NUMBER;
+    player.tracks = mtracks;
+    player.trackCount = 1;
+    player.tempoI = 150; // exactly one tick per call
+    mtracks[0].flags = MPT_FLG_EXIST;
+    mtracks[0].cmdPtr = stream;
+    mtracks[0].wait = 1; // no commands unless a test asks for them
+
+    clear64_calls = 0;
+    fade_calls = 0;
+    fade_pauses = 0;
+    plynote_calls = 0;
+    plynote_arg = 0xFFFFFFFF;
+    plynote_ptr = NULL;
+    handler_calls = 0;
+    marked_handler_calls = 0;
+    handler_ends_track = 0;
+    chain_calls = 0;
+    chained_with = NULL;
+    ident_during_chain = 0;
+    clear_chain_calls = 0;
+    trk_vol_pit_calls = 0;
+    freq_key = 0xFF;
+    cgb_freq_type = 0xFF;
+}
+
+// Somewhere for the recompute pass to land, so what it did can be seen.
+static struct WaveData driver_wave;
+
+static void attach_one_channel(void)
+{
+    link_chain(1);
+    mtracks[0].chan = &chans[0];
+    chans[0].track = &mtracks[0];
+    chans[0].gateTime = 9; // long enough that this tick does not release it
+    chans[0].wav = &driver_wave;
+    chans[0].key = 60;
+    chans[0].frequency = 0;
+}
+
+// The ident is a lock as well as a signature: a player caught mid-update is left
+// alone, and the lock is released however the call leaves.
+static void test_driver_ident_guard(void)
+{
+    driver_reset("the driver ignores a player mid-update");
+    player.ident = ID_NUMBER + 1;
+    MPlayMain(&player);
+    CHECK(fade_calls == 0, "a locked player was driven anyway");
+    CHECK(player.ident == ID_NUMBER + 1, "the ident was disturbed");
+
+    driver_reset("the driver releases the lock on the way out");
+    MPlayMain(&player);
+    CHECK(player.ident == ID_NUMBER, "the ident was left at %08X", player.ident);
+
+    driver_reset("a paused player still has its lock released");
+    player.status = MUSICPLAYER_STATUS_PAUSE;
+    MPlayMain(&player);
+    CHECK(player.ident == ID_NUMBER, "the ident was left locked on the paused path");
+    CHECK(fade_calls == 0, "a paused player was faded");
+}
+
+// Players form a chain, and the head drives the rest before doing its own work.
+static void test_driver_chains(void)
+{
+    driver_reset("the driver drives the next player first");
+    player.MPlayMainNext = spy_chain;
+    player.musicPlayerNext = (struct MusicPlayerInfo *)&mtracks[2];
+    MPlayMain(&player);
+    CHECK(chain_calls == 1, "the next player was driven %d times", chain_calls);
+    CHECK(chained_with == (struct MusicPlayerInfo *)&mtracks[2],
+          "the next player was handed the wrong pointer");
+    CHECK(ident_during_chain == ID_NUMBER + 1,
+          "the player was not locked while updating, its ident was %08X",
+          ident_during_chain);
+
+    // A locked player does not reach the chain at all.
+    driver_reset("a locked player does not drive the chain");
+    player.ident = 0;
+    player.MPlayMainNext = spy_chain;
+    MPlayMain(&player);
+    CHECK(chain_calls == 0, "a locked player drove the chain anyway");
+}
+
+// A fade that finishes during this call pauses the player, and nothing after it
+// runs.
+static void test_driver_fade_pauses(void)
+{
+    driver_reset("a fade that ends the song stops the tick");
+    fade_pauses = 1;
+    player.tempoI = 300; // would otherwise be two ticks
+    MPlayMain(&player);
+    CHECK(fade_calls == 1, "the fade was not stepped");
+    CHECK(player.clock == 0, "a tick ran after the fade ended the song");
+}
+
+// The tempo accumulator decides how many ticks a frame is worth: it climbs by the
+// player's increment and spends 150 per tick.
+static void test_driver_tempo(void)
+{
+    driver_reset("a tempo below the threshold runs no ticks");
+    player.tempoI = 100;
+    MPlayMain(&player);
+    CHECK(player.clock == 0, "a tick ran below the threshold");
+    CHECK(player.tempoC == 100, "the accumulator came out %d, not 100", player.tempoC);
+
+    driver_reset("the threshold itself runs one tick");
+    player.tempoI = 150;
+    MPlayMain(&player);
+    CHECK(player.clock == 1, "%d ticks ran, not one", player.clock);
+    CHECK(player.tempoC == 0, "the accumulator came out %d, not 0", player.tempoC);
+
+    driver_reset("a large tempo runs several ticks");
+    player.tempoI = 380;
+    MPlayMain(&player);
+    // 380 -> tick, 230 -> tick, 80: two ticks and a remainder.
+    CHECK(player.clock == 2, "%d ticks ran, not two", player.clock);
+    CHECK(player.tempoC == 80, "the accumulator came out %d, not 80", player.tempoC);
+
+    driver_reset("the accumulator carries across calls");
+    player.tempoI = 100;
+    MPlayMain(&player);
+    MPlayMain(&player);
+    CHECK(player.clock == 1, "the carried remainder did not reach the threshold");
+    CHECK(player.tempoC == 50, "the accumulator came out %d, not 50", player.tempoC);
+}
+
+// The status word carries a bit per living track, and a player with none left is
+// paused.
+static void test_driver_status(void)
+{
+    driver_reset("the status word names the living tracks");
+    player.trackCount = 3;
+    mtracks[0].flags = MPT_FLG_EXIST;
+    mtracks[0].wait = 1;
+    mtracks[1].flags = 0; // not in use
+    mtracks[2].flags = MPT_FLG_EXIST;
+    mtracks[2].wait = 1;
+
+    MPlayMain(&player);
+
+    CHECK(player.status == 0x5, "the status word came out %08X, not 0x5", player.status);
+
+    driver_reset("a player with nothing left is paused");
+    mtracks[0].flags = 0;
+    MPlayMain(&player);
+    CHECK(player.status == MUSICPLAYER_STATUS_PAUSE, "the player was not paused, status %08X",
+          player.status);
+    CHECK(player.clock == 1, "the tick that found nothing did not still count");
+}
+
+// Every channel a track owns is counted one tick closer to its release.
+static void test_driver_ages_channels(void)
+{
+    driver_reset("a gate time counts down");
+    link_chain(2);
+    mtracks[0].chan = &chans[0];
+    chans[0].track = &mtracks[0];
+    chans[1].track = &mtracks[0];
+    chans[0].gateTime = 3;
+    chans[1].gateTime = 1;
+
+    MPlayMain(&player);
+
+    CHECK(chans[0].gateTime == 2, "the first gate time came out %d", chans[0].gateTime);
+    CHECK(!(chans[0].statusFlags & SOUND_CHANNEL_SF_STOP),
+          "a channel with time left was released");
+    CHECK(chans[1].gateTime == 0, "the second gate time came out %d", chans[1].gateTime);
+    CHECK(chans[1].statusFlags & SOUND_CHANNEL_SF_STOP,
+          "a gate time that ran out did not release the channel");
+
+    driver_reset("a gate time of zero is left alone");
+    link_chain(1);
+    mtracks[0].chan = &chans[0];
+    chans[0].track = &mtracks[0];
+    chans[0].gateTime = 0;
+    MPlayMain(&player);
+    CHECK(chans[0].gateTime == 0, "a zero gate time was decremented to %d",
+          chans[0].gateTime);
+    CHECK(!(chans[0].statusFlags & SOUND_CHANNEL_SF_STOP),
+          "a note held open was released anyway");
+
+    driver_reset("a channel that has gone quiet is unhooked");
+    link_chain(1);
+    mtracks[0].chan = &chans[0];
+    chans[0].track = &mtracks[0];
+    chans[0].statusFlags = 0; // no longer on
+    MPlayMain(&player);
+    CHECK(clear_chain_calls == 1, "the quiet channel was unhooked %d times",
+          clear_chain_calls);
+    CHECK(mtracks[0].chan == NULL, "the chain still holds the quiet channel");
+}
+
+// A track flagged as just started is given its defaults, but keeps its place in
+// the command stream.
+static void test_driver_starts_a_track(void)
+{
+    driver_reset("a starting track gets its defaults");
+    mtracks[0].flags = MPT_FLG_EXIST | MPT_FLG_START;
+    mtracks[0].cmdPtr = stream + 4;
+    stream[4] = 0x80; // a wait of gClockTable[0], which is zero
+    stream[5] = 0x81; // ...so a second command runs: a wait of 3
+
+    MPlayMain(&player);
+
+    CHECK(clear64_calls == 1, "the track was cleared %d times", clear64_calls);
+    CHECK(mtracks[0].bendRange == 2, "bend range came out %d", mtracks[0].bendRange);
+    CHECK(mtracks[0].volX == 0x40, "volX came out %02X", mtracks[0].volX);
+    CHECK(mtracks[0].lfoSpeed == 0x16, "lfo speed came out %02X", mtracks[0].lfoSpeed);
+    CHECK(mtracks[0].tone.type == 1, "the default instrument type came out %d",
+          mtracks[0].tone.type);
+    CHECK(!(mtracks[0].flags & MPT_FLG_START), "the start flag survived");
+    // Only 64 of the track's 80 bytes are cleared, which is what leaves the
+    // command pointer standing.
+    CHECK(mtracks[0].cmdPtr == stream + 6, "the command pointer was reset to %p",
+          (void *)mtracks[0].cmdPtr);
+}
+
+// The command byte decides which of three things happens.
+static void test_driver_dispatch(void)
+{
+    driver_reset("a note command reaches the allocator");
+    mtracks[0].wait = 0;
+    stream[0] = 0xD2; // 0xCF + 3
+    stream[1] = 0x81; // then a real wait, to end the run
+    MPlayMain(&player);
+    CHECK(plynote_calls == 1, "the allocator was called %d times", plynote_calls);
+    CHECK(plynote_arg == 3, "the allocator was handed %u, not 3", plynote_arg);
+
+    driver_reset("a control command reaches the jump table");
+    mtracks[0].wait = 0;
+    stream[0] = 0xB5; // 0xB1 + 4
+    stream[1] = 0x81;
+    MPlayMain(&player);
+    CHECK(marked_handler_calls == 1, "the entry at index four was called %d times",
+          marked_handler_calls);
+    CHECK(handler_calls == 0, "a neighbouring entry was called instead");
+    CHECK(player.cmd == 4, "the player was told command %d, not 4", player.cmd);
+
+    driver_reset("a wait command sets the counter from the clock table");
+    mtracks[0].wait = 0;
+    stream[0] = 0x83; // index 3
+    MPlayMain(&player);
+    // The counter is set to 12 and then spent once by this same tick.
+    CHECK(mtracks[0].wait == 11, "the wait counter came out %d, not 11", mtracks[0].wait);
+    CHECK(plynote_calls == 0 && handler_calls == 0, "a wait dispatched something");
+}
+
+// The three kinds of command byte meet at exact values, and each boundary is
+// checked on both sides.
+static void test_driver_dispatch_boundaries(void)
+{
+    driver_reset("0xCF is the first note");
+    mtracks[0].wait = 0;
+    stream[0] = 0xCF;
+    stream[1] = 0x81;
+    MPlayMain(&player);
+    CHECK(plynote_calls == 1, "0xCF did not reach the allocator");
+    CHECK(plynote_arg == 0, "0xCF was handed %u, not 0", plynote_arg);
+
+    driver_reset("0xCE is still a control command");
+    mtracks[0].wait = 0;
+    stream[0] = 0xCE;
+    stream[1] = 0x81;
+    MPlayMain(&player);
+    CHECK(plynote_calls == 0, "0xCE was taken for a note");
+    CHECK(handler_calls == 1, "0xCE did not reach the jump table");
+    CHECK(player.cmd == 0xCE - 0xB1, "0xCE was recorded as command %d", player.cmd);
+
+    driver_reset("0xB1 is the first control command");
+    mtracks[0].wait = 0;
+    stream[0] = 0xB1;
+    stream[1] = 0x81;
+    MPlayMain(&player);
+    CHECK(handler_calls == 1, "0xB1 did not reach the jump table");
+    CHECK(player.cmd == 0, "0xB1 was recorded as command %d, not 0", player.cmd);
+
+    driver_reset("0xB0 is still a wait");
+    mtracks[0].wait = 0;
+    stream[0] = 0xB0;
+    MPlayMain(&player);
+    CHECK(handler_calls == 0, "0xB0 was taken for a control command");
+    // gClockTable[0x30] in the test's table, less the tick that spends it.
+    CHECK(mtracks[0].wait == 148 - 1, "0xB0 set a wait of %d", mtracks[0].wait);
+}
+
+// A byte below 0x80 is not a command but the operands of the previous one.
+static void test_driver_running_status(void)
+{
+    driver_reset("a low byte repeats the remembered command");
+    mtracks[0].wait = 0;
+    mtracks[0].runningStatus = 0xD5; // a note, 0xCF + 6
+    stream[0] = 0x40;                // below 0x80: not a command
+    stream[1] = 0x81; // a real wait: 0x80 waits zero and would not end the run
+    MPlayMain(&player);
+    CHECK(plynote_calls == 1, "the remembered command did not run");
+    CHECK(plynote_arg == 6, "the remembered command was %u, not 6", plynote_arg);
+    // The driver leaves the low byte for the handler to read as its operand rather
+    // than stepping over it, so the handler is handed a pointer still sitting on it.
+    CHECK(plynote_ptr == stream, "the driver stepped over the operand byte");
+
+    driver_reset("a command from 0xBD up is remembered");
+    mtracks[0].wait = 0;
+    stream[0] = 0xBD;
+    stream[1] = 0x81; // a real wait: 0x80 waits zero and would not end the run
+    MPlayMain(&player);
+    CHECK(mtracks[0].runningStatus == 0xBD, "0xBD was not remembered, status is %02X",
+          mtracks[0].runningStatus);
+
+    driver_reset("a command below 0xBD is not remembered");
+    mtracks[0].wait = 0;
+    mtracks[0].runningStatus = 0xD5;
+    stream[0] = 0xBC;
+    stream[1] = 0x81; // a real wait: 0x80 waits zero and would not end the run
+    MPlayMain(&player);
+    CHECK(mtracks[0].runningStatus == 0xD5, "0xBC overwrote the remembered command");
+    CHECK(handler_calls == 1, "0xBC did not reach the jump table");
+}
+
+// A handler that ends the track leaves nothing to tick, so the rest of the track's
+// turn is skipped rather than run against a dead track.
+static void test_driver_handler_ends_track(void)
+{
+    driver_reset("a track ended by its handler is not ticked further");
+    mtracks[0].wait = 0;
+    stream[0] = 0xB6; // index five, a plain handler
+    handler_ends_track = 1;
+    mtracks[0].lfoSpeed = 0x10;
+    mtracks[0].mod = 8;
+
+    MPlayMain(&player);
+
+    CHECK(handler_calls == 1, "the handler did not run");
+    CHECK(mtracks[0].flags == 0, "the track was revived");
+    CHECK(mtracks[0].lfoSpeedC == 0, "the modulation ran on a dead track");
+    // It still counted as living when the tick began, so the status says so.
+    CHECK(player.status == 1, "the status came out %08X, not 1", player.status);
+}
+
+// The wait counter is spent once per tick, after any commands have run.
+static void test_driver_spends_the_wait(void)
+{
+    driver_reset("the wait counter is spent once a tick");
+    mtracks[0].wait = 4;
+    MPlayMain(&player);
+    CHECK(mtracks[0].wait == 3, "the wait counter came out %d, not 3", mtracks[0].wait);
+
+    driver_reset("two ticks spend two");
+    mtracks[0].wait = 4;
+    player.tempoI = 300;
+    MPlayMain(&player);
+    CHECK(mtracks[0].wait == 2, "the wait counter came out %d, not 2", mtracks[0].wait);
+}
+
+// The modulation sweep is a triangle: the counter climbs, and past the midpoint it
+// is read back down again.
+static void test_driver_modulation(void)
+{
+    // The flag the sweep sets cannot be seen after the call -- the recompute pass
+    // consumes it and clears the low nibble -- so these check its consequence: a
+    // pitch change recomputes the frequency, a volume change does not.
+    driver_reset("the rising half of the triangle");
+    attach_one_channel();
+    mtracks[0].wait = 2;
+    mtracks[0].lfoSpeed = 0x20;
+    mtracks[0].mod = 64;
+    mtracks[0].modT = 0;
+
+    MPlayMain(&player);
+
+    CHECK(mtracks[0].lfoSpeedC == 0x20, "the counter came out %02X",
+          mtracks[0].lfoSpeedC);
+    // 0x20 is below the midpoint, so the wave is the counter itself:
+    // (64 * 0x20) >> 6 = 32.
+    CHECK(mtracks[0].modM == 32, "the sweep came out %d, not 32", mtracks[0].modM);
+    CHECK(trk_vol_pit_calls == 1, "the sweep did not ask for a recompute");
+    CHECK(chans[0].frequency == 0xF00D, "a pitch modulation did not recompute the pitch");
+
+    driver_reset("the falling half of the triangle");
+    mtracks[0].wait = 2;
+    mtracks[0].lfoSpeedC = 0x50;
+    mtracks[0].lfoSpeed = 0x10;
+    mtracks[0].mod = 64;
+
+    MPlayMain(&player);
+
+    // 0x60 is past the midpoint, so the wave is 0x80 - 0x60 = 0x20 again, but
+    // falling: (64 * 0x20) >> 6 = 32.
+    CHECK(mtracks[0].lfoSpeedC == 0x60, "the counter came out %02X",
+          mtracks[0].lfoSpeedC);
+    CHECK(mtracks[0].modM == 32, "the sweep came out %d, not 32", mtracks[0].modM);
+
+    driver_reset("a volume modulation asks for the other recompute");
+    attach_one_channel();
+    mtracks[0].wait = 2;
+    mtracks[0].lfoSpeed = 0x20;
+    mtracks[0].mod = 64;
+    mtracks[0].modT = 1;
+    MPlayMain(&player);
+    CHECK(trk_vol_pit_calls == 1, "the sweep did not ask for a recompute");
+    CHECK(chans[0].frequency == 0, "a volume modulation recomputed the pitch as well");
+
+    driver_reset("the delay holds the sweep off");
+    mtracks[0].wait = 2;
+    mtracks[0].lfoSpeed = 0x20;
+    mtracks[0].mod = 64;
+    mtracks[0].lfoDelayC = 2;
+    MPlayMain(&player);
+    CHECK(mtracks[0].lfoDelayC == 1, "the delay came out %d", mtracks[0].lfoDelayC);
+    CHECK(mtracks[0].lfoSpeedC == 0, "the sweep advanced during its delay");
+    CHECK(mtracks[0].modM == 0, "the sweep moved during its delay");
+
+    driver_reset("no depth means no sweep");
+    mtracks[0].wait = 2;
+    mtracks[0].lfoSpeed = 0x20;
+    mtracks[0].mod = 0;
+    MPlayMain(&player);
+    CHECK(mtracks[0].lfoSpeedC == 0, "the counter advanced with no depth set");
+
+    driver_reset("no speed means no sweep");
+    mtracks[0].wait = 2;
+    mtracks[0].lfoSpeed = 0;
+    mtracks[0].mod = 64;
+    mtracks[0].lfoDelayC = 3;
+    MPlayMain(&player);
+    CHECK(mtracks[0].lfoDelayC == 3, "the delay was spent with no speed set");
+
+    driver_reset("a sweep that lands where it already was asks for nothing");
+    attach_one_channel();
+    mtracks[0].wait = 2;
+    mtracks[0].lfoSpeed = 0x20;
+    mtracks[0].mod = 64;
+    mtracks[0].modM = 32; // exactly what the step would produce
+    MPlayMain(&player);
+    CHECK(trk_vol_pit_calls == 0, "an unchanged sweep asked for a recompute anyway");
+    CHECK(chans[0].frequency == 0, "an unchanged sweep recomputed the pitch");
+}
+
+// What the tick invalidated is recomputed once at the end, not inside each handler
+// that invalidated it.
+static void test_driver_applies_changes(void)
+{
+    static struct WaveData wave;
+
+    driver_reset("a volume change reaches the channels");
+    link_chain(1);
+    mtracks[0].chan = &chans[0];
+    chans[0].track = &mtracks[0];
+    chans[0].gateTime = 5;
+    mtracks[0].flags = MPT_FLG_EXIST | MPT_FLG_VOLCHG;
+    mtracks[0].vol = 0x40;
+    mtracks[0].volX = 0x40;
+
+    MPlayMain(&player);
+
+    CHECK(trk_vol_pit_calls == 1, "the track volume was recomputed %d times",
+          trk_vol_pit_calls);
+    CHECK(mtracks[0].flags == MPT_FLG_EXIST, "the flags were not cleared, they are %02X",
+          mtracks[0].flags);
+
+    driver_reset("a pitch change recomputes the frequency");
+    link_chain(1);
+    mtracks[0].chan = &chans[0];
+    chans[0].track = &mtracks[0];
+    chans[0].gateTime = 5;
+    chans[0].wav = &wave;
+    chans[0].key = 60;
+    mtracks[0].flags = MPT_FLG_EXIST | MPT_FLG_PITCHG;
+    mtracks[0].keyM = 4;
+    mtracks[0].pitM = 9;
+
+    MPlayMain(&player);
+
+    CHECK(chans[0].frequency == 0xF00D, "the frequency was not recomputed");
+    CHECK(freq_key == 64, "the shifted key came out %d, not 64", freq_key);
+
+    driver_reset("a recomputed pitch is floored at zero");
+    attach_one_channel();
+    chans[0].key = 3;
+    mtracks[0].flags = MPT_FLG_EXIST | MPT_FLG_PITCHG;
+    mtracks[0].keyM = (u8)-10;
+    MPlayMain(&player);
+    CHECK(freq_key == 0, "the recomputed key came out %d rather than bottoming out",
+          freq_key);
+
+    driver_reset("a track with nothing invalidated is left alone");
+    link_chain(1);
+    mtracks[0].chan = &chans[0];
+    chans[0].track = &mtracks[0];
+    chans[0].gateTime = 5;
+    mtracks[0].flags = MPT_FLG_EXIST;
+    MPlayMain(&player);
+    CHECK(trk_vol_pit_calls == 0, "a track with no changes was recomputed anyway");
+
+    driver_reset("a compatible-sound channel is told what changed");
+    link_chain(1);
+    mtracks[0].chan = &chans[0];
+    chans[0].track = &mtracks[0];
+    chans[0].gateTime = 5;
+    chans[0].type = 2; // within TONEDATA_TYPE_CGB
+    mtracks[0].flags = MPT_FLG_EXIST | MPT_FLG_VOLCHG | MPT_FLG_PITCHG;
+
+    MPlayMain(&player);
+
+    CHECK(((struct CgbChannel *)&chans[0])->modify
+              == (CGB_CHANNEL_MO_VOL | CGB_CHANNEL_MO_PIT),
+          "the channel was told %02X changed",
+          ((struct CgbChannel *)&chans[0])->modify);
+    CHECK(cgb_freq_type == 2, "the compatible-sound table was handed type %d",
+          cgb_freq_type);
+}
+
+// The track loop is entered before the count is looked at, so a player claiming no
+// tracks still has its first one run. Preserved rather than tidied.
+static void test_driver_zero_track_count(void)
+{
+    driver_reset("a track count of zero still runs one track");
+    player.trackCount = 0;
+    mtracks[0].flags = MPT_FLG_EXIST;
+    mtracks[0].wait = 4;
+
+    MPlayMain(&player);
+
+    CHECK(mtracks[0].wait == 3, "the first track was not run, its wait is %d",
+          mtracks[0].wait);
+    CHECK(player.status == 1, "the status came out %08X, not 1", player.status);
+}
+
 // ---------------------------------------------------------- the V-blank tick ---
 
 #define DMA1_CNT REG_OFFSET_DMA1CNT
@@ -1483,6 +2108,21 @@ int main(void)
     test_note_key_shift();
     test_note_cgb_sweep();
     test_note_chains_and_delay();
+    test_driver_ident_guard();
+    test_driver_chains();
+    test_driver_fade_pauses();
+    test_driver_tempo();
+    test_driver_status();
+    test_driver_ages_channels();
+    test_driver_starts_a_track();
+    test_driver_dispatch();
+    test_driver_dispatch_boundaries();
+    test_driver_running_status();
+    test_driver_handler_ends_track();
+    test_driver_spends_the_wait();
+    test_driver_modulation();
+    test_driver_applies_changes();
+    test_driver_zero_track_count();
     test_vsync_counts_down();
     test_vsync_reloads();
     test_vsync_zero_counter();

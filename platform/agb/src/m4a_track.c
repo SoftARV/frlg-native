@@ -666,6 +666,298 @@ void ply_note(u32 clock, struct MusicPlayerInfo *player, struct MusicPlayerTrack
     track->flags &= 0xF0;
 }
 
+// ----------------------------------------------------------------- the driver ---
+
+// Also defined by the sequencer.
+extern void FadeOutBody(struct MusicPlayerInfo *player);
+extern void Clear64byte(void *addr);
+
+// Count every channel this track owns one tick closer to its end. A channel that
+// has already gone quiet is unhooked instead; a gate time that reaches zero asks
+// for the release rather than cutting the note off.
+static void age_channels(struct MusicPlayerTrack *track)
+{
+    struct SoundChannel *chan = track->chan;
+
+    while (chan != NULL)
+    {
+        if (!(chan->statusFlags & SOUND_CHANNEL_SF_ON))
+            ClearChain(chan);
+        else if (chan->gateTime != 0 && --chan->gateTime == 0)
+            chan->statusFlags |= SOUND_CHANNEL_SF_STOP;
+
+        // Read after the unhook rather than before it: unhooking rewrites the
+        // neighbours and leaves this field standing, so an unhooked channel still
+        // names its successor.
+        chan = chan->nextChannelPointer;
+    }
+}
+
+// A track that has just been started is given its defaults. Only the first 64 of
+// its 80 bytes are cleared, which is what leaves the command pointer and the
+// pattern stack standing -- the track resumes where it was rather than restarting.
+static void start_track(struct MusicPlayerTrack *track)
+{
+    Clear64byte(track);
+
+    track->flags = MPT_FLG_EXIST;
+    track->bendRange = 2;
+    track->volX = 0x40;
+    track->lfoSpeed = 0x16;
+    track->tone.type = 1;
+}
+
+// Run one command from the track's stream. Returns false when the track has ended
+// under us, in which case nothing more may be done to it this tick.
+//
+// A byte below 0x80 is not a command but the operands of the previous one, which
+// is what running status means here. Only commands from 0xBD up are remembered
+// that way -- the ones below take no operands worth repeating.
+static int run_one_command(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track,
+                           struct SoundInfo *info)
+{
+    u8 cmd = *track->cmdPtr;
+
+    if (cmd < 0x80)
+    {
+        cmd = track->runningStatus;
+    }
+    else
+    {
+        track->cmdPtr++;
+        if (cmd >= 0xBD)
+            track->runningStatus = cmd;
+    }
+
+    if (cmd >= 0xCF)
+    {
+        info->plynote(cmd - 0xCF, player, track);
+    }
+    else if (cmd > 0xB0)
+    {
+        player->cmd = (u8)(cmd - 0xB1);
+        info->MPlayJumpTable[cmd - 0xB1](player, track);
+
+        // A handler that ended the track leaves nothing to tick.
+        if (track->flags == 0)
+            return 0;
+    }
+    else
+    {
+        track->wait = gClockTable[cmd - 0x80];
+    }
+
+    return 1;
+}
+
+// Step the modulation sweep. It is a triangle: the counter climbs, and the half of
+// its range above the midpoint is read back down again.
+static void advance_modulation(struct MusicPlayerTrack *track)
+{
+    u32 sum;
+    s32 wave;
+
+    if (track->lfoSpeed == 0 || track->mod == 0)
+        return;
+
+    if (track->lfoDelayC != 0)
+    {
+        track->lfoDelayC--;
+        return;
+    }
+
+    // The counter is kept in a byte but the sum is not truncated before it is
+    // used, so the falling half of the triangle is measured against the wide
+    // value. Deliberate: it is what makes a large speed fold past the midpoint.
+    sum = (u32)track->lfoSpeedC + track->lfoSpeed;
+    track->lfoSpeedC = (u8)sum;
+
+    if ((u8)(sum - 0x40) & 0x80)
+        wave = (s8)(u8)sum;
+    else
+        wave = (s32)(0x80 - sum);
+
+    wave = (track->mod * wave) >> 6;
+
+    // Only a change worth hearing invalidates anything, and the comparison is
+    // made a byte at a time.
+    if ((u8)(track->modM ^ wave) != 0)
+    {
+        track->modM = (s8)wave;
+        track->flags |= track->modT == 0 ? MPT_FLG_PITCHG : MPT_FLG_VOLCHG;
+    }
+}
+
+// One sequencer tick across every track. Returns a bit per track that is still
+// alive, which is what the player's status word holds.
+static u32 run_tick(struct MusicPlayerInfo *player, struct SoundInfo *info)
+{
+    struct MusicPlayerTrack *track = player->tracks;
+    int left = player->trackCount;
+    u32 bit = 1;
+    u32 live = 0;
+
+    // Entered before the count is looked at, so a player claiming no tracks still
+    // has its first one run.
+    do
+    {
+        if (track->flags & MPT_FLG_EXIST)
+        {
+            live |= bit;
+
+            age_channels(track);
+
+            if (track->flags & MPT_FLG_START)
+                start_track(track);
+
+            while (track->wait == 0)
+            {
+                if (!run_one_command(player, track, info))
+                    goto next;
+            }
+
+            track->wait--;
+            advance_modulation(track);
+        }
+
+    next:
+        track++;
+        bit <<= 1;
+    } while (--left > 0);
+
+    return live;
+}
+
+// Whatever the tick invalidated is recomputed here, once, rather than inside the
+// handler that invalidated it: a track may be told to change volume several times
+// in one tick, and its channels only need to hear about it once.
+static void apply_changes(struct MusicPlayerInfo *player, struct SoundInfo *info)
+{
+    struct MusicPlayerTrack *track = player->tracks;
+    int left = player->trackCount;
+
+    do
+    {
+        if ((track->flags & MPT_FLG_EXIST)
+            && (track->flags & (MPT_FLG_VOLCHG | MPT_FLG_PITCHG)))
+        {
+            struct SoundChannel *chan;
+
+            TrkVolPitSet(player, track);
+
+            chan = track->chan;
+            while (chan != NULL)
+            {
+                u8 cgb_type;
+
+                if (!(chan->statusFlags & SOUND_CHANNEL_SF_ON))
+                {
+                    ClearChain(chan);
+                    chan = chan->nextChannelPointer;
+                    continue;
+                }
+
+                cgb_type = chan->type & TONEDATA_TYPE_CGB;
+
+                if (track->flags & MPT_FLG_VOLCHG)
+                {
+                    ChnVolSetAsm(chan, track);
+                    if (cgb_type != 0)
+                        ((struct CgbChannel *)chan)->modify |= CGB_CHANNEL_MO_VOL;
+                }
+
+                if (track->flags & MPT_FLG_PITCHG)
+                {
+                    int pitch = chan->key + (s8)track->keyM;
+
+                    if (pitch < 0)
+                        pitch = 0;
+
+                    if (cgb_type != 0)
+                    {
+                        struct CgbChannel *cgb = (struct CgbChannel *)chan;
+
+                        cgb->frequency =
+                            info->MidiKeyToCgbFreq(cgb_type, (u8)pitch, track->pitM);
+                        cgb->modify |= CGB_CHANNEL_MO_PIT;
+                    }
+                    else
+                    {
+                        chan->frequency = MidiKeyToFreq(chan->wav, (u8)pitch, track->pitM);
+                    }
+                }
+
+                chan = chan->nextChannelPointer;
+            }
+
+            track->flags &= 0xF0;
+        }
+
+        track++;
+    } while (--left > 0);
+}
+
+// The per-frame driver. Everything the sequencer does to a song happens here: the
+// tempo accumulator decides how many ticks this frame is worth, each tick walks
+// every track's command stream, and what the ticks invalidated is recomputed once
+// at the end.
+void MPlayMain(struct MusicPlayerInfo *player)
+{
+    struct SoundInfo *info;
+    u32 tempo;
+
+    // The ident is both a signature and a lock: a player caught mid-update is one
+    // this call must leave alone.
+    if (player->ident != ID_NUMBER)
+        return;
+
+    player->ident++;
+
+    // Players form a chain, and each one drives the next before doing its own
+    // work -- so the whole chain is serviced from a single call on the head.
+    if (player->MPlayMainNext != NULL)
+        player->MPlayMainNext(player->musicPlayerNext);
+
+    info = sound_info();
+
+    if ((s32)player->status < 0)
+        goto done;
+
+    FadeOutBody(player);
+
+    // A fade that has just finished leaves the player paused.
+    if ((s32)player->status < 0)
+        goto done;
+
+    tempo = (u32)player->tempoC + player->tempoI;
+
+    for (;;)
+    {
+        u32 live;
+
+        player->tempoC = (u16)tempo;
+        if (tempo < 150)
+            break;
+
+        live = run_tick(player, info);
+        player->clock++;
+
+        if (live == 0)
+        {
+            player->status = MUSICPLAYER_STATUS_PAUSE;
+            goto done;
+        }
+
+        player->status = live;
+        tempo = (u32)player->tempoC - 150;
+    }
+
+    apply_changes(player, info);
+
+done:
+    player->ident = ID_NUMBER;
+}
+
 // ---------------------------------------------------------- the V-blank tick ---
 
 // The DMA channels feeding the sound FIFOs. Ours is one register file, so these

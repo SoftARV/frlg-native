@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | **in progress** — mixer done; interpreter started |
+| 4 | Audio — the m4a mixer in C | **in progress** — `m4a_1.s` fully translated; sequencer and host output left |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -284,7 +284,18 @@ The order, and where it stands:
    its byte: the largest clock entry is 96 and an operand is at most 127, so a wrap test is
    unreachable and the largest reachable sum is pinned instead.
 
-   Left in this step: the driver `MPlayMain`, 338 lines of ARM, the last large piece in the phase.
+   The driver, `MPlayMain`, is **done** — 338 lines of ARM, and with it `m4a_1.s` is fully
+   translated. Its 58 mutants are all caught.
+
+   Two of its shapes are preserved rather than tidied, and both are pinned by a test: the track loops
+   are `do`/`while`, so a player claiming no tracks still runs its first one; and the modulation
+   counter is stored as a byte but the sum is used untruncated, so a large speed folds past the
+   triangle's midpoint against the wide value.
+
+   Worth knowing for the tests that come next: the recompute pass at the end of a frame **consumes**
+   the invalidation flags and clears the low nibble, so a flag set during a tick is never observable
+   after the call. Assertions have to be made on the consequence -- whether the volume or the pitch was
+   actually recomputed -- and two of mine were wrong until that was understood.
 5. **Build upstream's `m4a.c` and drop the deferred entries.** Attempted, reverted, and **moved
    after the driver** — the reason is worth writing down, because it was only visible by trying it.
 
