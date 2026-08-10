@@ -485,7 +485,8 @@ sequencer's dispatch table — and **nothing in this game calls that function**:
 `MPlayJumpTableCopy`, which we supply. Removing that one statement from the preprocessed copy is
 enough, which keeps 1781 lines of sequencer receiving upstream decomp fixes. It is scheduled after
 the driver rather than before, for the reason in [ROADMAP phase 4](ROADMAP.md#phase-4--it-sounds). `m4a_1.s` — 1917 lines of ARM across
-36 routines — is reimplemented in C as `platform/agb/src/m4a_mixer.c`. It is two subsystems, not
+36 routines — is reimplemented in C across `platform/agb/src/m4a_mixer.c` and
+`platform/agb/src/m4a_track.c`. It is two subsystems, not
 one: a track interpreter (`MPlayMain`, `TrackStop` and 24 `ply_*` opcode handlers) and the mixer
 proper (`SoundMain`, `SoundMainRAM`, `SoundMainBTM`, `m4aSoundVSync`).
 
@@ -528,10 +529,10 @@ The sequencer's dispatch table is filled by `MPlayJumpTableCopy` from a template
 against it; here it is an ordinary array, so the copy is just a copy. `SoundInit` fills the table
 before `MPlayExtender` overrides nine of its entries, so the order matters and is preserved.
 
-**Done so far: the parameter opcodes and control flow** — priority, tempo, key shift, instrument
-select, volume, pan, bend, bend range, tune, both modulation controls and the delay, the direct
-write to a compatible-sound register, and then the jump, the three-deep pattern call stack, the
-repeat counter and the end of a track.
+**Done so far: the parameter opcodes, control flow and the note allocator** — priority, tempo, key
+shift, instrument select, volume, pan, bend, bend range, tune, both modulation controls and the
+delay, the direct write to a compatible-sound register, then the jump, the three-deep pattern call
+stack, the repeat counter and the end of a track, and then `ply_note` itself.
 
 Ending a track releases the channels it owns rather than cutting them off, so their envelopes
 finish, and unlinks each from the chain the track keeps. The chain's head lives in the track rather
@@ -547,10 +548,37 @@ and re-arms the two FIFO channels when it arrives. **The re-arming has no audibl
 the host consumes the mixer's PCM buffer directly rather than through a sound FIFO — but the
 registers are written anyway, because the game can read them back and the cost is nothing.
 
-What remains is the note allocator (`ply_note`) and the driver `MPlayMain` — 279 and 338 lines of
-ARM, the two largest pieces left in the phase. `ply_note` also reaches into the sequencer, for
-`ClearChain`, `TrkVolPitSet` and `MidiKeyToFreq`, so it cannot be finished before step 5 builds
-`m4a.c` — though it can be written and tested against handlers a test supplies, the way the PPU
+**Starting a note** is `ply_note`, the largest single routine in the file. Its operand is an index
+into the game's clock table; up to three more bytes may follow — key, velocity, added gate time —
+each optional and each recognised only by being below `0x80`, so a note that supplies none of them
+repeats the previous one. The added gate time is stored into a byte without widening, but it cannot
+overflow: the largest clock entry is 96 and an operand is at most 127.
+
+Which instrument actually sounds takes one level of indirection, and only one. A **key-split**
+instrument redirects through a table of entry numbers; a **rhythm** instrument indexes by key
+directly and the entry it lands on carries its own key, and optionally its own pan. If the entry is
+itself a split or a rhythm the note is dropped. The two pointers involved sit at different offsets of
+the same instrument — the entries where a plain instrument keeps its waveform, the split table where
+it keeps its envelope — and neither has a field in the C struct, so both are reached through the
+offsets upstream's assembler names.
+
+**Channel allocation** is where a note is won or lost. A mixed note takes the first idle channel it
+finds, and only if there is none does it look for a victim: a releasing channel is always a better
+one than a sounding channel however unimportant the sounding one looks, then the lowest priority
+wins, and an exact tie is settled on track address so the choice does not depend on iteration order.
+The search begins holding the newcomer's own priority and track, which is what stops it from
+stealing a channel that outranks it on either count — with everything busy and more important, the
+note is simply dropped. A compatible-sound note has exactly one channel it may play on, chosen by
+type, and the same rules decide whether it may take it.
+
+The channel is then unhooked from wherever it was and put at the head of the track's chain. Upstream
+copies gate time, key, velocity and running status across as a single word, which lands the track's
+running status in the channel's priority — immediately overwritten by the computed one. Here the four
+are assigned separately, which is identical in effect and says what it means.
+
+What remains is the driver, `MPlayMain` — 338 lines of ARM, the last large piece in the phase.
+`ply_note` reaches into the sequencer for `ClearChain`, `TrkVolPitSet` and `MidiKeyToFreq`, so it is
+inert until step 5 builds `m4a.c`; it is tested against handlers the test supplies, the way the PPU
 tests supply the interrupt table.
 
 The mixer produces the GBA's native ~13.4 kHz PCM into a ring buffer; the host layer resamples.

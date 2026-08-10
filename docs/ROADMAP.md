@@ -272,10 +272,19 @@ The order, and where it stands:
    `m4aSoundVSync` is **done** as well -- the per-frame countdown to the next sound buffer and the
    re-arming of the two FIFO channels.
 
-   Left in this step: the note allocator (`ply_note`) and the driver `MPlayMain`, 279 and 338 lines
-   of ARM, the two largest pieces left in the phase. `ply_note` also calls into the sequencer
-   (`ClearChain`, `TrkVolPitSet`, `MidiKeyToFreq`), so it cannot be finished before step 5, although
-   it can be written and tested against handlers a test supplies.
+   The note allocator, `ply_note`, is **done** — 279 lines of ARM, the largest single routine in the
+   file. It calls into the sequencer (`ClearChain`, `TrkVolPitSet`, `MidiKeyToFreq`), so it stays
+   inert until step 5; it is tested against handlers the test supplies, and its 44 mutants are all
+   caught.
+
+   Two things it turned up. The **key split table and the instrument array are different pointers**,
+   held at different offsets of the same instrument — the assembler's `keySplitTable` is `.equiv` to
+   the `attack` offset, not to `wav`. Reading both from `wav`, which is the obvious mistake, makes a
+   key-split instrument select on its own envelope bytes. And the added gate time **cannot overflow**
+   its byte: the largest clock entry is 96 and an operand is at most 127, so a wrap test is
+   unreachable and the largest reachable sum is pinned instead.
+
+   Left in this step: the driver `MPlayMain`, 338 lines of ARM, the last large piece in the phase.
 5. **Build upstream's `m4a.c` and drop the deferred entries.** Attempted, reverted, and **moved
    after the driver** — the reason is worth writing down, because it was only visible by trying it.
 

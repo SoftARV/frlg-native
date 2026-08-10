@@ -405,6 +405,267 @@ void ply_port(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track)
     *(volatile u8 *)(agb_mem.io + REG_OFFSET_SOUND1CNT_L + offset) = value;
 }
 
+// ------------------------------------------------------------ starting a note ---
+
+// Note lengths are not encoded directly; the opcode carries an index into this
+// table. It lives in the game's own data, so we only borrow it.
+extern const u8 gClockTable[];
+
+// Defined by the sequencer, which has no header for it.
+extern u32 MidiKeyToFreq(struct WaveData *wav, u8 key, u8 fineAdjust);
+
+// A rhythm or key-split instrument's `wav` field is not a waveform at all, it is
+// the base of an array of real instruments to pick from.
+#define SUBTONE(tone, index) ((const struct ToneData *)((const u8 *)(tone)->wav + (index) * 12))
+
+// A key-split instrument keeps its split table where a plain one keeps its
+// envelope. Upstream's assembler names that offset outright; the C struct has no
+// field for it, so it is reached the same way.
+#define KEY_SPLIT_TABLE(tone) (*(const u8 *const *)&(tone)->attack)
+
+// Which instrument this note actually plays, and on which key. A plain
+// instrument answers for itself; a key-split one redirects through its table,
+// and a rhythm one additionally carries its own key and pan.
+//
+// Returns NULL when the redirect lands on another split or rhythm entry: one
+// level of indirection is all the format allows, and the note is dropped.
+static const struct ToneData *resolve_tone(struct MusicPlayerTrack *track, u8 *key,
+                                           u32 *rhythm_pan)
+{
+    const struct ToneData *tone = &track->tone;
+    const struct ToneData *entry;
+    u8 index;
+
+    *rhythm_pan = 0;
+    *key = track->key;
+
+    if (!(tone->type & (TONEDATA_TYPE_SPL | TONEDATA_TYPE_RHY)))
+        return tone;
+
+    index = (tone->type & TONEDATA_TYPE_SPL) ? KEY_SPLIT_TABLE(tone)[*key] : *key;
+    entry = SUBTONE(tone, index);
+
+    if (entry->type & (TONEDATA_TYPE_SPL | TONEDATA_TYPE_RHY))
+        return NULL;
+
+    if (tone->type & TONEDATA_TYPE_RHY)
+    {
+        // Only a rhythm entry that asks for a pan gets one, and it arrives
+        // biased so that centre is a positive byte.
+        if (entry->pan_sweep & 0x80)
+            *rhythm_pan = (u32)((u8)(entry->pan_sweep - TONEDATA_P_S_PAN) << 1);
+
+        *key = entry->key;
+    }
+
+    return entry;
+}
+
+// A compatible-sound note has exactly one channel it can play on, so the only
+// question is whether what is already there may be taken. Anything finished or
+// releasing may be; otherwise the newcomer has to be at least as important, and
+// ties are settled by track address so that the decision is stable.
+static struct SoundChannel *claim_cgb_channel(struct SoundInfo *info, u8 cgb_type,
+                                              struct MusicPlayerTrack *track, u8 priority)
+{
+    struct SoundChannel *chan;
+
+    if (info->cgbChans == NULL)
+        return NULL;
+
+    // The two channel kinds share a layout for everything this code touches, so
+    // the shared parts are reached through the mixed-channel type.
+    chan = (struct SoundChannel *)((u8 *)info->cgbChans + (cgb_type - 1) * 64);
+
+    if (!(chan->statusFlags & SOUND_CHANNEL_SF_ON))
+        return chan;
+    if (chan->statusFlags & SOUND_CHANNEL_SF_STOP)
+        return chan;
+    if (chan->priority < priority)
+        return chan;
+    if (chan->priority > priority)
+        return NULL;
+
+    return (uintptr_t)chan->track >= (uintptr_t)track ? chan : NULL;
+}
+
+// A mixed note takes the first idle channel it finds. Failing that it steals the
+// least worthy one: a releasing channel is always a better victim than a
+// sounding one, then the lowest priority, and finally the highest track address.
+static struct SoundChannel *claim_mixed_channel(struct SoundInfo *info,
+                                                struct MusicPlayerTrack *track, u8 priority)
+{
+    struct SoundChannel *chan = info->chans;
+    struct SoundChannel *best = NULL;
+    struct MusicPlayerTrack *best_track = track;
+    u8 best_priority = priority;
+    int releasing = 0;
+
+    for (int left = info->maxChans; left > 0; left--, chan++)
+    {
+        int candidate;
+
+        if (!(chan->statusFlags & SOUND_CHANNEL_SF_ON))
+            return chan;
+
+        if (chan->statusFlags & SOUND_CHANNEL_SF_STOP)
+        {
+            // The first releasing channel displaces any sounding one already
+            // held, however important it looked.
+            if (!releasing)
+            {
+                releasing = 1;
+                best_priority = chan->priority;
+                best_track = chan->track;
+                best = chan;
+                continue;
+            }
+        }
+        else if (releasing)
+        {
+            continue;
+        }
+
+        candidate = 0;
+        if (chan->priority < best_priority)
+        {
+            best_priority = chan->priority;
+            best_track = chan->track;
+            candidate = 1;
+        }
+        else if (chan->priority == best_priority
+                 && (uintptr_t)chan->track >= (uintptr_t)best_track)
+        {
+            best_track = chan->track;
+            candidate = 1;
+        }
+
+        if (candidate)
+            best = chan;
+    }
+
+    return best;
+}
+
+// Hand a channel over to a track: unhook it from wherever it was, put it at the
+// head of this track's chain, and restart the modulation delay.
+static void attach_channel(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track,
+                           struct SoundChannel *chan)
+{
+    struct SoundChannel *head = track->chan;
+
+    ClearChain(chan);
+
+    chan->prevChannelPointer = NULL;
+    chan->nextChannelPointer = head;
+    if (head != NULL)
+        head->prevChannelPointer = chan;
+
+    track->chan = chan;
+    chan->track = track;
+
+    track->lfoDelayC = track->lfoDelay;
+    if (track->lfoDelay != 0)
+        clear_modM(track);
+
+    TrkVolPitSet(player, track);
+}
+
+// Start a note. The opcode's operand is a length index; up to three more bytes
+// may follow -- key, velocity, and extra length -- each optional, and each
+// recognised only by being below 0x80. Anything at or above that is the next
+// opcode, and a note that supplies none of them simply repeats the last one.
+void ply_note(u32 clock, struct MusicPlayerInfo *player, struct MusicPlayerTrack *track)
+{
+    struct SoundInfo *info = sound_info();
+    const struct ToneData *tone;
+    struct SoundChannel *chan;
+    u32 rhythm_pan;
+    u8 key;
+    u8 priority;
+    u8 cgb_type;
+    int pitch;
+
+    track->gateTime = gClockTable[clock];
+
+    if (*track->cmdPtr < 0x80)
+    {
+        const u8 *p = track->cmdPtr;
+
+        track->key = *p++;
+        if (*p < 0x80)
+        {
+            track->velocity = *p++;
+            if (*p < 0x80)
+                track->gateTime = (u8)(track->gateTime + *p++);
+        }
+        track->cmdPtr = (u8 *)p;
+    }
+
+    tone = resolve_tone(track, &key, &rhythm_pan);
+    if (tone == NULL)
+        return;
+
+    priority = (u8)(track->priority + player->priority);
+    if (track->priority + player->priority > 0xFF)
+        priority = 0xFF;
+
+    cgb_type = tone->type & TONEDATA_TYPE_CGB;
+    chan = cgb_type != 0 ? claim_cgb_channel(info, cgb_type, track, priority)
+                         : claim_mixed_channel(info, track, priority);
+    if (chan == NULL)
+        return;
+
+    attach_channel(player, track, chan);
+
+    // The original copies these four bytes as one word, which lands the track's
+    // running status in the channel's priority -- immediately overwritten below.
+    chan->gateTime = track->gateTime;
+    chan->midiKey = track->key;
+    chan->velocity = track->velocity;
+    chan->priority = priority;
+
+    chan->key = key;
+    chan->rhythmPan = (u8)rhythm_pan;
+    chan->type = tone->type;
+    chan->wav = tone->wav;
+    chan->attack = tone->attack;
+    chan->decay = tone->decay;
+    chan->sustain = tone->sustain;
+    chan->release = tone->release;
+    chan->pseudoEchoVolume = track->pseudoEchoVolume;
+    chan->pseudoEchoLength = track->pseudoEchoLength;
+
+    ChnVolSetAsm(chan, track);
+
+    // A key shifted below zero does not wrap, it bottoms out.
+    pitch = chan->key + (s8)track->keyM;
+    if (pitch < 0)
+        pitch = 0;
+
+    if (cgb_type != 0)
+    {
+        struct CgbChannel *cgb = (struct CgbChannel *)chan;
+        u8 sweep = tone->pan_sweep;
+
+        cgb->length = tone->length;
+        // A pan request is not a sweep, and neither is an empty one.
+        if ((sweep & 0x80) || !(sweep & 0x70))
+            sweep = 8;
+        cgb->sweep = sweep;
+
+        chan->frequency = info->MidiKeyToCgbFreq(cgb_type, (u8)pitch, track->pitM);
+    }
+    else
+    {
+        chan->count = track->unk_3C;
+        chan->frequency = MidiKeyToFreq(tone->wav, (u8)pitch, track->pitM);
+    }
+
+    chan->statusFlags = SOUND_CHANNEL_SF_START;
+    track->flags &= 0xF0;
+}
+
 // ---------------------------------------------------------- the V-blank tick ---
 
 // The DMA channels feeding the sound FIFOs. Ours is one register file, so these

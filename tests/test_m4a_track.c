@@ -650,6 +650,698 @@ static void test_endtie(void)
     CHECK((chans[1].statusFlags & SOUND_CHANNEL_SF_STOP) != 0, "a silent channel absorbed the tie");
 }
 
+// ------------------------------------------------------------ starting a note ---
+
+// ply_note reaches into the sequencer for these four. None of it is built yet,
+// so the test stands in for all of them -- and being spies, they also record
+// that the note went through the steps in the right order.
+
+const u8 gClockTable[] = {0, 3, 6, 12, 24, 48, 96};
+
+static int clear_chain_calls;
+static void *clear_chain_arg;
+static int trk_vol_pit_calls;
+static struct WaveData *freq_wav;
+static u8 freq_key;
+static u8 freq_fine;
+static u8 cgb_freq_type;
+static u8 cgb_freq_key;
+static u8 cgb_freq_fine;
+
+void ClearChain(void *x)
+{
+    clear_chain_calls++;
+    clear_chain_arg = x;
+    RealClearChain(x);
+}
+
+void TrkVolPitSet(struct MusicPlayerInfo *mplayInfo, struct MusicPlayerTrack *t)
+{
+    (void)mplayInfo;
+    (void)t;
+    trk_vol_pit_calls++;
+}
+
+u32 MidiKeyToFreq(struct WaveData *wav, u8 key, u8 fineAdjust)
+{
+    freq_wav = wav;
+    freq_key = key;
+    freq_fine = fineAdjust;
+    return 0xF00D;
+}
+
+static u32 fake_cgb_freq(u8 type, u8 key, u8 fineAdjust)
+{
+    cgb_freq_type = type;
+    cgb_freq_key = key;
+    cgb_freq_fine = fineAdjust;
+    return 0xC0FFEE;
+}
+
+// The mixed-channel pool is embedded in the sound header rather than pointed
+// at, so the note tests work on the header's own channels.
+#define pool (sound_header.chans)
+
+static struct CgbChannel cgb_chans[4];
+
+// Ties are settled on track address, so testing them needs two tracks whose
+// order in memory is known. An array guarantees that; two separate objects do
+// not, and a test that only asserts when they happen to fall the right way is no
+// test at all.
+static struct MusicPlayerTrack ordered[2];
+static u8 ordered_stream[2] = {0x80, 0x80};
+
+#define LOWER (&ordered[0])
+#define HIGHER (&ordered[1])
+
+static void arm_track(struct MusicPlayerTrack *t, u8 priority)
+{
+    memset(t, 0, sizeof(*t));
+    t->cmdPtr = ordered_stream;
+    t->priority = priority;
+    t->key = 60;
+}
+
+// A key split's table is held where a plain instrument keeps its envelope, so it
+// is written the same way the interpreter reads it.
+static void set_key_split_table(struct ToneData *tone, const u8 *table)
+{
+    *(const u8 **)&tone->attack = table;
+}
+
+// A note needs rather more standing around it than a parameter opcode: a sound
+// header holding the channel pool, an instrument, and somewhere to put the note.
+static void note_reset(const char *name, const int *bytes, int n)
+{
+    reset(name, bytes, n);
+    install_sound_header();
+    memset(cgb_chans, 0, sizeof(cgb_chans));
+
+    sound_header.maxChans = 3;
+    sound_header.cgbChans = cgb_chans;
+    sound_header.MidiKeyToCgbFreq = fake_cgb_freq;
+
+    clear_chain_calls = 0;
+    clear_chain_arg = NULL;
+    trk_vol_pit_calls = 0;
+    freq_wav = NULL;
+    freq_key = 0xFF;
+    freq_fine = 0xFF;
+    cgb_freq_type = 0xFF;
+    cgb_freq_key = 0xFF;
+    cgb_freq_fine = 0xFF;
+
+    track.key = 60;
+    track.velocity = 100;
+}
+
+// Up to three operand bytes may follow, each optional and each recognised only
+// by being below 0x80. A note that supplies none repeats the previous one.
+static void test_note_operands(void)
+{
+    const int none[1] = {0x80}; // the next opcode, not an operand
+
+    note_reset("note with no operands", none, 1);
+    ply_note(3, &player, &track);
+    CHECK(track.gateTime == 12, "gate time came from the wrong clock entry: %d",
+          track.gateTime);
+    CHECK(track.key == 60, "the key changed without an operand");
+    CHECK(track.velocity == 100, "the velocity changed without an operand");
+    CHECK(eaten() == 0, "%d operand bytes were eaten, not none", eaten());
+
+    const int key_only[2] = {55, 0x80};
+    note_reset("note with a key", key_only, 2);
+    ply_note(1, &player, &track);
+    CHECK(track.key == 55, "the key operand did not land, it is %d", track.key);
+    CHECK(track.velocity == 100, "the velocity changed without an operand");
+    CHECK(track.gateTime == 3, "gate time came out %d", track.gateTime);
+    CHECK(eaten() == 1, "%d bytes were eaten, not one", eaten());
+
+    const int key_vel[3] = {55, 20, 0x80};
+    note_reset("note with a key and a velocity", key_vel, 3);
+    ply_note(1, &player, &track);
+    CHECK(track.velocity == 20, "the velocity operand did not land, it is %d",
+          track.velocity);
+    CHECK(track.gateTime == 3, "gate time changed without a third operand");
+    CHECK(eaten() == 2, "%d bytes were eaten, not two", eaten());
+
+    const int all_three[4] = {55, 20, 5, 0x80};
+    note_reset("note with an added gate time", all_three, 4);
+    ply_note(3, &player, &track);
+    CHECK(track.gateTime == 12 + 5, "gate time came out %d, not the sum", track.gateTime);
+    CHECK(eaten() == 3, "%d bytes were eaten, not three", eaten());
+}
+
+// The three operands are positional: a velocity cannot be given without a key,
+// and stopping early must not consume the byte that ended the run.
+static void test_note_operands_stop_early(void)
+{
+    const int stops[3] = {55, 0x90, 20};
+
+    note_reset("an operand run stops at the first high byte", stops, 3);
+    ply_note(1, &player, &track);
+    CHECK(track.key == 55, "the key did not land");
+    CHECK(track.velocity == 100, "the velocity was taken from beyond the run");
+    CHECK(eaten() == 1, "%d bytes were eaten; the high byte must be left", eaten());
+}
+
+// Gate time is a byte and the addition is not widened, but it cannot actually
+// overflow: the largest clock entry is 96 and an operand is at most 127, so the
+// sum tops out at 223. The largest reachable sum is pinned here instead -- if the
+// clock table ever grows, this is what will notice.
+static void test_note_gate_time_maximum(void)
+{
+    const int s[4] = {55, 20, 127, 0x80};
+
+    note_reset("the largest reachable gate time", s, 4);
+    ply_note(6, &player, &track); // the last entry of the test's table, 96
+    CHECK(track.gateTime == 96 + 127, "gate time came out %d, not 223", track.gateTime);
+    CHECK(eaten() == 3, "%d bytes were eaten, not three", eaten());
+}
+
+// A plain instrument answers for itself, and everything about it reaches the
+// channel.
+static void test_note_plain_instrument(void)
+{
+    const int s[1] = {0x80};
+    static struct WaveData wave;
+
+    note_reset("a plain instrument sets the channel up", s, 1);
+    track.tone.type = 0;
+    track.tone.wav = &wave;
+    track.tone.attack = 1;
+    track.tone.decay = 2;
+    track.tone.sustain = 3;
+    track.tone.release = 4;
+    track.pseudoEchoVolume = 50;
+    track.pseudoEchoLength = 60;
+    track.unk_3C = 0x1234;
+    track.flags = 0xFF;
+
+    ply_note(2, &player, &track);
+
+    CHECK(track.chan == &pool[0], "the note did not take the first idle channel");
+    CHECK(pool[0].wav == &wave, "the waveform did not reach the channel");
+    CHECK(pool[0].attack == 1 && pool[0].decay == 2 && pool[0].sustain == 3
+              && pool[0].release == 4,
+          "the envelope did not reach the channel");
+    CHECK(pool[0].pseudoEchoVolume == 50 && pool[0].pseudoEchoLength == 60,
+          "the pseudo-echo pair did not reach the channel");
+    CHECK(pool[0].gateTime == 6, "the gate time did not reach the channel");
+    CHECK(pool[0].midiKey == 60, "the midi key did not reach the channel");
+    CHECK(pool[0].velocity == 100, "the velocity did not reach the channel");
+    CHECK(pool[0].key == 60, "the played key came out %d", pool[0].key);
+    CHECK(pool[0].count == 0x1234, "the channel's count did not come from the track");
+    CHECK(pool[0].frequency == 0xF00D, "the frequency did not come from the sequencer");
+    CHECK(pool[0].statusFlags == SOUND_CHANNEL_SF_START,
+          "the channel was not started, its flags are %02X", pool[0].statusFlags);
+    CHECK(track.flags == 0xF0, "the track's low flags were not cleared, they are %02X",
+          track.flags);
+    CHECK(freq_wav == &wave, "the sequencer was handed the wrong waveform");
+    CHECK(trk_vol_pit_calls == 1, "the volume was recomputed %d times, not once",
+          trk_vol_pit_calls);
+    CHECK(clear_chain_calls == 1 && clear_chain_arg == &pool[0],
+          "the channel was not unhooked before being taken");
+    CHECK(pool[0].track == &track, "the channel was not given its track");
+}
+
+// A key-split instrument redirects through a table, and the entries it indexes
+// are twelve bytes apart. The table and the entries are two separate pointers,
+// held at two different offsets of the same instrument.
+static void test_note_key_split(void)
+{
+    const int s[1] = {0x80};
+    static u8 table[128];
+    static u8 block[4 * 12];
+    struct ToneData *entries = (struct ToneData *)block;
+    static struct WaveData wave;
+
+    note_reset("a key split redirects through its table", s, 1);
+    memset(table, 0, sizeof(table));
+    memset(block, 0, sizeof(block));
+    // Not the identity, so a lookup that skipped the table shows up; and the
+    // entries carry distinct envelopes, so a wrong stride shows up too.
+    table[60] = 2;
+    entries[1].attack = 11;
+    entries[2].attack = 22;
+    entries[2].decay = 33;
+    entries[2].wav = &wave;
+    entries[2].key = 77; // a split entry's own key is not used
+
+    track.tone.type = TONEDATA_TYPE_SPL;
+    track.tone.wav = (struct WaveData *)block;
+    set_key_split_table(&track.tone, table);
+
+    ply_note(1, &player, &track);
+
+    CHECK(pool[0].attack == 22 && pool[0].decay == 33,
+          "the wrong split entry was chosen: attack %d, decay %d", pool[0].attack,
+          pool[0].decay);
+    CHECK(pool[0].wav == &wave, "the entry's waveform did not reach the channel");
+    CHECK(pool[0].key == 60, "a key split must keep the track's key, not the entry's");
+
+    note_reset("a key split with an identity entry", s, 1);
+    memset(table, 0, sizeof(table));
+    memset(block, 0, sizeof(block));
+    table[60] = 1;
+    entries[1].attack = 11;
+    track.tone.type = TONEDATA_TYPE_SPL;
+    track.tone.wav = (struct WaveData *)block;
+    set_key_split_table(&track.tone, table);
+    ply_note(1, &player, &track);
+    CHECK(pool[0].attack == 11, "the entry one along was not reached, attack is %d",
+          pool[0].attack);
+}
+
+// A rhythm instrument indexes by key, then plays the entry's own key -- and may
+// carry a pan with it.
+static void test_note_rhythm(void)
+{
+    const int s[1] = {0x80};
+    static u8 block[4 * 12];
+    struct ToneData *entries = (struct ToneData *)block;
+    static struct WaveData wave;
+
+    note_reset("a rhythm entry brings its own key", s, 1);
+    memset(block, 0, sizeof(block));
+    entries[2].type = 0;
+    entries[2].key = 77;
+    entries[2].wav = &wave;
+    entries[2].pan_sweep = 0; // no pan
+    track.key = 2;
+    track.tone.type = TONEDATA_TYPE_RHY;
+    track.tone.wav = (struct WaveData *)block;
+
+    ply_note(1, &player, &track);
+
+    CHECK(pool[0].key == 77, "the entry's own key was not used, the channel has %d",
+          pool[0].key);
+    CHECK(pool[0].midiKey == 2, "the track's key should still reach midiKey, it is %d",
+          pool[0].midiKey);
+    CHECK(pool[0].rhythmPan == 0, "a pan appeared without one being asked for");
+    CHECK(pool[0].wav == &wave, "the entry's waveform did not reach the channel");
+
+    note_reset("a rhythm entry with a pan", s, 1);
+    memset(block, 0, sizeof(block));
+    entries[2].type = 0;
+    entries[2].key = 77;
+    entries[2].pan_sweep = 0xC0 + 5; // biased, bit seven set
+    track.key = 2;
+    track.tone.type = TONEDATA_TYPE_RHY;
+    track.tone.wav = (struct WaveData *)block;
+
+    ply_note(1, &player, &track);
+
+    CHECK(pool[0].rhythmPan == 10, "the pan came out %d, not the debiased double",
+          pool[0].rhythmPan);
+}
+
+// One level of redirection is all the format allows.
+static void test_note_nested_redirect_is_dropped(void)
+{
+    const int s[1] = {0x80};
+    static u8 block[4 * 12];
+    struct ToneData *entries = (struct ToneData *)block;
+
+    note_reset("a rhythm entry that is itself a rhythm is dropped", s, 1);
+    memset(block, 0, sizeof(block));
+    entries[2].type = TONEDATA_TYPE_RHY;
+    track.key = 2;
+    track.tone.type = TONEDATA_TYPE_RHY;
+    track.tone.wav = (struct WaveData *)block;
+
+    ply_note(1, &player, &track);
+
+    CHECK(track.chan == NULL, "a nested redirect still claimed a channel");
+    CHECK(clear_chain_calls == 0, "a dropped note still unhooked a channel");
+    // The operands are read before the instrument is resolved, so the gate time
+    // still moved.
+    CHECK(track.gateTime == 3, "the gate time should still have been set");
+
+    note_reset("a rhythm entry that is a key split is dropped", s, 1);
+    memset(block, 0, sizeof(block));
+    entries[2].type = TONEDATA_TYPE_SPL;
+    track.key = 2;
+    track.tone.type = TONEDATA_TYPE_RHY;
+    track.tone.wav = (struct WaveData *)block;
+    ply_note(1, &player, &track);
+    CHECK(track.chan == NULL, "a nested key split still claimed a channel");
+}
+
+// The note's priority is the track's plus the player's, and it saturates.
+static void test_note_priority(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("note priority sums track and player", s, 1);
+    track.priority = 30;
+    player.priority = 12;
+    ply_note(1, &player, &track);
+    CHECK(pool[0].priority == 42, "priority came out %d, not the sum",
+          pool[0].priority);
+
+    note_reset("note priority saturates", s, 1);
+    track.priority = 200;
+    player.priority = 100;
+    ply_note(1, &player, &track);
+    CHECK(pool[0].priority == 0xFF, "priority came out %d rather than saturating",
+          pool[0].priority);
+}
+
+// An idle channel is taken outright, before any of the stealing rules apply.
+static void test_note_takes_an_idle_channel(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("an idle channel wins over a better victim", s, 1);
+    // Channel 0 is sounding and would never be chosen as a victim; channel 1 is
+    // idle. The search must stop at 1 rather than looking for the best steal.
+    pool[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    pool[0].priority = 0;
+    pool[1].statusFlags = 0;
+    pool[2].statusFlags = SOUND_CHANNEL_SF_STOP;
+
+    track.priority = 10;
+    ply_note(1, &player, &track);
+
+    CHECK(track.chan == &pool[1], "the idle channel was not the one taken");
+}
+
+// With everything busy the least worthy channel is stolen: lowest priority.
+static void test_note_steals_lowest_priority(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("the lowest priority channel is stolen", s, 1);
+    for (int i = 0; i < 3; i++)
+    {
+        pool[i].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+        pool[i].track = &track;
+    }
+    pool[0].priority = 9;
+    pool[1].priority = 3;
+    pool[2].priority = 7;
+
+    track.priority = 20;
+    ply_note(1, &player, &track);
+
+    CHECK(track.chan == &pool[1], "the wrong channel was stolen");
+}
+
+// A releasing channel is a better victim than any sounding one, however much
+// less important the sounding one looks.
+static void test_note_prefers_a_releasing_channel(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("a releasing channel is stolen before a sounding one", s, 1);
+    for (int i = 0; i < 3; i++)
+        pool[i].track = &track;
+    // Channel 0 is sounding at the lowest priority there is, so the priority
+    // rule alone would pick it. Channel 2 is releasing at the highest.
+    pool[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    pool[0].priority = 1;
+    pool[1].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    pool[1].priority = 2;
+    pool[2].statusFlags = SOUND_CHANNEL_SF_STOP;
+    pool[2].priority = 250;
+
+    track.priority = 20;
+    ply_note(1, &player, &track);
+
+    CHECK(track.chan == &pool[2], "a sounding channel was stolen over a releasing one");
+}
+
+// Once a releasing channel is in hand, later sounding ones are not even weighed;
+// but a second releasing one still competes on priority.
+static void test_note_releasing_channels_compete(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("two releasing channels are compared on priority", s, 1);
+    for (int i = 0; i < 3; i++)
+        pool[i].track = &track;
+    pool[0].statusFlags = SOUND_CHANNEL_SF_STOP;
+    pool[0].priority = 100;
+    pool[1].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    pool[1].priority = 1; // must be ignored: it is only sounding
+    pool[2].statusFlags = SOUND_CHANNEL_SF_STOP;
+    pool[2].priority = 50;
+
+    track.priority = 200;
+    ply_note(1, &player, &track);
+
+    CHECK(track.chan == &pool[2], "the quieter releasing channel was not preferred");
+}
+
+// Equal priorities are settled by track address, so the choice is stable rather
+// than depending on which channel happened to be looked at first.
+static void test_note_ties_break_on_track(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("an equal-priority tie goes to the higher track address", s, 1);
+    arm_track(LOWER, 5);
+    for (int i = 0; i < 3; i++)
+    {
+        pool[i].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+        pool[i].priority = 5;
+    }
+    // Only the middle channel's track outranks the newcomer's, so it is the one
+    // that has to be given up.
+    pool[0].track = LOWER;
+    pool[1].track = HIGHER;
+    pool[2].track = LOWER;
+
+    ply_note(1, &player, LOWER);
+
+    CHECK(LOWER->chan == &pool[1], "the tie was not broken towards the higher address");
+
+    // Channels tied on both priority and track: the search keeps moving, so the
+    // last of them is the one taken rather than the first.
+    note_reset("an exact tie goes to the last channel, not the first", s, 1);
+    arm_track(LOWER, 5);
+    for (int i = 0; i < 3; i++)
+    {
+        pool[i].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+        pool[i].priority = 5;
+        pool[i].track = HIGHER;
+    }
+
+    ply_note(1, &player, LOWER);
+
+    CHECK(LOWER->chan == &pool[2], "the last of an exact tie was not the one taken");
+}
+
+// The search starts out holding the newcomer's own priority and track, which is
+// what stops it from stealing a channel that outranks it on either count.
+static void test_note_will_not_steal_from_below(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("an equal-priority channel below the newcomer keeps it", s, 1);
+    arm_track(HIGHER, 5);
+    // Equal priority, but the track holding it sits below the newcomer's, so the
+    // tie-break goes against the newcomer and nothing is taken.
+    pool[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    pool[0].priority = 5;
+    pool[0].track = LOWER;
+    pool[1].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    pool[1].priority = 5;
+    pool[1].track = LOWER;
+    pool[2].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    pool[2].priority = 5;
+    pool[2].track = LOWER;
+
+    ply_note(1, &player, HIGHER);
+
+    CHECK(HIGHER->chan == NULL, "a channel below the newcomer was stolen anyway");
+    CHECK(clear_chain_calls == 0, "a dropped note still unhooked a channel");
+}
+
+// Every channel busy and more important than the newcomer: the note is dropped.
+static void test_note_dropped_when_nothing_is_stealable(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("a note with nothing to steal is dropped", s, 1);
+    for (int i = 0; i < 3; i++)
+    {
+        pool[i].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+        pool[i].priority = 200;
+        pool[i].track = &track;
+    }
+
+    track.priority = 10;
+    player.priority = 0;
+    ply_note(1, &player, &track);
+
+    CHECK(track.chan == NULL, "a channel was stolen that should have been safe");
+    CHECK(clear_chain_calls == 0, "a dropped note still unhooked a channel");
+}
+
+// A compatible-sound note has one channel it can play on, chosen by type.
+static void test_note_cgb_channel_choice(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("a compatible-sound note picks its channel by type", s, 1);
+    track.tone.type = 3; // within TONEDATA_TYPE_CGB
+    track.tone.length = 42;
+
+    ply_note(1, &player, &track);
+
+    CHECK(track.chan == (struct SoundChannel *)&cgb_chans[2],
+          "the note did not land on the third oscillator");
+    CHECK(cgb_chans[2].length == 42, "the sound length did not reach the channel");
+    CHECK(cgb_chans[2].frequency == 0xC0FFEE,
+          "the frequency did not come from the compatible-sound table");
+    CHECK(cgb_freq_type == 3, "the table was handed type %d", cgb_freq_type);
+    CHECK(pool[0].statusFlags == 0, "a mixed channel was disturbed");
+
+    note_reset("a compatible-sound note with no channel pool is dropped", s, 1);
+    sound_header.cgbChans = NULL;
+    track.tone.type = 1;
+    ply_note(1, &player, &track);
+    CHECK(track.chan == NULL, "a note was placed with no pool to place it in");
+}
+
+// The same stealing rules, but with only one candidate to apply them to.
+static void test_note_cgb_stealing(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("a busier compatible-sound channel is not taken", s, 1);
+    cgb_chans[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    cgb_chans[0].priority = 200;
+    cgb_chans[0].track = &track;
+    track.tone.type = 1;
+    track.priority = 10;
+    ply_note(1, &player, &track);
+    CHECK(track.chan == NULL, "a more important note was cut off");
+
+    note_reset("a releasing compatible-sound channel is taken", s, 1);
+    cgb_chans[0].statusFlags = SOUND_CHANNEL_SF_STOP;
+    cgb_chans[0].priority = 200;
+    track.tone.type = 1;
+    track.priority = 10;
+    ply_note(1, &player, &track);
+    CHECK(track.chan == (struct SoundChannel *)&cgb_chans[0],
+          "a releasing channel was not reused");
+
+    note_reset("a less important compatible-sound channel is taken", s, 1);
+    cgb_chans[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    cgb_chans[0].priority = 5;
+    track.tone.type = 1;
+    track.priority = 10;
+    player.priority = 0;
+    ply_note(1, &player, &track);
+    CHECK(track.chan == (struct SoundChannel *)&cgb_chans[0],
+          "a channel of lower priority was not taken");
+
+    note_reset("an equal-priority compatible-sound tie goes on track address", s, 1);
+    arm_track(HIGHER, 10);
+    HIGHER->tone.type = 1;
+    cgb_chans[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    cgb_chans[0].priority = 10;
+    // A track below the newcomer's keeps the channel.
+    cgb_chans[0].track = LOWER;
+    ply_note(1, &player, HIGHER);
+    CHECK(HIGHER->chan == NULL, "a lower-addressed track lost its channel");
+
+    note_reset("an equal-priority tie at the same track is taken", s, 1);
+    arm_track(LOWER, 10);
+    LOWER->tone.type = 1;
+    cgb_chans[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    cgb_chans[0].priority = 10;
+    cgb_chans[0].track = HIGHER;
+    ply_note(1, &player, LOWER);
+    CHECK(LOWER->chan == (struct SoundChannel *)&cgb_chans[0],
+          "a higher-addressed track kept its channel");
+}
+
+// The key shift lands on the played key, and does not wrap when it goes under.
+static void test_note_key_shift(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("the key shift moves the played key", s, 1);
+    track.key = 60;
+    track.keyM = 5;
+    track.pitM = 7;
+    ply_note(1, &player, &track);
+    CHECK(freq_key == 65, "the shifted key came out %d", freq_key);
+    CHECK(freq_fine == 7, "the fine adjustment did not reach the sequencer");
+    CHECK(pool[0].key == 60, "the channel's key should be the unshifted one, it is %d",
+          pool[0].key);
+
+    note_reset("a key shifted below zero bottoms out", s, 1);
+    track.key = 3;
+    track.keyM = (u8)-10;
+    ply_note(1, &player, &track);
+    CHECK(freq_key == 0, "the shifted key came out %d rather than bottoming out", freq_key);
+}
+
+// A pan request is not a sweep, and an empty sweep field is not one either.
+static void test_note_cgb_sweep(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("a real sweep reaches the channel", s, 1);
+    track.tone.type = 1;
+    track.tone.pan_sweep = 0x30; // within the sweep field, bit seven clear
+    ply_note(1, &player, &track);
+    CHECK(cgb_chans[0].sweep == 0x30, "the sweep came out %02X", cgb_chans[0].sweep);
+
+    note_reset("a pan request is not treated as a sweep", s, 1);
+    track.tone.type = 1;
+    track.tone.pan_sweep = 0x80 | 0x30;
+    ply_note(1, &player, &track);
+    CHECK(cgb_chans[0].sweep == 8, "a pan request became sweep %02X",
+          cgb_chans[0].sweep);
+
+    note_reset("an empty sweep field falls back", s, 1);
+    track.tone.type = 1;
+    track.tone.pan_sweep = 0x0F; // nothing in the sweep field
+    ply_note(1, &player, &track);
+    CHECK(cgb_chans[0].sweep == 8, "an empty sweep came out %02X", cgb_chans[0].sweep);
+}
+
+// The channel goes to the head of the track's chain, and the modulation delay
+// restarts with it.
+static void test_note_chains_and_delay(void)
+{
+    const int s[1] = {0x80};
+
+    note_reset("a second note chains ahead of the first", s, 1);
+    pool[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    pool[0].track = &track;
+    track.chan = &pool[0];
+
+    ply_note(1, &player, &track);
+
+    CHECK(track.chan == &pool[1], "the new channel is not at the head");
+    CHECK(pool[1].nextChannelPointer == &pool[0], "the old head was not linked behind");
+    CHECK(pool[0].prevChannelPointer == &pool[1], "the old head does not point back");
+    CHECK(pool[1].prevChannelPointer == NULL, "the head has something before it");
+
+    note_reset("a modulation delay restarts and clears the sweep", s, 1);
+    track.lfoDelay = 4;
+    track.modM = 20;
+    track.lfoSpeedC = 9;
+    track.modT = 0;
+    ply_note(1, &player, &track);
+    CHECK(track.lfoDelayC == 4, "the delay counter did not reload, it is %d",
+          track.lfoDelayC);
+    CHECK(track.modM == 0 && track.lfoSpeedC == 0, "the modulation sweep was not cleared");
+
+    note_reset("no modulation delay leaves the sweep alone", s, 1);
+    track.lfoDelay = 0;
+    track.modM = 20;
+    ply_note(1, &player, &track);
+    CHECK(track.modM == 20, "the sweep was cleared with no delay set");
+}
+
 // ---------------------------------------------------------- the V-blank tick ---
 
 #define DMA1_CNT REG_OFFSET_DMA1CNT
@@ -771,6 +1463,26 @@ int main(void)
     test_track_stop();
     test_chn_vol_set();
     test_endtie();
+    test_note_operands();
+    test_note_operands_stop_early();
+    test_note_gate_time_maximum();
+    test_note_plain_instrument();
+    test_note_key_split();
+    test_note_rhythm();
+    test_note_nested_redirect_is_dropped();
+    test_note_priority();
+    test_note_takes_an_idle_channel();
+    test_note_steals_lowest_priority();
+    test_note_prefers_a_releasing_channel();
+    test_note_releasing_channels_compete();
+    test_note_ties_break_on_track();
+    test_note_will_not_steal_from_below();
+    test_note_dropped_when_nothing_is_stealable();
+    test_note_cgb_channel_choice();
+    test_note_cgb_stealing();
+    test_note_key_shift();
+    test_note_cgb_sweep();
+    test_note_chains_and_delay();
     test_vsync_counts_down();
     test_vsync_reloads();
     test_vsync_zero_counter();
