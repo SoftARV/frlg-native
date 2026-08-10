@@ -532,8 +532,16 @@ so they are free again at once, and a compatible-sound channel is told to switch
 because that is hardware rather than something we mix. Ending a tie releases the first channel still
 holding the key and only that one.
 
+The per-frame tick, `m4aSoundVSync`, counts down to the moment the sound DMA needs the next buffer
+and re-arms the two FIFO channels when it arrives. **The re-arming has no audible effect here** —
+the host consumes the mixer's PCM buffer directly rather than through a sound FIFO — but the
+registers are written anyway, because the game can read them back and the cost is nothing.
+
 What remains is the note allocator (`ply_note`) and the driver `MPlayMain` — 279 and 338 lines of
-ARM, the two largest pieces left in the phase.
+ARM, the two largest pieces left in the phase. `ply_note` also reaches into the sequencer, for
+`ClearChain`, `TrkVolPitSet` and `MidiKeyToFreq`, so it cannot be finished before step 5 builds
+`m4a.c` — though it can be written and tested against handlers a test supplies, the way the PPU
+tests supply the interrupt table.
 
 The mixer produces the GBA's native ~13.4 kHz PCM into a ring buffer; the host layer resamples.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game

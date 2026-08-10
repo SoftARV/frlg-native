@@ -269,9 +269,13 @@ The order, and where it stands:
    `TrackStop`, `ChnVolSetAsm` and `ply_endtie` are **done** too, taking the unbound count to 1289
    from the 1311 it started the phase at.
 
-   Left in this step: the note allocator (`ply_note`) and the drivers `MPlayMain` and
-   `m4aSoundVSync`. `MPlayMain` and `ply_note` are 338 and 279 lines of ARM on their own, and are
-   the two largest pieces left in the phase.
+   `m4aSoundVSync` is **done** as well -- the per-frame countdown to the next sound buffer and the
+   re-arming of the two FIFO channels.
+
+   Left in this step: the note allocator (`ply_note`) and the driver `MPlayMain`, 279 and 338 lines
+   of ARM, the two largest pieces left in the phase. `ply_note` also calls into the sequencer
+   (`ClearChain`, `TrkVolPitSet`, `MidiKeyToFreq`), so it cannot be finished before step 5, although
+   it can be written and tested against handlers a test supplies.
 5. Build upstream's `m4a.c` and drop the deferred entries. It is excluded for one line,
    `asm("swi 0x2A")`, and a per-file `-Dasm(x)=` clears it — so the 1781-line sequencer keeps
    receiving upstream fixes instead of being forked into an override.

@@ -380,3 +380,77 @@ void ply_port(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track)
     (void)player;
     *(volatile u8 *)(agb_mem.io + REG_OFFSET_SOUND1CNT_L + offset) = value;
 }
+
+// ---------------------------------------------------------- the V-blank tick ---
+
+// The DMA channels feeding the sound FIFOs. Ours is one register file, so these
+// are offsets into it rather than addresses.
+#define DMA1_CNT REG_OFFSET_DMA1CNT
+#define DMA2_CNT (REG_OFFSET_DMA1CNT + 0x0C)
+
+// A four-word immediate transfer, used to nudge a channel that was mid-repeat.
+#define DMA_KICK (((u32)(DMA_ENABLE | DMA_START_NOW | DMA_32BIT | DMA_SRC_INC \
+                         | DMA_DEST_FIXED) << 16) | 4)
+
+// Disabled, and then re-armed in the FIFO mode the mixer feeds.
+#define DMA_OFF ((u16)DMA_32BIT)
+#define DMA_FIFO ((u16)(DMA_ENABLE | DMA_START_SPECIAL | DMA_32BIT | DMA_REPEAT))
+
+static u32 io_read32(int offset)
+{
+    return *(volatile u32 *)(agb_mem.io + offset);
+}
+
+static void io_write32(int offset, u32 value)
+{
+    *(volatile u32 *)(agb_mem.io + offset) = value;
+}
+
+static void io_write16(int offset, u16 value)
+{
+    *(volatile u16 *)(agb_mem.io + offset) = value;
+}
+
+// Restart a FIFO channel that is part-way through a repeat, so it begins the
+// next buffer cleanly rather than continuing the old one.
+static void dma_restart_if_repeating(int cnt)
+{
+    if (io_read32(cnt) & ((u32)DMA_REPEAT << 16))
+        io_write32(cnt, DMA_KICK);
+}
+
+// Called once per frame from the game's own V-blank handler. It counts down to
+// the moment the sound DMA has to be handed the next buffer, and re-arms the two
+// FIFO channels when it arrives.
+//
+// The re-arming has no audible effect here -- the host consumes the mixer's PCM
+// buffer directly rather than through a sound FIFO -- but the registers are
+// written anyway, because the game can read them back and the cost is nothing.
+void m4aSoundVSync(void)
+{
+    struct SoundInfo *info = sound_info();
+    int counter;
+
+    // The header is locked while the mixer is inside it, which shows up as an
+    // ident one past its resting value. Either is fine; anything else means the
+    // header is not ours to touch.
+    if ((u32)(info->ident - ID_NUMBER) > 1)
+        return;
+
+    // The original decrements the byte and branches on the signed result, so a
+    // counter of zero falls through here as well as a counter of one.
+    counter = info->pcmDmaCounter;
+    info->pcmDmaCounter = (u8)(counter - 1);
+    if (counter - 1 > 0)
+        return;
+
+    info->pcmDmaCounter = info->pcmDmaPeriod;
+
+    dma_restart_if_repeating(DMA1_CNT);
+    dma_restart_if_repeating(DMA2_CNT);
+
+    io_write16(DMA1_CNT + 2, DMA_OFF);
+    io_write16(DMA2_CNT + 2, DMA_OFF);
+    io_write16(DMA1_CNT + 2, DMA_FIFO);
+    io_write16(DMA2_CNT + 2, DMA_FIFO);
+}

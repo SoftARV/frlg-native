@@ -60,4 +60,9 @@ void agb_m4a_prepare_frame(const struct SoundInfo *info, s8 *frame, int samples)
 // it is declared here for the tests and for our own callers.
 void ChnVolSetAsm(struct SoundChannel *chan, struct MusicPlayerTrack *track);
 
+// Called once per frame from the game's own V-blank handler. Declared in
+// upstream's m4a.h rather than its internal header, which our layer does not
+// pull in, so it is repeated here.
+void m4aSoundVSync(void);
+
 #endif // GUARD_AGB_M4A_H

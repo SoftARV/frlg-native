@@ -621,6 +621,105 @@ static void test_endtie(void)
     CHECK((chans[1].statusFlags & SOUND_CHANNEL_SF_STOP) != 0, "a silent channel absorbed the tie");
 }
 
+// ---------------------------------------------------------- the V-blank tick ---
+
+#define DMA1_CNT REG_OFFSET_DMA1CNT
+#define DMA2_CNT (REG_OFFSET_DMA1CNT + 0x0C)
+
+static u32 io32(int offset)
+{
+    return *(volatile u32 *)(agb_mem.io + offset);
+}
+
+static void reset_vsync(const char *name, int counter, int period)
+{
+    TEST_CASE(name);
+    memset(&agb_mem, 0, sizeof(agb_mem));
+    memset(&sound_header, 0, sizeof(sound_header));
+    sound_header.ident = ID_NUMBER;
+    sound_header.pcmDmaCounter = (u8)counter;
+    sound_header.pcmDmaPeriod = (u8)period;
+    *(struct SoundInfo **)(agb_mem.iwram + 0x7FF0) = &sound_header;
+}
+
+// Most frames just count down.
+static void test_vsync_counts_down(void)
+{
+    reset_vsync("vsync counts down", 4, 4);
+    m4aSoundVSync();
+    CHECK(sound_header.pcmDmaCounter == 3, "the counter is %u, not 3",
+          sound_header.pcmDmaCounter);
+    CHECK(io32(DMA1_CNT) == 0, "a channel was re-armed on an ordinary frame");
+}
+
+// On the frame the counter runs out, the period is reloaded and both FIFO
+// channels are re-armed.
+static void test_vsync_reloads(void)
+{
+    reset_vsync("vsync reloads and re-arms", 1, 7);
+    m4aSoundVSync();
+
+    CHECK(sound_header.pcmDmaCounter == 7, "the counter reloaded to %u, not 7",
+          sound_header.pcmDmaCounter);
+    CHECK((io32(DMA1_CNT) >> 16) == (u32)(DMA_ENABLE | DMA_START_SPECIAL | DMA_32BIT | DMA_REPEAT),
+          "channel 1 was not left in FIFO mode, control is %04X",
+          (unsigned)(io32(DMA1_CNT) >> 16));
+    CHECK((io32(DMA2_CNT) >> 16) == (u32)(DMA_ENABLE | DMA_START_SPECIAL | DMA_32BIT | DMA_REPEAT),
+          "channel 2 was not left in FIFO mode");
+}
+
+// A counter of zero falls through as well: the original decrements the byte and
+// branches on the signed result.
+static void test_vsync_zero_counter(void)
+{
+    reset_vsync("vsync with a counter of zero", 0, 5);
+    m4aSoundVSync();
+    CHECK(sound_header.pcmDmaCounter == 5, "a counter of zero did not reload, it is %u",
+          sound_header.pcmDmaCounter);
+}
+
+// A channel part-way through a repeat is kicked with an immediate transfer
+// before being re-armed.
+static void test_vsync_restarts_a_repeating_channel(void)
+{
+    reset_vsync("vsync kicks a repeating channel", 1, 4);
+    // Leave channel 1 mid-repeat and channel 2 idle.
+    *(volatile u32 *)(agb_mem.io + DMA1_CNT) = (u32)DMA_REPEAT << 16;
+    m4aSoundVSync();
+    // The kick writes a four-word count, which the re-arm does not overwrite.
+    CHECK((io32(DMA1_CNT) & 0xFFFF) == 4, "the kicked channel has a count of %u, not 4",
+          (unsigned)(io32(DMA1_CNT) & 0xFFFF));
+    CHECK((io32(DMA2_CNT) & 0xFFFF) == 0, "the idle channel was kicked as well");
+
+    // And the same the other way round, so neither channel is being handled by
+    // accident through the other.
+    reset_vsync("vsync kicks the second channel too", 1, 4);
+    *(volatile u32 *)(agb_mem.io + DMA2_CNT) = (u32)DMA_REPEAT << 16;
+    m4aSoundVSync();
+    CHECK((io32(DMA2_CNT) & 0xFFFF) == 4, "channel 2 was not kicked, its count is %u",
+          (unsigned)(io32(DMA2_CNT) & 0xFFFF));
+    CHECK((io32(DMA1_CNT) & 0xFFFF) == 0, "channel 1 was kicked as well");
+}
+
+// The header is only ours to touch while its ident is at rest or one past it.
+static void test_vsync_ident_guard(void)
+{
+    reset_vsync("vsync accepts a locked header", 1, 4);
+    sound_header.ident = ID_NUMBER + 1;
+    m4aSoundVSync();
+    CHECK(sound_header.pcmDmaCounter == 4, "a locked header was refused");
+
+    reset_vsync("vsync refuses a foreign header", 1, 4);
+    sound_header.ident = ID_NUMBER + 2;
+    m4aSoundVSync();
+    CHECK(sound_header.pcmDmaCounter == 1, "a header two past its ident was touched");
+
+    reset_vsync("vsync refuses an uninitialised header", 1, 4);
+    sound_header.ident = 0;
+    m4aSoundVSync();
+    CHECK(sound_header.pcmDmaCounter == 1, "an uninitialised header was touched");
+}
+
 int main(void)
 {
     test_prio();
@@ -642,6 +741,11 @@ int main(void)
     test_track_stop();
     test_chn_vol_set();
     test_endtie();
+    test_vsync_counts_down();
+    test_vsync_reloads();
+    test_vsync_zero_counter();
+    test_vsync_restarts_a_repeating_channel();
+    test_vsync_ident_guard();
 
     return test_report("m4a track opcodes");
 }
