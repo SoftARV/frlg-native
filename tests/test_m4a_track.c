@@ -405,6 +405,222 @@ static void test_rept(void)
           (int)(track.cmdPtr - stream));
 }
 
+// ------------------------------------------------- stopping and note ends ---
+
+static int cgb_off_calls;
+static u8 cgb_off_arg;
+static struct SoundInfo sound_header;
+
+static void fake_cgb_osc_off(u8 which)
+{
+    cgb_off_calls++;
+    cgb_off_arg = which;
+}
+
+// TrackStop reaches the sound header the way the game does, through a fixed slot
+// in IWRAM, so a test has to put it there.
+static void install_sound_header(void)
+{
+    memset(&sound_header, 0, sizeof(sound_header));
+    sound_header.CgbOscOff = fake_cgb_osc_off;
+    cgb_off_calls = 0;
+    cgb_off_arg = 0xFF;
+    *(struct SoundInfo **)(agb_mem.iwram + 0x7FF0) = &sound_header;
+}
+
+// Stopping cuts channels off outright, where ending a track releases them.
+static void test_track_stop(void)
+{
+    reset("track stop cuts channels off", NULL, 0);
+    install_sound_header();
+    link_chain(2);
+    track.flags = MPT_FLG_EXIST;
+
+    TrackStop(&player, &track);
+
+    CHECK(chans[0].statusFlags == 0, "channel 0 was not silenced, it is %02X",
+          chans[0].statusFlags);
+    CHECK(chans[1].statusFlags == 0, "channel 1 was not silenced");
+    CHECK(chans[0].track == NULL && chans[1].track == NULL, "a channel kept its track");
+    CHECK(track.chan == NULL, "the chain was not emptied");
+    CHECK(cgb_off_calls == 0, "a mixed channel asked the hardware to stop an oscillator");
+
+    reset("track stop on a track that does not exist", NULL, 0);
+    install_sound_header();
+    link_chain(1);
+    track.flags = 0; // no EXIST bit
+    TrackStop(&player, &track);
+    CHECK(chans[0].statusFlags != 0, "a track with no EXIST flag was stopped anyway");
+    CHECK(track.chan == &chans[0], "the chain was emptied anyway");
+
+    reset("track stop turns off a compatible-sound oscillator", NULL, 0);
+    install_sound_header();
+    link_chain(1);
+    track.flags = MPT_FLG_EXIST;
+    chans[0].type = TONEDATA_TYPE_CGB & 0x03; // a CGB channel type
+    TrackStop(&player, &track);
+    CHECK(cgb_off_calls == 1, "the oscillator was told to stop %d times, not once", cgb_off_calls);
+    CHECK(cgb_off_arg == (TONEDATA_TYPE_CGB & 0x03),
+          "it was handed %02X rather than the channel type", cgb_off_arg);
+
+    reset("track stop masks the type down to the oscillator", NULL, 0);
+    install_sound_header();
+    link_chain(1);
+    track.flags = MPT_FLG_EXIST;
+    // Bits above the oscillator field must not reach the header.
+    chans[0].type = 0x08 | 0x03;
+    TrackStop(&player, &track);
+    CHECK(cgb_off_calls == 1, "the oscillator was not stopped");
+    CHECK(cgb_off_arg == 0x03, "it was handed %02X rather than just the oscillator bits",
+          cgb_off_arg);
+
+    reset("track stop leaves an already silent channel alone", NULL, 0);
+    install_sound_header();
+    link_chain(1);
+    track.flags = MPT_FLG_EXIST;
+    chans[0].statusFlags = 0;
+    chans[0].type = TONEDATA_TYPE_CGB & 0x03;
+    TrackStop(&player, &track);
+    CHECK(cgb_off_calls == 0, "a silent channel still stopped an oscillator");
+    CHECK(chans[0].track == NULL, "a silent channel kept its track");
+}
+
+// Velocity is split across the two sides by the pan, and the two are not quite
+// symmetrical.
+static void test_chn_vol_set(void)
+{
+    reset("channel volume, centred", NULL, 0);
+    chans[0].velocity = 127;
+    chans[0].rhythmPan = 0;
+    track.volMR = 128;
+    track.volML = 128;
+
+    ChnVolSetAsm(&chans[0], &track);
+
+    // right: (128 * ((0x80 + 0) * 127)) >> 14 = (128 * 16256) >> 14 = 127
+    // left:  (128 * ((0x7F - 0) * 127)) >> 14 = (128 * 16129) >> 14 = 126
+    CHECK(chans[0].rightVolume == 127, "right was %u, not 127", chans[0].rightVolume);
+    CHECK(chans[0].leftVolume == 126, "left was %u, not 126", chans[0].leftVolume);
+
+    reset("channel volume, panned right", NULL, 0);
+    chans[0].velocity = 127;
+    chans[0].rhythmPan = 63;
+    track.volMR = 128;
+    track.volML = 128;
+    ChnVolSetAsm(&chans[0], &track);
+    // right: (128 * (191 * 127)) >> 14 = 189; left: (128 * (64 * 127)) >> 14 = 63
+    CHECK(chans[0].rightVolume == 189, "right was %u, not 189", chans[0].rightVolume);
+    CHECK(chans[0].leftVolume == 63, "left was %u, not 63", chans[0].leftVolume);
+
+    reset("channel volume, panned left", NULL, 0);
+    chans[0].velocity = 127;
+    chans[0].rhythmPan = -64; // signed: a negative pan is to the left
+    track.volMR = 128;
+    track.volML = 128;
+    ChnVolSetAsm(&chans[0], &track);
+    // right: (128 * ((0x80 - 64) * 127)) >> 14 = 63
+    // left:  (128 * ((0x7F + 64) * 127)) >> 14 = 189
+    CHECK(chans[0].rightVolume == 63, "right was %u, not 63", chans[0].rightVolume);
+    CHECK(chans[0].leftVolume == 189, "left was %u, not 189", chans[0].leftVolume);
+
+    reset("channel volume clamps", NULL, 0);
+    chans[0].velocity = 255;
+    chans[0].rhythmPan = 0;
+    track.volMR = 255;
+    track.volML = 255;
+    ChnVolSetAsm(&chans[0], &track);
+    CHECK(chans[0].rightVolume == 0xFF, "right did not clamp, it is %u", chans[0].rightVolume);
+    CHECK(chans[0].leftVolume == 0xFF, "left did not clamp, it is %u", chans[0].leftVolume);
+
+    reset("channel volume, silent note", NULL, 0);
+    chans[0].velocity = 0;
+    track.volMR = 255;
+    track.volML = 255;
+    ChnVolSetAsm(&chans[0], &track);
+    CHECK(chans[0].rightVolume == 0 && chans[0].leftVolume == 0,
+          "a note with no velocity was audible");
+}
+
+// Ending a tie releases the first channel holding that key, and only that one.
+static void test_endtie(void)
+{
+    reset("endtie with a key operand", NULL, 0);
+    stream[0] = 60;
+    link_chain(2);
+    chans[0].midiKey = 55;
+    chans[1].midiKey = 60;
+    chans[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    chans[1].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    track.cmdPtr = stream;
+
+    ply_endtie(&player, &track);
+
+    CHECK(track.key == 60, "the running key was not updated, it is %u", track.key);
+    CHECK(eaten() == 1, "endtie ate %d bytes, not 1", eaten());
+    CHECK((chans[1].statusFlags & SOUND_CHANNEL_SF_STOP) != 0, "the matching note was not released");
+    CHECK((chans[0].statusFlags & SOUND_CHANNEL_SF_STOP) == 0, "a note on another key was released");
+
+    reset("endtie with no operand uses the running key", NULL, 0);
+    stream[0] = 0x80; // not a key, so it belongs to whatever comes next
+    link_chain(1);
+    track.key = 44;
+    chans[0].midiKey = 44;
+    chans[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    track.cmdPtr = stream;
+
+    ply_endtie(&player, &track);
+
+    CHECK(eaten() == 0, "endtie consumed a byte that was not its operand");
+    CHECK(track.key == 44, "the running key changed");
+    CHECK((chans[0].statusFlags & SOUND_CHANNEL_SF_STOP) != 0, "the running note was not released");
+
+    reset("endtie treats 0x7F as a key", NULL, 0);
+    stream[0] = 0x7F; // the highest value that is still a key
+    link_chain(1);
+    chans[0].midiKey = 0x7F;
+    chans[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    track.cmdPtr = stream;
+    ply_endtie(&player, &track);
+    CHECK(eaten() == 1, "0x7F was not taken as a key");
+    CHECK(track.key == 0x7F, "the running key is %u, not 0x7F", track.key);
+
+    reset("endtie releases only the first match", NULL, 0);
+    stream[0] = 60;
+    link_chain(3);
+    for (int i = 0; i < 3; i++)
+    {
+        chans[i].midiKey = 60;
+        chans[i].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    }
+    track.cmdPtr = stream;
+    ply_endtie(&player, &track);
+    CHECK((chans[0].statusFlags & SOUND_CHANNEL_SF_STOP) != 0, "the first match was not released");
+    CHECK((chans[1].statusFlags & SOUND_CHANNEL_SF_STOP) == 0, "a second match was released too");
+
+    reset("endtie skips a note already stopping", NULL, 0);
+    stream[0] = 60;
+    link_chain(2);
+    chans[0].midiKey = 60;
+    chans[0].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN | SOUND_CHANNEL_SF_STOP;
+    chans[1].midiKey = 60;
+    chans[1].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    track.cmdPtr = stream;
+    ply_endtie(&player, &track);
+    CHECK((chans[1].statusFlags & SOUND_CHANNEL_SF_STOP) != 0,
+          "it stopped at a note that was already ending instead of moving on");
+
+    reset("endtie skips a silent channel", NULL, 0);
+    stream[0] = 60;
+    link_chain(2);
+    chans[0].midiKey = 60;
+    chans[0].statusFlags = 0; // neither starting nor in an envelope
+    chans[1].midiKey = 60;
+    chans[1].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    track.cmdPtr = stream;
+    ply_endtie(&player, &track);
+    CHECK((chans[1].statusFlags & SOUND_CHANNEL_SF_STOP) != 0, "a silent channel absorbed the tie");
+}
+
 int main(void)
 {
     test_prio();
@@ -423,6 +639,9 @@ int main(void)
     test_goto();
     test_patt_and_pend();
     test_rept();
+    test_track_stop();
+    test_chn_vol_set();
+    test_endtie();
 
     return test_report("m4a track opcodes");
 }

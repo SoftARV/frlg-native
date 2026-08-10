@@ -55,4 +55,9 @@ s8 *agb_m4a_frame_buffer(const struct SoundInfo *info);
 // right-hand buffer; the left sits PCM_DMA_BUF_SIZE further on.
 void agb_m4a_prepare_frame(const struct SoundInfo *info, s8 *frame, int samples);
 
+// Split a note's velocity across the two sides by its pan. Upstream's header
+// does not declare this one -- it is reached only through the interpreter -- so
+// it is declared here for the tests and for our own callers.
+void ChnVolSetAsm(struct SoundChannel *chan, struct MusicPlayerTrack *track);
+
 #endif // GUARD_AGB_M4A_H

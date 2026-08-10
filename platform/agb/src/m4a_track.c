@@ -271,6 +271,105 @@ void ply_rept(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track)
     track->cmdPtr = operand + 5;
 }
 
+// The sequencer keeps the sound header's address at a fixed spot in IWRAM. The
+// prelude points the game's own SOUND_INFO_PTR at the same place, so both sides
+// agree without either knowing about the other.
+#define SOUND_INFO_SLOT 0x7FF0
+
+static struct SoundInfo *sound_info(void)
+{
+    return *(struct SoundInfo **)(agb_mem.iwram + SOUND_INFO_SLOT);
+}
+
+// Silence a track at once. Unlike the end of a track, which releases its
+// channels and lets their envelopes finish, this cuts them off: a stopped
+// channel is available again immediately.
+void TrackStop(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track)
+{
+    struct SoundChannel *chan;
+
+    (void)player;
+    if (!(track->flags & MPT_FLG_EXIST))
+        return;
+
+    for (chan = track->chan; chan != NULL; chan = chan->nextChannelPointer)
+    {
+        if (chan->statusFlags != 0)
+        {
+            // A compatible-sound channel is a hardware oscillator rather than a
+            // mixed one, so it has to be told to stop rather than just dropped.
+            // What the header wants is the channel's type, not the channel.
+            u8 cgb = chan->type & TONEDATA_TYPE_CGB;
+
+            if (cgb != 0)
+                sound_info()->CgbOscOff(cgb);
+
+            chan->statusFlags = 0;
+        }
+
+        chan->track = NULL;
+    }
+
+    track->chan = NULL;
+}
+
+// Split a note's velocity across the two sides according to where it is panned.
+//
+// The two sides are not quite symmetrical: the right takes 0x80 plus the pan and
+// the left 0x7F minus it, so a centred note is one step louder on the right.
+// That is the original's arithmetic, not a rounding artefact of this
+// translation.
+void ChnVolSetAsm(struct SoundChannel *chan, struct MusicPlayerTrack *track)
+{
+    int velocity = chan->velocity;
+    int pan = (s8)chan->rhythmPan;
+    int right = (track->volMR * ((0x80 + pan) * velocity)) >> 14;
+    int left = (track->volML * ((0x7F - pan) * velocity)) >> 14;
+
+    chan->rightVolume = (u8)(right > 0xFF ? 0xFF : right);
+    chan->leftVolume = (u8)(left > 0xFF ? 0xFF : left);
+}
+
+// End a tied note. The key either arrives as an operand or is whatever the track
+// last played, and only the first channel still holding that key is released --
+// a tie ends one note, not every note sharing its pitch.
+void ply_endtie(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track)
+{
+    struct SoundChannel *chan;
+    u8 operand = *track->cmdPtr;
+    u8 key;
+
+    (void)player;
+    if (operand < 0x80)
+    {
+        // A key was given: it becomes the track's running key and is consumed.
+        track->key = operand;
+        track->cmdPtr++;
+        key = operand;
+    }
+    else
+    {
+        // No key: the byte belongs to whatever comes next, and the tie ends the
+        // note the track is already on.
+        key = track->key;
+    }
+
+    for (chan = track->chan; chan != NULL; chan = chan->nextChannelPointer)
+    {
+        u8 flags = chan->statusFlags;
+
+        if (!(flags & (SOUND_CHANNEL_SF_START | SOUND_CHANNEL_SF_ENV)))
+            continue;
+        if (flags & SOUND_CHANNEL_SF_STOP)
+            continue;
+        if (chan->midiKey != key)
+            continue;
+
+        chan->statusFlags = (u8)(flags | SOUND_CHANNEL_SF_STOP);
+        return;
+    }
+}
+
 // Two operands: an offset into the compatible-sound registers, then the byte to
 // put there. The track data addresses those registers directly.
 void ply_port(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track)

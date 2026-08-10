@@ -527,7 +527,13 @@ Ending a track releases the channels it owns rather than cutting them off, so th
 finish, and unlinks each from the chain the track keeps. The chain's head lives in the track rather
 than in a channel, which makes losing the first one a separate case from losing a middle one.
 
-What remains is the note allocator (`ply_note`, `ply_endtie`), `MPlayMain` and `TrackStop`.
+Stopping a track is the other case: it cuts its channels off outright rather than releasing them,
+so they are free again at once, and a compatible-sound channel is told to switch its oscillator off
+because that is hardware rather than something we mix. Ending a tie releases the first channel still
+holding the key and only that one.
+
+What remains is the note allocator (`ply_note`) and the driver `MPlayMain` — 279 and 338 lines of
+ARM, the two largest pieces left in the phase.
 
 The mixer produces the GBA's native ~13.4 kHz PCM into a ring buffer; the host layer resamples.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game
