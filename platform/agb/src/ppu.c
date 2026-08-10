@@ -1,8 +1,8 @@
 // Scanline renderer.
 //
 // Phase 3 scope: backgrounds, text and affine; objects, regular and affine; the
-// windows that mask them; and the colour effects. Mosaic follows, as do the
-// bitmap modes. Anything not yet implemented is skipped rather than
+// windows that mask them; the colour effects; and mosaic. The bitmap modes are
+// what remain. Anything not yet implemented is skipped rather than
 // approximated, so a missing feature reads as absent rather than as a subtly
 // wrong picture.
 
@@ -25,9 +25,17 @@
 #define REG_WIN0V 0x044
 #define REG_WININ 0x048
 #define REG_WINOUT 0x04A
+#define REG_MOSAIC 0x04C
 #define REG_BLDCNT 0x050
 #define REG_BLDALPHA 0x052
 #define REG_BLDY 0x054
+
+// Each mosaic field holds one less than the size of a block, so zero means a
+// block of one pixel -- which is no mosaic at all.
+#define MOSAIC_BG_H(m) (((m) & 0xF) + 1)
+#define MOSAIC_BG_V(m) ((((m) >> 4) & 0xF) + 1)
+#define MOSAIC_OBJ_H(m) ((((m) >> 8) & 0xF) + 1)
+#define MOSAIC_OBJ_V(m) ((((m) >> 12) & 0xF) + 1)
 
 #define BLD_EFFECT(c) (((c) >> 6) & 3)
 #define BLD_ALPHA 1
@@ -100,6 +108,7 @@
 #define OBJ_GFX_MODE(a) (((a) >> 10) & 3)
 #define OBJ_GFX_SEMI 1
 #define OBJ_GFX_WINDOW 2
+#define OBJ_MOSAIC 0x1000
 #define OBJ_256_COLOUR 0x2000
 #define OBJ_SHAPE(a) (((a) >> 14) & 3)
 
@@ -208,6 +217,14 @@ static int32_t bg_reference(uint32_t raw)
     return (value & 0x08000000) ? value - 0x10000000 : value;
 }
 
+// Mosaic keeps the pixel at the start of each block and repeats it across the
+// rest, so a coordinate is snapped back to its block. A size of one is the
+// identity, which is what a layer with mosaic switched off passes in.
+static int mosaic_snap(int value, int size)
+{
+    return value - value % size;
+}
+
 static uint16_t bg_palette(int index)
 {
     return *(const volatile uint16_t *)(agb_mem.pltt + index * 2);
@@ -273,13 +290,16 @@ static void render_text_bg_line(int bg, int line)
     const uint8_t *chars = agb_mem.vram + BGCNT_CHAR_BASE(control) * CHAR_BLOCK_SIZE;
     const uint8_t *screen = agb_mem.vram + BGCNT_SCREEN_BASE(control) * SCREEN_BLOCK_SIZE;
 
+    uint16_t mosaic = io16(REG_MOSAIC);
+    int mos_h = (control & BGCNT_MOSAIC) ? MOSAIC_BG_H(mosaic) : 1;
+    int mos_v = (control & BGCNT_MOSAIC) ? MOSAIC_BG_V(mosaic) : 1;
     int width_mask = (size == 1 || size == 3) ? 0x1FF : 0xFF;
     int height_mask = (size == 2 || size == 3) ? 0x1FF : 0xFF;
-    int src_y = (line + vofs) & height_mask;
+    int src_y = (mosaic_snap(line, mos_v) + vofs) & height_mask;
 
     for (int x = 0; x < SCREEN_W; x++)
     {
-        int src_x = (x + hofs) & width_mask;
+        int src_x = (mosaic_snap(x, mos_h) + hofs) & width_mask;
         int map_x = src_x >> 3;
         int map_y = src_y >> 3;
         const uint8_t *block = screen + screen_block_offset(size, map_x, map_y);
@@ -394,15 +414,20 @@ static void render_affine_bg_line(int bg, int line)
     const uint8_t *chars = agb_mem.vram + BGCNT_CHAR_BASE(control) * CHAR_BLOCK_SIZE;
     const uint8_t *screen = agb_mem.vram + BGCNT_SCREEN_BASE(control) * SCREEN_BLOCK_SIZE;
 
+    uint16_t mosaic = io16(REG_MOSAIC);
+    int mos_h = (control & BGCNT_MOSAIC) ? MOSAIC_BG_H(mosaic) : 1;
+    int mos_v = (control & BGCNT_MOSAIC) ? MOSAIC_BG_V(mosaic) : 1;
+
     // The reference point walks down the screen by one column of the matrix per
     // scanline, and across it by one row per pixel.
-    int32_t x = bg_reference(io32(params + 8)) + (int32_t)pb * line;
-    int32_t y = bg_reference(io32(params + 12)) + (int32_t)pd * line;
+    int32_t base_x = bg_reference(io32(params + 8)) + (int32_t)pb * mosaic_snap(line, mos_v);
+    int32_t base_y = bg_reference(io32(params + 12)) + (int32_t)pd * mosaic_snap(line, mos_v);
 
-    for (int i = 0; i < SCREEN_W; i++, x += pa, y += pc)
+    for (int i = 0; i < SCREEN_W; i++)
     {
-        int tx = x >> 8;
-        int ty = y >> 8;
+        int across = mosaic_snap(i, mos_h);
+        int tx = (base_x + (int32_t)pa * across) >> 8;
+        int ty = (base_y + (int32_t)pc * across) >> 8;
         int colour;
 
         if (layer_count[i] >= 2 || !(window_mask[i] & (1 << bg)))
@@ -462,6 +487,7 @@ static int obj_texel(uint32_t offset, int is_256, int tx, int palette)
 static void render_obj_line(int line)
 {
     uint16_t dispcnt = io16(REG_DISPCNT);
+    uint16_t mosaic = io16(REG_MOSAIC);
     int one_d = (dispcnt & DISPCNT_OBJ_1D_MAP) != 0;
     int min_tile = (dispcnt & DISPCNT_MODE_MASK) >= 3 ? OBJ_BITMAP_MIN_TILE : 0;
 
@@ -500,6 +526,9 @@ static void render_obj_line(int line)
         // texels mark out a region, and it is never drawn.
         int is_window = OBJ_GFX_MODE(attr0) == OBJ_GFX_WINDOW;
         int is_semi = OBJ_GFX_MODE(attr0) == OBJ_GFX_SEMI;
+        // Objects carry their own mosaic sizes, in the upper half of the register.
+        int mos_h = (attr0 & OBJ_MOSAIC) ? MOSAIC_OBJ_H(mosaic) : 1;
+        int mos_v = (attr0 & OBJ_MOSAIC) ? MOSAIC_OBJ_V(mosaic) : 1;
 
         if (mode == OBJ_MODE_HIDDEN)
             continue;
@@ -508,6 +537,10 @@ static void render_obj_line(int line)
 
         if (x >= 0x100)
             x -= 0x200;
+
+        // Mosaic works in the object's own space, so it is applied to the
+        // object-relative coordinate before a flip turns it around.
+        py = mosaic_snap(py, mos_v);
 
         if (affine)
         {
@@ -526,6 +559,7 @@ static void render_obj_line(int line)
         for (int col = 0; col < box_w; col++)
         {
             int sx = x + col;
+            int across = mosaic_snap(col, mos_h);
             int tx, ty;
             int index;
 
@@ -540,7 +574,7 @@ static void render_obj_line(int line)
             {
                 // Screen offset from the centre of the box, transformed into
                 // texture space and re-centred on the object itself.
-                int dx = col - box_w / 2;
+                int dx = across - box_w / 2;
                 int dy = py - box_h / 2;
 
                 tx = ((pa * dx + pb * dy) >> OBJ_AFFINE_FRACTION) + width / 2;
@@ -551,7 +585,7 @@ static void render_obj_line(int line)
             }
             else
             {
-                tx = (attr1 & OBJ_HFLIP) ? width - 1 - col : col;
+                tx = (attr1 & OBJ_HFLIP) ? width - 1 - across : across;
                 ty = py;
             }
 

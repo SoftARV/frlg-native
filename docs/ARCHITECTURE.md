@@ -345,8 +345,8 @@ Per scanline it composes, in the GBA's order: four backgrounds (text and affine)
 from OAM, two windows plus the object window, then colour special effects (alpha blend, brightness
 increase/decrease) and mosaic. Output is a 32-bit XRGB framebuffer handed to the host layer.
 
-**Implemented so far: the background and object layers in both their forms, the windows and the
-colour effects.** Text backgrounds:
+**Implemented so far: everything except the bitmap modes** — the background and object layers in
+both their forms, the windows, the colour effects and mosaic. Text backgrounds:
 all four layers, 4bpp and 8bpp, both flips, all four map sizes with their multi-block layouts,
 priority ordering front-to-back, and forced blank. Affine backgrounds: all four map sizes, the
 20.8 reference point, per-scanline matrix stepping, and both overflow behaviours. Objects: all
@@ -390,9 +390,15 @@ space — so a source coordinate landing outside the object clips rather than sa
 The double-size mode grows that box, not the object: a rotated sprite needs the corners its own
 box cannot hold.
 
-**Not yet: mosaic and the bitmap modes.** Anything unimplemented is **skipped rather than
-approximated**, so a missing feature reads as absent rather than as a subtly wrong picture — which
-matters when the reference is a golden image.
+**Mosaic** snaps a coordinate back to the start of its block, so the pixel there repeats across the
+rest. Backgrounds and objects have separate sizes in the one register and separate enables — a
+`BGCNT` bit per background, an OAM attribute bit per object — and a size field holds one less than
+its block, so zero means a block of one pixel and no mosaic at all. Objects snap in their own space,
+before a flip turns the coordinate around, and always draw at the unsnapped screen position.
+
+**Not yet: the bitmap modes.** Anything unimplemented is **skipped rather than approximated**, so a
+missing feature reads as absent rather than as a subtly wrong picture — which matters when the
+reference is a golden image.
 
 The PPU composes on the game thread at V-blank, immediately after the game's own handler, so the
 register writes and DMA copies that handler performs appear in the same frame. The host thread

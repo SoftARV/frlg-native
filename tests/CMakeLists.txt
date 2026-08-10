@@ -17,3 +17,5 @@ frlg_add_test(test_ppu_bg_affine)
 frlg_add_test(test_ppu_windows)
 
 frlg_add_test(test_ppu_blend)
+
+frlg_add_test(test_ppu_mosaic)
