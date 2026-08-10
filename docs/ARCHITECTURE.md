@@ -480,15 +480,18 @@ and `HuffUnComp` are exercised against real game assets.
 ### 6.7 Audio
 
 `m4a.c`, the sequencer, is already C upstream and needs no override. One statement stops it
-compiling — `asm("swi 0x2A")` inside `MusicPlayerJumpTableCopy`, asking the BIOS to fill the
+*compiling* — `asm("swi 0x2A")` inside `MusicPlayerJumpTableCopy`, asking the BIOS to fill the
 sequencer's dispatch table — and **nothing in this game calls that function**: the table is filled by
-`MPlayJumpTableCopy`, which we supply. Removing that one statement from the preprocessed copy is
-enough, which keeps 1781 lines of sequencer receiving upstream decomp fixes. It is scheduled after
-the driver rather than before, for the reason in [ROADMAP phase 4](ROADMAP.md#phase-4--it-sounds). `m4a_1.s` — 1917 lines of ARM across
-36 routines — is reimplemented in C across `platform/agb/src/m4a_mixer.c` and
-`platform/agb/src/m4a_track.c`. It is two subsystems, not
-one: a track interpreter (`MPlayMain`, `TrackStop` and 24 `ply_*` opcode handlers) and the mixer
-proper (`SoundMain`, `SoundMainRAM`, `SoundMainBTM`, `m4aSoundVSync`).
+`MPlayJumpTableCopy`, which we supply. Removing that one statement from the preprocessed copy makes
+it build and link, which keeps 1781 lines of sequencer receiving upstream decomp fixes. It does not
+yet make it *run*: three separate dependencies stand behind it, set out in
+[ROADMAP phase 4](ROADMAP.md#phase-4--it-sounds), and one of them — following a pointer stored inside
+ROM data — belongs to phase 7.
+
+`m4a_1.s` — 1917 lines of ARM across 36 routines — is reimplemented in C across
+`platform/agb/src/m4a_mixer.c` and `platform/agb/src/m4a_track.c`. It is two subsystems, not one: a
+track interpreter (`MPlayMain`, `TrackStop` and 24 `ply_*` opcode handlers) and the mixer proper
+(`SoundMain`, `SoundMainRAM`, `SoundMainBTM`, `m4aSoundVSync`).
 
 It is **translated rather than rewritten**, so the result can be checked against a known-good
 emulator sample for sample, the way the PPU is checked frame for frame. Where the original relies on
@@ -529,7 +532,7 @@ The sequencer's dispatch table is filled by `MPlayJumpTableCopy` from a template
 against it; here it is an ordinary array, so the copy is just a copy. `SoundInit` fills the table
 before `MPlayExtender` overrides nine of its entries, so the order matters and is preserved.
 
-**`m4a_1.s` is now fully translated.** The parameter opcodes — priority, tempo, key shift, instrument
+**The interpreter half of `m4a_1.s` is fully translated.** The parameter opcodes — priority, tempo, key shift, instrument
 select, volume, pan, bend, bend range, tune, both modulation controls and the delay, and the direct
 write to a compatible-sound register; control flow — the jump, the three-deep pattern call stack, the
 repeat counter and the end of a track; and then `ply_note` and `MPlayMain`.

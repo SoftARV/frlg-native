@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | **in progress** — `m4a_1.s` fully translated; sequencer and host output left |
+| 4 | Audio — the m4a mixer in C | **in progress** — interpreter done; mixer entry points, sequencer and host output left |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -284,8 +284,9 @@ The order, and where it stands:
    its byte: the largest clock entry is 96 and an operand is at most 127, so a wrap test is
    unreachable and the largest reachable sum is pinned instead.
 
-   The driver, `MPlayMain`, is **done** — 338 lines of ARM, and with it `m4a_1.s` is fully
-   translated. Its 58 mutants are all caught.
+   The driver, `MPlayMain`, is **done** — 338 lines of ARM, and with it the track interpreter is
+   complete. Its 58 mutants are all caught. Five of `m4a_1.s`'s 35 routines are still missing, all
+   of them the mixer's: `SoundMain`, `SoundMainRAM`, `SoundMainBTM` and the two wave helpers.
 
    Two of its shapes are preserved rather than tidied, and both are pinned by a test: the track loops
    are `do`/`while`, so a player claiming no tracks still runs its first one; and the modulation
@@ -296,30 +297,47 @@ The order, and where it stands:
    the invalidation flags and clears the low nibble, so a flag set during a tick is never observable
    after the call. Assertions have to be made on the consequence -- whether the volume or the pitch was
    actually recomputed -- and two of mine were wrong until that was understood.
-5. **Build upstream's `m4a.c` and drop the deferred entries.** Attempted, reverted, and **moved
-   after the driver** — the reason is worth writing down, because it was only visible by trying it.
+5. **Build upstream's `m4a.c` and drop the deferred entries.** Attempted twice, reverted twice.
+   The second attempt, with the driver in place, found the real dependencies -- and found that the
+   first attempt's diagnosis was **wrong**.
 
-   Enabling it works mechanically: the sequencer compiles and links, the deferred-call log drops
-   from a dozen sound calls to one, and the unbound count falls from 1311 to 1249. Then the game
-   stops drawing entirely — forced blank from frame 30 onwards, every frame blank, the golden tier
-   failing on all four frames. The cause is not a translation error but a **dependency**: the real
-   sequencer waits on progress only `MPlayMain` and `SoundMain` can make, and with those still
-   stubbed it waits for ever. The old no-op stubs answered "done" immediately, which is what let the
-   intro through. So `m4a.c` has to be enabled *with* its driver, not before it.
+   The mechanics work and are settled. `m4a.c` compiles and links once one BIOS call is removed
+   from its preprocessed copy, and the link needs two of upstream's linker-script absolutes:
+   `gNumMusicPlayers = 4` and `gMaxLines = 0`, both declared `extern char []` and read as their own
+   address. `gMaxLines` matters -- non-zero switches on the mixer's scanline budget.
 
-   Three things found on the way, all of which stand whenever this is picked up:
+   The removal must match the statement exactly and fail when it is absent. A blanket erasure of
+   `asm` would be wrong: `global.h` rewrites it to `__asm__`, and the preprocessed file carries a
+   second `__asm__` -- glibc's asm label on `strerror_r`. `MusicPlayerJumpTableCopy`, which holds the
+   call, is dead code here; nothing calls it and the table is filled by `MPlayJumpTableCopy`.
 
-   - **No override is needed, and the plan to define `asm` away was wrong.** The game's `global.h`
-     rewrites `asm` to `__asm__`, and `__asm__` appears twice in that file — the `swi`, and glibc's
-     asm label on `strerror_r`. A blanket erasure would have silently stripped the label. An exact
-     textual removal of `__asm__("swi 0x2A");` from the preprocessed copy is the right seam, and it
-     should fail the build when the statement is absent so a submodule bump is reported.
-   - **`MusicPlayerJumpTableCopy` is dead code in this game.** Nothing calls it, so its one statement
-     can go without a replacement. The table is filled by `MPlayJumpTableCopy`, which is now
-     implemented.
-   - **The link needs two of upstream's linker-script absolutes**: `gNumMusicPlayers = 4` and
-     `gMaxLines = 0`, both read through their addresses. `gMaxLines` matters — a non-zero value
-     switches on the mixer's scanline budget.
+   **What actually blocks it, in the order the game meets them:**
+
+   - **A busy-wait our frame model cannot satisfy.** `SampleFreqSet` spins on
+     `while (VCOUNT != 159)` to phase-align timer 0. A whole frame is rendered inside one signal
+     handler on the game thread, so `VCOUNT` sweeps 0..159 while the game thread is *suspended* and
+     reads 0 every time it resumes. The wait can never end. The process does not hang -- the frame
+     timer keeps counting -- which is why the first attempt read this as "blank frames" and blamed a
+     missing `MPlayMain`. It is the only busy-wait on a specific `VCOUNT` value in the game; every
+     other read happens inside a handler, where the value is right. Fixing it means either changing
+     upstream behaviour through the same build seam, or making `VCOUNT` advance continuously the way
+     hardware does -- a timing change with its own consequences, and its own decision to make.
+   - **ROM data holding pointers into RAM.** `gMPlayTable` is bound into the cart region and used
+     where it lies, but its entries are the addresses the original had for *its* RAM -- `0x03004518`
+     and friends -- which are mapped nowhere here. Dereferencing one is the segfault behind
+     `m4aSoundInit`. This is [spike 0001](spikes/0001-relocation-table.md)'s relocation problem
+     arriving at phase 4 rather than phase 7: the sound engine is the first subsystem that follows a
+     pointer stored *inside* ROM data. Supplying that one table in C works and was verified, since
+     every entry resolves to a named RAM symbol the binding tool already places in the arena. It does
+     not generalise: `gSongTable` and the song and tone data behind it are the same problem at scale.
+   - **`SoundMainBTM` is not the mixer, it is the 64-byte clear.** `m4a.c`'s `Clear64byte` reaches
+     it as `gMPlayJumpTable[35]`, so while it is stubbed `MPlayOpen` clears nothing and then reads
+     uninitialised fields. Thirteen lines of ARM.
+
+   So the order is: finish the mixer (`SoundMain`, `SoundMainRAM`, `SoundMainBTM` -- the rest of
+   step 3, not of step 5), decide the `VCOUNT` model, and relocate the song tables. Only then does
+   the sequencer have anything to run.
+
 6. Host audio: `host.h` gains an output stream, SDL3 implements it, `null` stays silent.
 
 Waiting at the end of it: [spike 0004](spikes/0004-mgba-frame-alignment.md) excluded frames 400 and
