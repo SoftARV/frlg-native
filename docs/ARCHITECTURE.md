@@ -714,6 +714,14 @@ needs no special case above it.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game
 state.
 
+**Sound has an oracle too.** `tools/mgba_audio.c` captures PCM from mGBA running the same ROM, and
+`FRLG_PCM=<path>` makes the port dump the same format — measured before the device is considered, so
+it needs no sound hardware. Between them a tune can be compared rather than described.
+[Spike 0007](spikes/0007-audio-against-mgba.md) is the first such comparison: the per-second level
+tracks mGBA's across the whole intro, which says the right notes are playing at the right times, and
+the one clear spectral difference turned out to come from the direct-sound path rather than from the
+PSG that was suspected.
+
 **The PSG channels** are the GBA's other sound system, and `platform/agb/src/psg.c` is it: two
 squares, a programmable wave and noise. The m4a engine does not mix these — it drives them by writing
 registers, `CgbSound` doing so every frame — so something has to turn those writes into samples.

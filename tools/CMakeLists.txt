@@ -25,6 +25,20 @@ if(FRLG_MGBA_LIBRARY AND FRLG_MGBA_INCLUDE_DIR)
         VERBATIM)
     # The target cannot share a name with the file it produces.
     add_custom_target(mgba-capture-tool ALL DEPENDS "${capture}")
+
+    # The same thing for sound: a screenshot cannot show a missing instrument.
+    set(audio "${CMAKE_CURRENT_BINARY_DIR}/mgba-audio")
+    add_custom_command(
+        OUTPUT "${audio}"
+        COMMAND "${CMAKE_C_COMPILER}" -O2 -std=gnu11 -Wall -Wextra
+                "-I${FRLG_MGBA_INCLUDE_DIR}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/mgba_audio.c"
+                "${FRLG_MGBA_LIBRARY}"
+                -o "${audio}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/mgba_audio.c"
+        COMMENT "building mgba-audio (reference sound tool)"
+        VERBATIM)
+    add_custom_target(mgba-audio-tool ALL DEPENDS "${audio}")
     message(STATUS "frlg-native: mgba-capture will be built; goldens can be blessed from the ROM")
 else()
     message(STATUS "frlg-native: libmgba not found, goldens can only be blessed from our own renderer")

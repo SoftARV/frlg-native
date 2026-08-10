@@ -114,6 +114,7 @@ static void write_ppm(const char *path)
 // no trace if it is wrong -- a mixer that runs but produces nothing looks exactly
 // like a host that is not listening -- so this is measured on every run and
 // reported at the end. It is the only way a silent mixer fails a test.
+static FILE *audio_dump;
 static uint32_t audio_frames;
 static uint32_t audio_loud_frames;
 static int audio_peak;
@@ -146,6 +147,19 @@ static void audio_sink(const int8_t *right, const int8_t *left, int samples, int
         opened_rate = host_audio_open(rate) ? rate : 0;
         if (opened_rate != 0)
             printf("frlg-native: audio at %d Hz\n", opened_rate);
+    }
+
+    // FRLG_PCM dumps what the mixer produced, in the same raw signed 16-bit
+    // stereo mgba-audio writes, so the two can be compared directly. Audio is
+    // the one subsystem a screenshot cannot check.
+    if (audio_dump != NULL)
+    {
+        for (int i = 0; i < samples; i++)
+        {
+            short pair[2] = {(short)(left[i] * 256), (short)(right[i] * 256)};
+
+            fwrite(pair, sizeof(pair), 1, audio_dump);
+        }
     }
 
     if (opened_rate != 0)
@@ -203,6 +217,12 @@ int main(int argc, char **argv)
 
     load_cart();
 
+    {
+        const char *dump = getenv("FRLG_PCM");
+
+        if (dump != NULL)
+            audio_dump = fopen(dump, "wb");
+    }
     agb_m4a_set_audio_sink(audio_sink);
 
     printf("frlg-native: starting, frame limit %u\n", frame_limit);
@@ -253,6 +273,8 @@ int main(int argc, char **argv)
         write_ppm(shot);
     }
 
+    if (audio_dump != NULL)
+        fclose(audio_dump);
     host_audio_close();
     host_video_close();
 

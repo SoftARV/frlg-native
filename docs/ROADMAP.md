@@ -386,9 +386,11 @@ The order, and where it stands:
    Sampling is at the mixer's rate rather than the hardware's, and the final add clamps where the
    software mixer's own accumulate wraps -- one reproduces the m4a engine, the other is the DAC.
 
-   **Not yet judged by ear against the original.** The balance between the PSG and direct sound is a
-   choice this makes rather than one the hardware dictates, and it is the part most likely to be
-   wrong.
+   **Measured against mGBA** rather than left to judgement — [spike 0007](spikes/0007-audio-against-mgba.md).
+   Per-second level tracks the reference across the whole intro, so the notes and their timing are
+   right. The balance is defensible: our overall level runs about 1.3x mGBA's, which is as much its
+   output convention as ours. The one clear spectral difference, excess treble, was measured to come
+   from the direct-sound path and not from the PSG -- switching the PSG off makes it worse.
 
 6. **Host audio** — **done, with a caveat**. `host.h` gained an output stream, SDL3 implements it,
    and `null` stays silent. The mixer hands each finished frame to a sink the port installs, and the
