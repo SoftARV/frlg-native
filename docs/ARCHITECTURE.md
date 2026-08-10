@@ -357,6 +357,17 @@ plus BG2 affine, mode 2 is BG2 and BG3 affine — and a layer its mode does not 
 at all. An affine map is square, always 8bpp, and one byte per entry: a tile number with no flip
 bits and no palette bank.
 
+**Windows** resolve once per scanline into a per-pixel set of the layers allowed to draw there.
+The regions are tried in a fixed order — window 0, then window 1, then the object window, then
+everything outside all of them — and the first match owns the pixel, so an overlap belongs to the
+earlier window. Inside and outside are independent control bytes rather than one and its inverse.
+A window whose end lies past the screen, or before its start, is garbage that reads as the far
+edge. With no window enabled in `DISPCNT` there is no masking at all, whatever the control
+registers hold.
+
+The object window is why the object pass runs before the mask is resolved: objects in the window
+graphics mode contribute shape rather than colour, and their opaque texels *are* the region.
+
 Objects resolve into a scanline buffer before any background is drawn, because which object owns a
 pixel is settled among the objects alone — lowest priority value wins, and OAM order breaks a tie.
 Only that winner then competes with the backgrounds, at the priority it carries. Objects in the
@@ -369,9 +380,10 @@ space — so a source coordinate landing outside the object clips rather than sa
 The double-size mode grows that box, not the object: a rotated sprite needs the corners its own
 box cannot hold.
 
-**Not yet: windows, blending, mosaic and the bitmap modes.** Anything unimplemented is **skipped
-rather than approximated**, so a missing feature reads as absent rather than as a subtly wrong
-picture — which matters when the reference is a golden image.
+**Not yet: blending, mosaic and the bitmap modes.** The colour-effect bit in each window control
+byte is parsed but has no reader until blending lands. Anything unimplemented is **skipped rather
+than approximated**, so a missing feature reads as absent rather than as a subtly wrong picture —
+which matters when the reference is a golden image.
 
 The PPU composes on the game thread at V-blank, immediately after the game's own handler, so the
 register writes and DMA copies that handler performs appear in the same frame. The host thread

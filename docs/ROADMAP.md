@@ -156,7 +156,7 @@ Frame captures across a run, by distinct colour count — a flat backdrop scores
 | --- | --- | --- |
 | 100 | 5 | copyright text on black |
 | 400 | 11 | dark blue screen |
-| 900 | 32 | intro cinematic, forest scene |
+| 900 | 29 | intro cinematic, forest scene |
 | 2400 | 166 | title screen |
 
 `FRLG_SHOT=<path>` captures a frame as PPM; `tools/ppm_to_png.py` converts for review. Captures are
@@ -168,14 +168,18 @@ defines. **They change nothing on screen yet:** every frame reachable today is m
 places FRLG asks for mode 1 (`oak_speech.c` past the controls guide, `credits.c`, `trade_scene.c`)
 all sit behind the Phase 6 blocker. The work is proven by the unit tier, not by a screenshot.
 
-The unit tier is up: `tests/` runs under CTest. `test_ppu_objects` and `test_ppu_bg_affine` drive
-the renderer from hand-built registers, VRAM and OAM to cover what a running frame does not reach —
-8bpp, 2D tile mapping, the size tables, the wrap and overflow rules, priority ordering, both affine
-transforms with their clipping, and the mode/layer table.
+Windows are done too — both rectangles, the object window, the region outside them all, and the
+garbage-bounds rules — and this one *is* visible: the intro cinematic's letterbox was leaking
+background into its black bands, because the mask that clips it did not exist.
 
-Remaining, in the order the game stresses them: **windows** → blending and mosaic, plus the bitmap
-modes. Unimplemented features are skipped rather than approximated, so absence is visible rather
-than subtly wrong.
+The unit tier is up: `tests/` runs under CTest, with `test_ppu_objects`, `test_ppu_bg_affine` and
+`test_ppu_windows` driving the renderer from hand-built registers, VRAM and OAM to cover what a
+running frame does not reach — 8bpp, 2D tile mapping, the size tables, the wrap and overflow rules,
+priority ordering, both affine transforms with their clipping, the mode/layer table, and the window
+regions with their precedence.
+
+Remaining: **blending and mosaic**, plus the bitmap modes. Unimplemented features are skipped
+rather than approximated, so absence is visible rather than subtly wrong.
 
 Still to build: the golden-image harness itself (two thresholds, diff artifacts, `--bless`) and
 mGBA reference captures to compare against. HBlank interrupts land here too, since per-scanline

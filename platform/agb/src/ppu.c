@@ -1,10 +1,9 @@
 // Scanline renderer.
 //
-// Phase 3 scope: backgrounds, text and affine, and objects, regular and affine.
-// Windows, blending and mosaic follow, in the order the game stresses them, as
-// do the bitmap modes. Anything not yet implemented is skipped rather than
-// approximated, so a missing feature reads as absent rather than as a subtly
-// wrong picture.
+// Phase 3 scope: backgrounds, text and affine; objects, regular and affine; and
+// the windows that mask them. Blending and mosaic follow, as do the bitmap
+// modes. Anything not yet implemented is skipped rather than approximated, so a
+// missing feature reads as absent rather than as a subtly wrong picture.
 
 #include <string.h>
 
@@ -21,11 +20,25 @@
 #define REG_BG2PA 0x020
 #define REG_AFFINE_BLOCK(bg) (REG_BG2PA + ((bg) - 2) * 0x10)
 
+#define REG_WIN0H 0x040
+#define REG_WIN0V 0x044
+#define REG_WININ 0x048
+#define REG_WINOUT 0x04A
+
 #define DISPCNT_MODE_MASK 0x0007
 #define DISPCNT_OBJ_1D_MAP 0x0040
 #define DISPCNT_FORCED_BLANK 0x0080
 #define DISPCNT_BG_ENABLE(n) (0x0100 << (n))
 #define DISPCNT_OBJ_ENABLE 0x1000
+#define DISPCNT_WIN0 0x2000
+#define DISPCNT_WIN1 0x4000
+#define DISPCNT_WIN_OBJ 0x8000
+
+// A window control byte is one bit per background, then the object layer, then
+// the colour effects -- which have no reader until blending lands.
+#define WINDOW_OBJ 0x10
+#define WINDOW_CONTROL_MASK 0x3F
+#define WINDOW_EVERYTHING WINDOW_CONTROL_MASK
 
 #define BGCNT_PRIORITY_MASK 0x0003
 #define BGCNT_CHAR_BASE(c) (((c) >> 2) & 3)
@@ -97,6 +110,13 @@ static uint32_t frame_serial;
 // Index 0 means no object claimed the pixel.
 static uint8_t obj_colour[SCREEN_W];
 static uint8_t obj_prio[SCREEN_W];
+
+// Objects in the window graphics mode contribute shape rather than colour, so
+// they land here instead, and become a region in the mask below.
+static uint8_t obj_window[SCREEN_W];
+
+// Which layers may draw at each pixel of the current scanline.
+static uint8_t window_mask[SCREEN_W];
 
 int agb_ppu_width(void)
 {
@@ -249,11 +269,69 @@ static void render_text_bg_line(int bg, int line, uint8_t *coverage)
             colour += MAP_PALETTE(entry) * 16;
         }
 
-        if (coverage[x])
+        if (coverage[x] || !(window_mask[x] & (1 << bg)))
             continue;
 
         out[x] = to_argb(bg_palette(colour));
         coverage[x] = 1;
+    }
+}
+
+// One edge of a window, from a register holding its start in the high byte and
+// its end in the low one. An end past the screen, or before the start, is
+// garbage that hardware reads as the far edge.
+static int window_contains(uint16_t bounds, int value, int limit)
+{
+    int start = (bounds >> 8) & 0xFF;
+    int end = bounds & 0xFF;
+
+    if (end > limit || start > end)
+        end = limit;
+
+    return value >= start && value < end;
+}
+
+// Windows are resolved once per scanline into a per-pixel set of layers. The
+// regions are tried in a fixed order -- window 0, then window 1, then the
+// object window, then everything outside all of them -- and the first match
+// decides the pixel, so an overlap belongs to the earlier window.
+static void compute_window_mask(int line, uint16_t dispcnt)
+{
+    uint16_t winin, winout;
+    uint8_t inside0, inside1, inside_obj, outside;
+    int win0 = (dispcnt & DISPCNT_WIN0) != 0;
+    int win1 = (dispcnt & DISPCNT_WIN1) != 0;
+    int win_obj = (dispcnt & DISPCNT_WIN_OBJ) != 0;
+    int row0, row1;
+
+    // With no window enabled there is no masking at all, which is the state
+    // every frame drawn before windows existed was in.
+    if (!win0 && !win1 && !win_obj)
+    {
+        memset(window_mask, WINDOW_EVERYTHING, sizeof(window_mask));
+        return;
+    }
+
+    winin = io16(REG_WININ);
+    winout = io16(REG_WINOUT);
+    inside0 = winin & WINDOW_CONTROL_MASK;
+    inside1 = (winin >> 8) & WINDOW_CONTROL_MASK;
+    outside = winout & WINDOW_CONTROL_MASK;
+    inside_obj = (winout >> 8) & WINDOW_CONTROL_MASK;
+
+    row0 = win0 && window_contains(io16(REG_WIN0V), line, SCREEN_H);
+    row1 = win1 && window_contains(io16(REG_WIN0V + 2), line, SCREEN_H);
+
+    for (int x = 0; x < SCREEN_W; x++)
+    {
+        if (row0 && window_contains(io16(REG_WIN0H), x, SCREEN_W))
+            window_mask[x] = inside0;
+        else if (row1 && window_contains(io16(REG_WIN0H + 2), x, SCREEN_W))
+            window_mask[x] = inside1;
+        else if (win_obj && obj_window[x])
+            window_mask[x] = inside_obj;
+        else
+            window_mask[x] = outside;
     }
 }
 
@@ -285,7 +363,7 @@ static void render_affine_bg_line(int bg, int line, uint8_t *coverage)
         int ty = y >> 8;
         int colour;
 
-        if (coverage[i])
+        if (coverage[i] || !(window_mask[i] & (1 << bg)))
             continue;
 
         if (wrap)
@@ -347,6 +425,7 @@ static void render_obj_line(int line)
     int min_tile = (dispcnt & DISPCNT_MODE_MASK) >= 3 ? OBJ_BITMAP_MIN_TILE : 0;
 
     memset(obj_colour, 0, sizeof(obj_colour));
+    memset(obj_window, 0, sizeof(obj_window));
 
     if (!(dispcnt & DISPCNT_OBJ_ENABLE))
         return;
@@ -375,11 +454,11 @@ static void render_obj_line(int line)
         int py = (line - OBJ_Y(attr0)) & 0xFF;
         int16_t pa = 0, pb = 0, pc = 0, pd = 0;
 
+        // A window object contributes shape rather than colour: its opaque
+        // texels mark out a region, and it is never drawn.
+        int is_window = OBJ_GFX_MODE(attr0) == OBJ_GFX_WINDOW;
+
         if (mode == OBJ_MODE_HIDDEN)
-            continue;
-        // A window object contributes a mask rather than pixels, and it is
-        // never drawn on hardware either -- skipping it is exact, not partial.
-        if (OBJ_GFX_MODE(attr0) == OBJ_GFX_WINDOW)
             continue;
         if (py >= box_h || tile < min_tile)
             continue;
@@ -409,7 +488,9 @@ static void render_obj_line(int line)
 
             if (sx < 0 || sx >= SCREEN_W)
                 continue;
-            if (obj_colour[sx] && obj_prio[sx] <= prio)
+            // A window object is not competing for the pixel, so the occlusion
+            // test does not apply to it.
+            if (!is_window && obj_colour[sx] && obj_prio[sx] <= prio)
                 continue;
 
             if (affine)
@@ -436,6 +517,12 @@ static void render_obj_line(int line)
             if (index == 0)
                 continue;
 
+            if (is_window)
+            {
+                obj_window[sx] = 1;
+                continue;
+            }
+
             obj_colour[sx] = (uint8_t)index;
             obj_prio[sx] = (uint8_t)prio;
         }
@@ -449,6 +536,8 @@ static void blit_obj_line(int line, int priority, uint8_t *coverage)
     for (int x = 0; x < SCREEN_W; x++)
     {
         if (!obj_colour[x] || obj_prio[x] != priority || coverage[x])
+            continue;
+        if (!(window_mask[x] & WINDOW_OBJ))
             continue;
 
         out[x] = to_argb(obj_palette(obj_colour[x]));
@@ -479,7 +568,10 @@ void agb_ppu_render_frame(void)
         for (int x = 0; x < SCREEN_W; x++)
             out[x] = backdrop;
         memset(coverage, 0, sizeof(coverage));
+        // The object pass first: the object window is a region built from the
+        // shapes of objects, so the mask cannot be resolved before it.
         render_obj_line(line);
+        compute_window_mask(line, dispcnt);
 
         // Front to back, so the first layer to claim a pixel keeps it: priority
         // 0 is nearest, and among equal priorities objects sit above every
