@@ -621,6 +621,209 @@ static void test_reversed_phase_persists(void)
           " got %d", right[0]);
 }
 
+// ---------------------------------------------------------- compressed waves ---
+
+#define TYPE_CMP 0x20
+#define BDPCM_BYTES 33
+
+// The sixteen steps a 4-bit code selects between, mirrored from the game's own
+// table so a test can say what it expects without reading it back.
+static const int deltas[16] = {0, 1, 4, 9, 16, 25, 36, 49,
+                               -64, -49, -36, -25, -16, -9, -4, -1};
+
+// Build one 33-byte block: a whole first sample, then codes. `codes[0]` is only
+// half used -- the format takes the low nibble of the first packed byte and
+// throws its high nibble away -- so this packs from index 1 upward in pairs.
+static void set_block(int block, int first, const int *codes, int count)
+{
+    u8 *p = (u8 *)(wave.raw + offsetof(struct WaveData, data)) + block * BDPCM_BYTES;
+    int i;
+
+    memset(p, 0, BDPCM_BYTES);
+    p[0] = (u8)first;
+    // Byte 1 carries only a low nibble; every byte after it carries high then low.
+    p[1] = (u8)(codes[0] & 0xF);
+    for (i = 1; i < count; i += 2)
+    {
+        u8 hi = (u8)(codes[i] & 0xF);
+        u8 lo = (u8)(i + 1 < count ? codes[i + 1] & 0xF : 0);
+
+        p[2 + i / 2] = (u8)((hi << 4) | lo);
+    }
+}
+
+static void reset_compressed(const char *name, int count, uint32_t step)
+{
+    reset_pitched(name, count, step);
+    chan.type = TYPE_CMP;
+    wave.header.type = 1; // the header's own "compressed" marker
+    chan.currentPointer = sample_storage();
+}
+
+// The first sample of a block is stored whole and the rest are steps from it.
+static void test_compressed_decodes_a_block(void)
+{
+    // Rising then falling, so a wrong table index or a swapped nibble shows.
+    const int codes[6] = {1, 2, 3, 8, 9, 15};
+
+    reset_compressed("a compressed block decodes to its samples", 64, ONE_STEP);
+    set_block(0, 20, codes, 6);
+
+    agb_m4a_mix_compressed(&info, &chan, right, left, 7);
+
+    int expect = 20;
+    CHECK(right[0] == ((255 * expect) >> 8), "sample 0 was %d, expected the whole one",
+          right[0]);
+    for (int i = 0; i < 6; i++)
+    {
+        expect += deltas[codes[i]];
+        CHECK(right[i + 1] == ((255 * expect) >> 8),
+              "sample %d was %d, expected %d after delta %d",
+              i + 1, right[i + 1], (255 * expect) >> 8, deltas[codes[i]]);
+    }
+}
+
+// The running value is kept wide and only truncated as each sample is stored, so
+// a run of large steps wraps per sample rather than saturating the accumulator.
+static void test_compressed_value_wraps_per_sample(void)
+{
+    // Four steps of +49 from 100 reaches 296, which is -40 stored as a byte.
+    const int codes[4] = {7, 7, 7, 7};
+
+    reset_compressed("a compressed run wraps as it stores", 64, ONE_STEP);
+    set_block(0, 100, codes, 4);
+
+    agb_m4a_mix_compressed(&info, &chan, right, left, 5);
+
+    int expect = 100;
+    for (int i = 0; i < 4; i++)
+    {
+        expect += 49;
+        CHECK(right[i + 1] == ((255 * (s8)expect) >> 8),
+              "sample %d was %d, expected the wrapped %d", i + 1, right[i + 1],
+              (s8)expect);
+    }
+}
+
+// A block is decoded once and cached, and crossing into the next one decodes
+// that. Sixty-four samples per block, so this walks over the boundary.
+static void test_compressed_crosses_a_block(void)
+{
+    const int none[2] = {0, 0};
+
+    reset_compressed("crossing a block boundary decodes the next", 200, ONE_STEP);
+    set_block(0, 10, none, 2);
+    set_block(1, 90, none, 2);
+
+    // Sixty-five samples: the last one belongs to block 1.
+    agb_m4a_mix_compressed(&info, &chan, right, left, FRAME);
+    for (int f = 0; f < 7; f++)
+    {
+        memset(right, 0, sizeof(right));
+        agb_m4a_mix_compressed(&info, &chan, right, left, FRAME);
+    }
+    memset(right, 0, sizeof(right));
+    agb_m4a_mix_compressed(&info, &chan, right, left, 2);
+
+    CHECK(right[0] == ((255 * 90) >> 8), "the second block was not decoded, got %d",
+          right[0]);
+}
+
+// A decoded block is cached, so the source bytes are read once. Scribbling over
+// them afterwards must change nothing: if it does, the block is being decoded
+// again every sample.
+static void test_compressed_caches_the_block(void)
+{
+    const int codes[3] = {1, 2, 3};
+
+    reset_compressed("a decoded block is not decoded twice", 64, ONE_STEP);
+    set_block(0, 20, codes, 3);
+
+    agb_m4a_mix_compressed(&info, &chan, right, left, 2);
+
+    // Everything the block was built from, replaced with something else.
+    memset((u8 *)(wave.raw + offsetof(struct WaveData, data)), 0x77, BDPCM_BYTES);
+
+    memset(right, 0, sizeof(right));
+    agb_m4a_mix_compressed(&info, &chan, right, left, 2);
+
+    int expect = 20 + deltas[codes[0]] + deltas[codes[1]];
+    CHECK(right[0] == ((255 * expect) >> 8),
+          "sample 2 came out %d, expected %d -- the block was decoded again",
+          right[0], (255 * expect) >> 8);
+}
+
+// Half the rate puts an interpolated sample between each pair, as it does for
+// every other path.
+static void test_compressed_interpolates(void)
+{
+    const int codes[2] = {7, 7}; // two steps of +49
+
+    reset_compressed("a compressed wave interpolates", 64, ONE_STEP / 2);
+    set_block(0, 0, codes, 2);
+
+    agb_m4a_mix_compressed(&info, &chan, right, left, 4);
+
+    // Samples 0, 49, 98; halfway between each pair is 24 and 73.
+    const int expect[4] = {0, 24, 49, 73};
+
+    for (int i = 0; i < 4; i++)
+        CHECK(right[i] == ((255 * expect[i]) >> 8), "sample %d was %d, expected %d",
+              i, right[i], (255 * expect[i]) >> 8);
+}
+
+// The reversed variant walks the same blocks backwards. Nothing in this game
+// uses it -- the one compressed instrument plays forwards -- but the routine
+// covers both, so both are pinned.
+static void test_compressed_reversed(void)
+{
+    // Every sample distinct, so starting one place out is visible. A flat run
+    // would hide it.
+    const int codes[7] = {1, 2, 3, 4, 5, 6, 7};
+    int decoded[8];
+
+    reset_compressed("a compressed wave played backwards", 8, ONE_STEP);
+    chan.type = TYPE_CMP | TYPE_REV;
+    set_block(0, 20, codes, 7);
+    wave.header.size = 8;
+    chan.count = 4;
+
+    // The running value stays wide and is truncated only as each sample is
+    // stored, so the expectation has to be built the same way.
+    int running = 20;
+
+    decoded[0] = (signed char)running;
+    for (int i = 0; i < 7; i++)
+    {
+        running += deltas[codes[i]];
+        decoded[i + 1] = (signed char)running;
+    }
+
+    agb_m4a_mix_compressed(&info, &chan, right, left, 3);
+
+    // Turned round to the end of the wave, then walked down: 7, 6, 5.
+    for (int i = 0; i < 3; i++)
+        CHECK(right[i] == ((255 * decoded[7 - i]) >> 8),
+              "sample %d was %d, expected sample %d of the block (%d)",
+              i, right[i], 7 - i, (255 * decoded[7 - i]) >> 8);
+}
+
+// The pointer field carries an index for these waves, not an address, and it is
+// converted once.
+static void test_compressed_uses_an_index(void)
+{
+    const int none[2] = {0, 0};
+
+    reset_compressed("a compressed wave walks by index", 64, ONE_STEP);
+    set_block(0, 10, none, 2);
+
+    agb_m4a_mix_compressed(&info, &chan, right, left, 4);
+
+    CHECK((uintptr_t)chan.currentPointer == 4,
+          "the index came out %u, not 4", (unsigned)(uintptr_t)chan.currentPointer);
+    CHECK(chan.statusFlags & 0x20, "the one-time conversion was not recorded");
+}
+
 int main(void)
 {
     test_scaling();
@@ -650,6 +853,14 @@ int main(void)
     test_reversed_does_not_loop();
     test_reversed_stops_exactly_at_zero();
     test_reversed_phase_persists();
+
+    test_compressed_decodes_a_block();
+    test_compressed_value_wraps_per_sample();
+    test_compressed_crosses_a_block();
+    test_compressed_caches_the_block();
+    test_compressed_interpolates();
+    test_compressed_reversed();
+    test_compressed_uses_an_index();
 
     return test_report("m4a mixing");
 }

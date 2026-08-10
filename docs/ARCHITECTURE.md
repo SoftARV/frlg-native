@@ -600,15 +600,20 @@ play position is turned round **once**, on the channel's first frame, to the sam
 end that it was from the start; and a reversed wave **does not loop** — running out of samples ends
 the note.
 
-**Compressed waves are not mixed**, and the game does use them. A channel asking for one is skipped
-with a warning rather than mixed as though its wave were ordinary, so that instrument is silent until
-the block decoder (`SoundMainRAM_Unk2`) is written.
+**Compressed waves** hold 64 samples in 33 bytes: one whole sample, then 4-bit codes selecting from
+sixteen delta steps. A block is decoded in one go and cached in the channel — the resampler asks for
+neighbouring samples, so nearly every request hits — and the walk is by index rather than by pointer,
+because a compressed sample has no address. The channel's pointer field carries that index, converted
+once. Forward and reversed are both handled, and they are **asymmetric at the start**: forward reads
+the sample it is already on, reversed steps back first, exactly as the uncompressed pair are.
 
-An earlier note here claimed nothing in the game was compressed, from a scan of the tone tables the
-song table reaches directly. **That was wrong**: the scan never followed the sub-tables a rhythm or
-key-split instrument points at, and it took a static reading for a complete one. A channel of type
-`0x20`, with a wave header saying compressed, turns up during the intro. The reversed path is written
-because two instruments need it; the compressed one is the same kind of gap, still open.
+The running value is kept wide and truncated only as each sample is stored, so a run of large steps
+wraps per sample instead of saturating.
+
+FireRed uses one compressed instrument: **Nidorino's cry**, in the intro battle. Finding it corrected
+an earlier claim here that nothing in the game was compressed — that came from scanning only the tone
+tables the song table reaches directly, never the sub-tables a rhythm or key-split instrument points
+at, and it took a static reading for a complete one. The runtime settled it in one line.
 
 **The interpreter half of `m4a_1.s` is fully translated.** The parameter opcodes — priority, tempo, key shift, instrument
 select, volume, pan, bend, bend range, tune, both modulation controls and the delay, and the direct

@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | **it sounds** — silent in optimised builds ([spike 0006](spikes/0006-release-build-silence.md)) |
+| 4 | Audio — the m4a mixer in C | **done** |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -264,17 +264,21 @@ The order, and where it stands:
    pointer, which nothing noticed because it is only ever called through unprototyped table entries;
    ours lives in its own file so that declaration is not in scope.
 
-   **Reversed waves are mixed; compressed ones are not.** `SoundMainRAM_Unk1` covers three cases --
-   compressed forward, compressed reversed, and uncompressed reversed. The uncompressed reversed walk
-   is written and its 17 mutants are all caught. A channel asking for a compressed wave is skipped with
-   a warning rather than mixed wrongly, and `Unk2` -- the block decoder it would need -- is unwritten.
+   **Reversed and compressed waves are both mixed**, which completes `m4a_1.s`. `SoundMainRAM_Unk1`
+   covers three cases -- compressed forward, compressed reversed, and uncompressed reversed -- and all
+   three are written, along with `Unk2`, the block decoder. 17 mutants for the reversed walk and 15 for
+   the compressed one.
 
-   **That gap is real, not theoretical.** This step originally recorded that no instrument in the game
-   is compressed, from a scan of the tone tables the song table reaches. The claim was wrong twice
-   over: the scan never followed the sub-tables a rhythm or key-split instrument points at, and a
-   static reading was taken for a complete one. Running the game says otherwise -- a channel of type
-   `0x20`, wave header type 1, appears during the intro, and it is currently silent. Two instruments
-   are reversed, which is why that path exists; at least one is compressed, and that path does not.
+   The compressed instrument is **Nidorino's cry** in the intro battle, at frames 961--985. Finding it
+   corrected a claim this step originally made -- that nothing in the game is compressed -- which came
+   from scanning only the tone tables the song table reaches directly, never the sub-tables a rhythm or
+   key-split instrument points at. A static reading was taken for a complete one; the runtime settled
+   it in one line.
+
+   One of the compressed decoder's 15 mutants is caught **only by AddressSanitizer**: halving the
+   block-length step writes 128 samples into a 64-byte buffer while producing byte-identical output for
+   all 64, so no test that looks at samples can see it. Worth remembering as an argument for an ASan
+   preset -- the surviving mutant was checked by hand and the real code is clean.
 
    Two things about the reversed path are easy to get wrong and are pinned by tests. The play position
    is turned round **once**, on the channel's first frame, and it mirrors the position rather than

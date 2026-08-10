@@ -7,6 +7,12 @@
 
 IntrFunc gIntrTable[14];
 
+// The mixer's delta table, likewise the game's. These are the sixteen steps a
+// compressed wave's 4-bit codes select between; the values are upstream's.
+const signed char gDeltaEncodingTable[] = {
+    0, 1, 4, 9, 16, 25, 36, 49, -64, -49, -36, -25, -16, -9, -4, -1,
+};
+
 int test_failures;
 const char *test_case_name = "";
 

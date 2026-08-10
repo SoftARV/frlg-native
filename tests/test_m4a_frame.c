@@ -4,6 +4,7 @@
 // Expected values are worked out by hand from the original ARM.
 
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "agb/m4a.h"
@@ -327,7 +328,7 @@ static void test_driver_dispatches_on_type(void)
     CHECK(info.chans[0].statusFlags & 0x20,
           "the channel was mixed but not by the reversed path");
 
-    reset("a compressed wave is skipped");
+    reset("a compressed wave takes the compressed path");
     info.reverb = 0;
     info.maxChans = 1;
     info.divFreq = 1 << 4;
@@ -335,7 +336,11 @@ static void test_driver_dispatches_on_type(void)
     frame = info.pcmBuffer;
     arm_channel(&info.chans[0], 0x20); // TONEDATA_TYPE_CMP
     agb_m4a_mix_frame(&info, frame, SAMPLES);
-    CHECK(frame[0] == 0, "a compressed wave was mixed anyway");
+    // Only the compressed path turns the pointer field into an index, which is
+    // what tells it apart from the paths that leave an address there.
+    CHECK((uintptr_t)info.chans[0].currentPointer < 1024,
+          "the pointer field holds %p, so the compressed path did not run",
+          (void *)info.chans[0].currentPointer);
 }
 
 // A channel without the fixed-frequency bit is resampled instead, which walks

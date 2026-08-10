@@ -62,6 +62,13 @@ void agb_m4a_mix_frame(struct SoundInfo *info, s8 *frame, int samples);
 bool agb_m4a_mix_reversed(const struct SoundInfo *info, struct SoundChannel *chan,
                           s8 *right, s8 *left, int samples);
 
+// The compressed path, taken when the tone type has TONEDATA_TYPE_CMP: the wave
+// holds 64 samples per 33 bytes as 4-bit deltas, decoded a block at a time and
+// cached in the channel. Walks by index rather than by pointer, because a
+// compressed sample has no address. Handles both directions.
+bool agb_m4a_mix_compressed(const struct SoundInfo *info, struct SoundChannel *chan,
+                            s8 *right, s8 *left, int samples);
+
 // Where in the PCM area this frame writes. The area holds several frames and
 // the DMA counter says which one is free, so the mixer writes ahead of what the
 // hardware is reading out.

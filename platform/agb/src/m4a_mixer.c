@@ -15,6 +15,11 @@
 // a byte, so each step truncates.
 #define ENVELOPE_MAX 0xFF
 
+// Wave-format bits of the tone type. Upstream's C header does not name these --
+// only its assembler does -- so they are named here.
+#define TONEDATA_TYPE_REV 0x10
+#define TONEDATA_TYPE_CMP 0x20
+
 // The wave header's flags are the high byte of its `status` field -- the
 // original addresses them as a byte at offset 3 and the C struct has no name
 // for them, so the test is written here rather than borrowed.
@@ -497,15 +502,176 @@ bool agb_m4a_mix_reversed(const struct SoundInfo *info, struct SoundChannel *cha
     return true;
 }
 
+// ---------------------------------------------------------- compressed waves ---
+
+// A compressed wave holds 64 samples in 33 bytes: one whole sample, then 4-bit
+// deltas indexing a table of sixteen steps. Decoding happens a block at a time
+// and the block is cached in the channel, because the resampler asks for
+// neighbouring samples and so nearly every request is a hit.
+#define BDPCM_SAMPLES 64
+#define BDPCM_BYTES 33
+
+extern const s8 gDeltaEncodingTable[];
+
+static s8 decoded_block[BDPCM_SAMPLES];
+
+// The cached block number lives across `xpi` and `xpc`, which the original
+// writes as a single word, and it starts at a value no block can have.
+#define BDPCM_NO_BLOCK 0xFF000000u
+
+static uint32_t *cached_block(struct SoundChannel *chan)
+{
+    return (uint32_t *)&chan->xpi;
+}
+
+// One sample of a compressed wave, by index rather than by pointer: for these
+// waves the channel's `currentPointer` field holds an index, not an address.
+static int compressed_sample(struct SoundChannel *chan, uint32_t index)
+{
+    uint32_t block = index >> 6;
+
+    if (block != *cached_block(chan))
+    {
+        const u8 *src = (const u8 *)chan->wav + offsetof(struct WaveData, data)
+                        + block * BDPCM_BYTES;
+        s8 *out = decoded_block;
+        int value;
+        u8 packed;
+
+        *cached_block(chan) = block;
+
+        // The first sample is stored whole and every one after it is a step
+        // from the one before. The first packed byte gives up only its low
+        // nibble -- its high nibble is not part of the block. The running value
+        // is kept wide and only truncated as it is stored, as the original does.
+        value = (s8)*src++;
+        *out++ = (s8)value;
+        packed = *src++;
+
+        for (int left = BDPCM_SAMPLES;;)
+        {
+            value += gDeltaEncodingTable[packed & 0xF];
+            *out++ = (s8)value;
+
+            left -= 2;
+            if (left <= 0)
+                break;
+
+            packed = *src++;
+            value += gDeltaEncodingTable[packed >> 4];
+            *out++ = (s8)value;
+        }
+    }
+
+    return decoded_block[index & (BDPCM_SAMPLES - 1)];
+}
+
+// Mix a channel whose wave is compressed. The resampling is the same as every
+// other path -- interpolate between neighbouring samples, carry the fraction
+// across frames -- but a sample costs a table lookup instead of a load, and the
+// walk is by index because a compressed wave has no addressable samples.
+//
+// Handles both directions. A forward wave loops; a reversed one ends, exactly as
+// in the uncompressed pair.
+bool agb_m4a_mix_compressed(const struct SoundInfo *info, struct SoundChannel *chan,
+                            s8 *right, s8 *left, int samples)
+{
+    struct WaveData *wav = chan->wav;
+    bool reversed = (chan->type & TONEDATA_TYPE_REV) != 0;
+    int direction = reversed ? -1 : 1;
+    uint32_t loop_length = (!reversed && (chan->statusFlags & SOUND_CHANNEL_SF_LOOP))
+                               ? wav->size - wav->loopStart : 0;
+    int32_t remaining = (int32_t)chan->count;
+    uint32_t phase = chan->fw;
+    uint32_t step;
+    int volume_right = chan->envelopeVolumeRight;
+    int volume_left = chan->envelopeVolumeLeft;
+    uint32_t index;
+    int current;
+    int delta;
+
+    if (!(chan->statusFlags & SOUND_CHANNEL_SF_SPECIAL))
+    {
+        chan->statusFlags |= SOUND_CHANNEL_SF_SPECIAL;
+        if (reversed)
+            reverse_position(chan);
+
+        // From here the pointer field carries an index into the wave rather
+        // than an address, because the samples have none.
+        chan->currentPointer = (s8 *)(uintptr_t)
+            (uint32_t)(chan->currentPointer - wav->data);
+        *cached_block(chan) = BDPCM_NO_BLOCK;
+    }
+
+    step = (chan->type & TONEDATA_TYPE_FIX) ? (1u << FW_FRACTION)
+                                            : (uint32_t)info->divFreq * (uint32_t)chan->frequency;
+
+    // Forward reads the sample it is already on; reversed steps back first. The
+    // uncompressed pair are asymmetric in exactly the same way.
+    index = (uint32_t)(uintptr_t)chan->currentPointer;
+    if (reversed)
+        index--;
+    current = compressed_sample(chan, index);
+    index += (uint32_t)direction;
+    delta = compressed_sample(chan, index) - current;
+
+    for (int i = 0; i < samples; i++)
+    {
+        int32_t between = ((int32_t)phase * (int32_t)delta) >> FW_FRACTION;
+
+        right[i] = mix_sample(right[i], volume_right, current + between);
+        left[i] = mix_sample(left[i], volume_left, current + between);
+
+        phase += step;
+        uint32_t whole = phase >> FW_FRACTION;
+
+        if (whole == 0)
+            continue;
+
+        phase &= ~FW_CONSUMED_MASK;
+        remaining -= (int32_t)whole;
+
+        if (remaining <= 0)
+        {
+            if (loop_length == 0)
+            {
+                chan->statusFlags = 0;
+                return false;
+            }
+
+            index = wav->loopStart + (uint32_t)loop_rewind(&remaining, loop_length);
+            current = compressed_sample(chan, index);
+        }
+        else if (whole == 1)
+        {
+            // One sample on: the far end of the last interpolation is the near
+            // end of the next, so it needs no decoding.
+            current += delta;
+        }
+        else
+        {
+            index += (uint32_t)(direction * (int)(whole - 1));
+            current = compressed_sample(chan, index);
+        }
+
+        index += (uint32_t)direction;
+        delta = compressed_sample(chan, index) - current;
+    }
+
+    chan->fw = phase;
+    chan->count = (u32)remaining;
+    // Where each direction leaves the index differs by more than its sign,
+    // because they began a different distance apart.
+    chan->currentPointer = (s8 *)(uintptr_t)(reversed ? index + 2 : index - 1);
+    return true;
+}
+
 // ------------------------------------------------------------- the mixer driver ---
 
 // Compressed waves. The game does use them -- a channel of type 0x20 turns up
 // during the intro -- and the block decoder is not written yet, so such a channel
 // is skipped rather than mixed as though its wave were ordinary. That instrument
 // is silent until SoundMainRAM_Unk2 exists.
-#define TONEDATA_TYPE_REV 0x10
-#define TONEDATA_TYPE_CMP 0x20
-
 // Warned once per run, the way every other not-yet-written subsystem is. The
 // generated stubs declare this the same way; there is no header for it.
 int agb_deferred_named(const char *name);
@@ -535,7 +701,7 @@ void agb_m4a_mix_frame(struct SoundInfo *info, s8 *frame, int samples)
         if (agb_m4a_envelope_step(info, chan))
         {
             if (chan->type & TONEDATA_TYPE_CMP)
-                agb_deferred_named("compressed wave");
+                agb_m4a_mix_compressed(info, chan, frame, frame + PCM_DMA_BUF_SIZE, samples);
             else if (chan->type & TONEDATA_TYPE_REV)
                 agb_m4a_mix_reversed(info, chan, frame, frame + PCM_DMA_BUF_SIZE, samples);
             else if (chan->type & TONEDATA_TYPE_FIX)
