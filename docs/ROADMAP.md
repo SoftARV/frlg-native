@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | **in progress** — sequencer and mixer run; host output left |
+| 4 | Audio — the m4a mixer in C | **it sounds** — silent in optimised builds ([spike 0006](spikes/0006-release-build-silence.md)) |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -367,9 +367,7 @@ The order, and where it stands:
    **Debug** build and not by the optimised one, while both render identically. It is real, it
    reproduces, and it is not yet diagnosed.
 
-   Superseded plan text follows:
 
-6. Host audio: `host.h` gains an output stream, SDL3 implements it, `null` stays silent.
 
 Waiting at the end of it: [spike 0004](spikes/0004-mgba-frame-alignment.md) excluded frames 400 and
 900 from the mGBA oracle **because** audio is stubbed and scene pacing drifts. They are the measure
