@@ -345,7 +345,8 @@ Per scanline it composes, in the GBA's order: four backgrounds (text and affine)
 from OAM, two windows plus the object window, then colour special effects (alpha blend, brightness
 increase/decrease) and mosaic. Output is a 32-bit XRGB framebuffer handed to the host layer.
 
-**Implemented so far: the background and object layers, in both their forms.** Text backgrounds:
+**Implemented so far: the background and object layers in both their forms, the windows and the
+colour effects.** Text backgrounds:
 all four layers, 4bpp and 8bpp, both flips, all four map sizes with their multi-block layouts,
 priority ordering front-to-back, and forced blank. Affine backgrounds: all four map sizes, the
 20.8 reference point, per-scanline matrix stepping, and both overflow behaviours. Objects: all
@@ -368,6 +369,15 @@ registers hold.
 The object window is why the object pass runs before the mask is resolved: objects in the window
 graphics mode contribute shape rather than colour, and their opaque texels *are* the region.
 
+**Colour effects** are why composition collects the two frontmost layers per pixel rather than
+stopping at the first: a blend needs whatever sits under the top layer, and front-to-back with
+first-writer-wins cannot supply it. Anything below those two cannot affect the result, so two is
+all that is kept. Alpha blending needs the top layer to be a first target *and* the one under it a
+second target; the brightness effects need only the first. A semi-transparent object asks to be
+blended whatever the effect register selects and outranks it, but still only where something
+underneath is a second target — failing that it falls back to whatever the register wanted. Every
+effect is gated by the colour-effect bit of the window covering the pixel.
+
 Objects resolve into a scanline buffer before any background is drawn, because which object owns a
 pixel is settled among the objects alone — lowest priority value wins, and OAM order breaks a tie.
 Only that winner then competes with the backgrounds, at the priority it carries. Objects in the
@@ -380,10 +390,9 @@ space — so a source coordinate landing outside the object clips rather than sa
 The double-size mode grows that box, not the object: a rotated sprite needs the corners its own
 box cannot hold.
 
-**Not yet: blending, mosaic and the bitmap modes.** The colour-effect bit in each window control
-byte is parsed but has no reader until blending lands. Anything unimplemented is **skipped rather
-than approximated**, so a missing feature reads as absent rather than as a subtly wrong picture —
-which matters when the reference is a golden image.
+**Not yet: mosaic and the bitmap modes.** Anything unimplemented is **skipped rather than
+approximated**, so a missing feature reads as absent rather than as a subtly wrong picture — which
+matters when the reference is a golden image.
 
 The PPU composes on the game thread at V-blank, immediately after the game's own handler, so the
 register writes and DMA copies that handler performs appear in the same frame. The host thread

@@ -1,9 +1,10 @@
 // Scanline renderer.
 //
-// Phase 3 scope: backgrounds, text and affine; objects, regular and affine; and
-// the windows that mask them. Blending and mosaic follow, as do the bitmap
-// modes. Anything not yet implemented is skipped rather than approximated, so a
-// missing feature reads as absent rather than as a subtly wrong picture.
+// Phase 3 scope: backgrounds, text and affine; objects, regular and affine; the
+// windows that mask them; and the colour effects. Mosaic follows, as do the
+// bitmap modes. Anything not yet implemented is skipped rather than
+// approximated, so a missing feature reads as absent rather than as a subtly
+// wrong picture.
 
 #include <string.h>
 
@@ -24,6 +25,26 @@
 #define REG_WIN0V 0x044
 #define REG_WININ 0x048
 #define REG_WINOUT 0x04A
+#define REG_BLDCNT 0x050
+#define REG_BLDALPHA 0x052
+#define REG_BLDY 0x054
+
+#define BLD_EFFECT(c) (((c) >> 6) & 3)
+#define BLD_ALPHA 1
+#define BLD_BRIGHTEN 2
+#define BLD_DARKEN 3
+#define BLD_FIRST_TARGET(c) ((c) & 0x3F)
+#define BLD_SECOND_TARGET(c) (((c) >> 8) & 0x3F)
+
+// Layer identities, in the order the blend target bits name them.
+#define LAYER_OBJ 4
+#define LAYER_BACKDROP 5
+#define LAYER_NONE 0xFF
+
+#define BGR_R(c) ((c) & 0x1F)
+#define BGR_G(c) (((c) >> 5) & 0x1F)
+#define BGR_B(c) (((c) >> 10) & 0x1F)
+#define BGR(r, g, b) ((uint16_t)((r) | ((g) << 5) | ((b) << 10)))
 
 #define DISPCNT_MODE_MASK 0x0007
 #define DISPCNT_OBJ_1D_MAP 0x0040
@@ -35,8 +56,9 @@
 #define DISPCNT_WIN_OBJ 0x8000
 
 // A window control byte is one bit per background, then the object layer, then
-// the colour effects -- which have no reader until blending lands.
+// the colour effects.
 #define WINDOW_OBJ 0x10
+#define WINDOW_EFFECT 0x20
 #define WINDOW_CONTROL_MASK 0x3F
 #define WINDOW_EVERYTHING WINDOW_CONTROL_MASK
 
@@ -76,6 +98,7 @@
 #define OBJ_MODE_HIDDEN 2
 #define OBJ_MODE_AFFINE_DOUBLE 3
 #define OBJ_GFX_MODE(a) (((a) >> 10) & 3)
+#define OBJ_GFX_SEMI 1
 #define OBJ_GFX_WINDOW 2
 #define OBJ_256_COLOUR 0x2000
 #define OBJ_SHAPE(a) (((a) >> 14) & 3)
@@ -115,8 +138,30 @@ static uint8_t obj_prio[SCREEN_W];
 // they land here instead, and become a region in the mask below.
 static uint8_t obj_window[SCREEN_W];
 
+// Set where the object that won the pixel asked to be blended with whatever is
+// under it, whatever the blend registers otherwise select.
+static uint8_t obj_semi[SCREEN_W];
+
 // Which layers may draw at each pixel of the current scanline.
 static uint8_t window_mask[SCREEN_W];
+
+// Blending needs the layer under the top one, so composition collects the two
+// frontmost contributors per pixel rather than stopping at the first. Anything
+// below them cannot affect the result.
+static uint16_t layer_colour[2][SCREEN_W];
+static uint8_t layer_id[2][SCREEN_W];
+static uint8_t layer_count[SCREEN_W];
+
+// Layers arrive front to back, so the first two to claim a pixel are the two
+// that matter and the rest are discarded.
+static void deposit(int x, uint16_t colour, int id)
+{
+    int slot = layer_count[x];
+
+    layer_colour[slot][x] = colour;
+    layer_id[slot][x] = (uint8_t)id;
+    layer_count[x] = (uint8_t)(slot + 1);
+}
 
 int agb_ppu_width(void)
 {
@@ -218,7 +263,7 @@ static int screen_block_offset(int size, int map_x, int map_y)
     return block * SCREEN_BLOCK_SIZE;
 }
 
-static void render_text_bg_line(int bg, int line, uint8_t *coverage)
+static void render_text_bg_line(int bg, int line)
 {
     uint16_t control = io16(REG_BG0CNT + bg * 2);
     int hofs = io16(REG_BG0HOFS + bg * 4) & 0x1FF;
@@ -231,7 +276,6 @@ static void render_text_bg_line(int bg, int line, uint8_t *coverage)
     int width_mask = (size == 1 || size == 3) ? 0x1FF : 0xFF;
     int height_mask = (size == 2 || size == 3) ? 0x1FF : 0xFF;
     int src_y = (line + vofs) & height_mask;
-    uint32_t *out = framebuffer + line * SCREEN_W;
 
     for (int x = 0; x < SCREEN_W; x++)
     {
@@ -269,11 +313,10 @@ static void render_text_bg_line(int bg, int line, uint8_t *coverage)
             colour += MAP_PALETTE(entry) * 16;
         }
 
-        if (coverage[x] || !(window_mask[x] & (1 << bg)))
+        if (layer_count[x] >= 2 || !(window_mask[x] & (1 << bg)))
             continue;
 
-        out[x] = to_argb(bg_palette(colour));
-        coverage[x] = 1;
+        deposit(x, bg_palette(colour), bg);
     }
 }
 
@@ -337,7 +380,7 @@ static void compute_window_mask(int line, uint16_t dispcnt)
 
 // Affine backgrounds are always 8bpp and their maps are one byte per tile --
 // no flip bits, no palette bank, so an entry is just a tile number.
-static void render_affine_bg_line(int bg, int line, uint8_t *coverage)
+static void render_affine_bg_line(int bg, int line)
 {
     uint16_t control = io16(REG_BG0CNT + bg * 2);
     int params = REG_AFFINE_BLOCK(bg);
@@ -350,7 +393,6 @@ static void render_affine_bg_line(int bg, int line, uint8_t *coverage)
     int wrap = (control & BGCNT_AFFINE_WRAP) != 0;
     const uint8_t *chars = agb_mem.vram + BGCNT_CHAR_BASE(control) * CHAR_BLOCK_SIZE;
     const uint8_t *screen = agb_mem.vram + BGCNT_SCREEN_BASE(control) * SCREEN_BLOCK_SIZE;
-    uint32_t *out = framebuffer + line * SCREEN_W;
 
     // The reference point walks down the screen by one column of the matrix per
     // scanline, and across it by one row per pixel.
@@ -363,7 +405,7 @@ static void render_affine_bg_line(int bg, int line, uint8_t *coverage)
         int ty = y >> 8;
         int colour;
 
-        if (coverage[i] || !(window_mask[i] & (1 << bg)))
+        if (layer_count[i] >= 2 || !(window_mask[i] & (1 << bg)))
             continue;
 
         if (wrap)
@@ -381,8 +423,7 @@ static void render_affine_bg_line(int bg, int line, uint8_t *coverage)
         if (colour == 0)
             continue;
 
-        out[i] = to_argb(bg_palette(colour));
-        coverage[i] = 1;
+        deposit(i, bg_palette(colour), bg);
     }
 }
 
@@ -426,6 +467,7 @@ static void render_obj_line(int line)
 
     memset(obj_colour, 0, sizeof(obj_colour));
     memset(obj_window, 0, sizeof(obj_window));
+    memset(obj_semi, 0, sizeof(obj_semi));
 
     if (!(dispcnt & DISPCNT_OBJ_ENABLE))
         return;
@@ -457,6 +499,7 @@ static void render_obj_line(int line)
         // A window object contributes shape rather than colour: its opaque
         // texels mark out a region, and it is never drawn.
         int is_window = OBJ_GFX_MODE(attr0) == OBJ_GFX_WINDOW;
+        int is_semi = OBJ_GFX_MODE(attr0) == OBJ_GFX_SEMI;
 
         if (mode == OBJ_MODE_HIDDEN)
             continue;
@@ -525,23 +568,122 @@ static void render_obj_line(int line)
 
             obj_colour[sx] = (uint8_t)index;
             obj_prio[sx] = (uint8_t)prio;
+            obj_semi[sx] = (uint8_t)is_semi;
         }
     }
 }
 
-static void blit_obj_line(int line, int priority, uint8_t *coverage)
+static void blit_obj_line(int priority)
 {
-    uint32_t *out = framebuffer + line * SCREEN_W;
-
     for (int x = 0; x < SCREEN_W; x++)
     {
-        if (!obj_colour[x] || obj_prio[x] != priority || coverage[x])
+        if (!obj_colour[x] || obj_prio[x] != priority || layer_count[x] >= 2)
             continue;
         if (!(window_mask[x] & WINDOW_OBJ))
             continue;
 
-        out[x] = to_argb(obj_palette(obj_colour[x]));
-        coverage[x] = 1;
+        deposit(x, obj_palette(obj_colour[x]), LAYER_OBJ);
+    }
+}
+
+// The blend coefficients are five bits holding a value of 0..16, so anything
+// above 16 means the same as 16.
+static int bld_coefficient(uint16_t reg, int shift)
+{
+    int value = (reg >> shift) & 0x1F;
+
+    return value > 16 ? 16 : value;
+}
+
+static int clamp31(int channel)
+{
+    return channel > 31 ? 31 : channel;
+}
+
+static uint16_t blend_alpha(uint16_t top, uint16_t bottom, int eva, int evb)
+{
+    int r = clamp31((BGR_R(top) * eva + BGR_R(bottom) * evb) >> 4);
+    int g = clamp31((BGR_G(top) * eva + BGR_G(bottom) * evb) >> 4);
+    int b = clamp31((BGR_B(top) * eva + BGR_B(bottom) * evb) >> 4);
+
+    return BGR(r, g, b);
+}
+
+// Towards white or towards black, by the same fraction of the distance.
+static uint16_t blend_brightness(uint16_t colour, int evy, int brighten)
+{
+    int r = BGR_R(colour);
+    int g = BGR_G(colour);
+    int b = BGR_B(colour);
+
+    if (brighten)
+    {
+        r += ((31 - r) * evy) >> 4;
+        g += ((31 - g) * evy) >> 4;
+        b += ((31 - b) * evy) >> 4;
+    }
+    else
+    {
+        r -= (r * evy) >> 4;
+        g -= (g * evy) >> 4;
+        b -= (b * evy) >> 4;
+    }
+
+    return BGR(r, g, b);
+}
+
+// Turn the two frontmost candidates at each pixel into the colour that ships.
+//
+// A semi-transparent object asks to be blended whatever the effect register
+// selects, and outranks it -- but only where something underneath is a second
+// target. Where that fails it falls back to whatever the register wanted, which
+// is what hardware does with it.
+static void resolve_line(int line, uint16_t backdrop)
+{
+    uint32_t *out = framebuffer + line * SCREEN_W;
+    uint16_t bldcnt = io16(REG_BLDCNT);
+    uint16_t bldalpha = io16(REG_BLDALPHA);
+    int effect = BLD_EFFECT(bldcnt);
+    int first = BLD_FIRST_TARGET(bldcnt);
+    int second = BLD_SECOND_TARGET(bldcnt);
+    int eva = bld_coefficient(bldalpha, 0);
+    int evb = bld_coefficient(bldalpha, 8);
+    int evy = bld_coefficient(io16(REG_BLDY), 0);
+
+    for (int x = 0; x < SCREEN_W; x++)
+    {
+        int count = layer_count[x];
+        uint16_t top = count > 0 ? layer_colour[0][x] : backdrop;
+        int top_id = count > 0 ? layer_id[0][x] : LAYER_BACKDROP;
+        uint16_t under = count > 1 ? layer_colour[1][x] : backdrop;
+        // Nothing sits under the backdrop, so a pixel it already owns has no
+        // second layer to blend with.
+        int under_id = count > 1 ? layer_id[1][x] : (count > 0 ? LAYER_BACKDROP : LAYER_NONE);
+        int semi = top_id == LAYER_OBJ && obj_semi[x];
+        int blended = 0;
+
+        if (window_mask[x] & WINDOW_EFFECT)
+        {
+            int under_is_target = under_id != LAYER_NONE && (second & (1 << under_id));
+
+            if (semi && under_is_target)
+            {
+                top = blend_alpha(top, under, eva, evb);
+                blended = 1;
+            }
+
+            if (!blended && (first & (1 << top_id)))
+            {
+                if (effect == BLD_ALPHA && under_is_target)
+                    top = blend_alpha(top, under, eva, evb);
+                else if (effect == BLD_BRIGHTEN)
+                    top = blend_brightness(top, evy, 1);
+                else if (effect == BLD_DARKEN)
+                    top = blend_brightness(top, evy, 0);
+            }
+        }
+
+        out[x] = to_argb(top);
     }
 }
 
@@ -561,24 +703,18 @@ void agb_ppu_render_frame(void)
 
     for (int line = 0; line < SCREEN_H; line++)
     {
-        uint32_t backdrop = to_argb(bg_palette(0));
-        uint32_t *out = framebuffer + line * SCREEN_W;
-        uint8_t coverage[SCREEN_W];
-
-        for (int x = 0; x < SCREEN_W; x++)
-            out[x] = backdrop;
-        memset(coverage, 0, sizeof(coverage));
+        memset(layer_count, 0, sizeof(layer_count));
         // The object pass first: the object window is a region built from the
         // shapes of objects, so the mask cannot be resolved before it.
         render_obj_line(line);
         compute_window_mask(line, dispcnt);
 
-        // Front to back, so the first layer to claim a pixel keeps it: priority
-        // 0 is nearest, and among equal priorities objects sit above every
-        // background and the lower BG number wins.
+        // Front to back, so the first layer to claim a pixel is the frontmost:
+        // priority 0 is nearest, and among equal priorities objects sit above
+        // every background and the lower BG number wins.
         for (int priority = 0; priority < 4; priority++)
         {
-            blit_obj_line(line, priority, coverage);
+            blit_obj_line(priority);
 
             for (int bg = 0; bg < 4; bg++)
             {
@@ -604,10 +740,12 @@ void agb_ppu_render_frame(void)
                     continue;
 
                 if (affine)
-                    render_affine_bg_line(bg, line, coverage);
+                    render_affine_bg_line(bg, line);
                 else
-                    render_text_bg_line(bg, line, coverage);
+                    render_text_bg_line(bg, line);
             }
         }
+
+        resolve_line(line, bg_palette(0));
     }
 }

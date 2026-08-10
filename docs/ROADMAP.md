@@ -11,7 +11,7 @@ Update the status column when a milestone lands.
 | 0 | Foundations: repo, pinned submodule, docs, reference ROM builds | **done** |
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
-| 3 | PPU — the first real frame, and the golden-screenshot harness | **in progress** — backgrounds and objects render |
+| 3 | PPU — the first real frame, and the golden-screenshot harness | **in progress** — all layers, windows and blending render |
 | 4 | Audio — the m4a mixer in C | |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
@@ -172,14 +172,21 @@ Windows are done too — both rectangles, the object window, the region outside 
 garbage-bounds rules — and this one *is* visible: the intro cinematic's letterbox was leaking
 background into its black bands, because the mask that clips it did not exist.
 
-The unit tier is up: `tests/` runs under CTest, with `test_ppu_objects`, `test_ppu_bg_affine` and
-`test_ppu_windows` driving the renderer from hand-built registers, VRAM and OAM to cover what a
-running frame does not reach — 8bpp, 2D tile mapping, the size tables, the wrap and overflow rules,
-priority ordering, both affine transforms with their clipping, the mode/layer table, and the window
-regions with their precedence.
+Blending is in too — alpha, both brightness effects, semi-transparent objects, and the target and
+window rules deciding when each applies. It shows on the GAME FREAK logo, which fades in rather than
+appearing solid. It also forced a composition change the renderer needed anyway: layers are now
+collected two-deep per pixel, because a blend needs whatever sits under the top layer and
+first-writer-wins cannot supply it.
 
-Remaining: **blending and mosaic**, plus the bitmap modes. Unimplemented features are skipped
-rather than approximated, so absence is visible rather than subtly wrong.
+The unit tier is up: `tests/` runs under CTest, with `test_ppu_objects`, `test_ppu_bg_affine`,
+`test_ppu_windows` and `test_ppu_blend` driving the renderer from hand-built registers, VRAM and
+OAM to cover what a running frame does not reach — 8bpp, 2D tile mapping, the size tables, the wrap
+and overflow rules, priority ordering, both affine transforms with their clipping, the mode/layer
+table, the window regions with their precedence, and the blend arithmetic against hand-computed
+colours.
+
+Remaining: **mosaic**, plus the bitmap modes. Unimplemented features are skipped rather than
+approximated, so absence is visible rather than subtly wrong.
 
 Still to build: the golden-image harness itself (two thresholds, diff artifacts, `--bless`) and
 mGBA reference captures to compare against. HBlank interrupts land here too, since per-scanline
