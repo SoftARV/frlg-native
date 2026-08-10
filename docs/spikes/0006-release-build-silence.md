@@ -38,30 +38,47 @@ produced, not what the device did with it. Both builds open the stream and submi
 - **Not rendering.** Both builds produce an identical frame 2400. Whatever diverges is confined to
   the sound path.
 
-## Where to look next
+## Narrowing, and one hypothesis already dead
 
-The sound engine is reached from two contexts on one thread: the game calls into it normally, and
-`SoundMain` runs inside the V-blank signal handler. Upstream says so itself, of the field that
-guards exactly that:
+The port now reports what it mixed on every run, device or no device, which measures this directly:
 
-> This field should be volatile but isn't. This could potentially cause race conditions.
+| Build | Frames reaching the mixer | Non-silent | Peak |
+| --- | --- | --- | --- |
+| `headless` (`-O0`) | 1199 | 956 | 110 |
+| `linux-debug` (`-O0`) | 1199 | 956 | 110 |
+| `linux-release` (`-O2`) | **1199** | **0** | **0** |
 
-At `-O0` a global is reloaded on every access and the guard works by accident. At `-O2` the compiler
-may keep `SoundInfo.ident` — or any other sound state — in a register across the point where the
-signal arrives, which would make the lock read stale and `SoundMain` bail every frame. That is the
-first hypothesis to test, and it is testable: count entries to `SoundMain` against early returns in
-both builds.
+**The first hypothesis was wrong.** It said the sound header's `ident` — which upstream notes
+"should be volatile but isn't" — might read stale at `-O2` and make `SoundMain` bail every frame. It
+does not: the sink is called 1,199 times in *both* builds, so `SoundMain` runs, mixes, and hands over
+a buffer every frame. Only the contents differ.
+
+And they differ absolutely, not subtly: **exact zeros, peak 0**. That is not arithmetic drifting, it
+is nothing being added to a cleared buffer at all. So either no channel is ever active, or every
+active channel mixes at zero volume. That points at note allocation or the envelope rather than at
+the mixing loop, and the two `-O0` builds agreeing to the sample says the pipeline is otherwise
+deterministic.
+
+Next measurement, not next guess: count channels that pass `agb_m4a_envelope_step` per frame in both
+builds. If it is zero at `-O2`, the fault is in `ply_note` or `MPlayMain`; if it is non-zero, it is in
+the envelope's volume fold.
 
 If that is it, the fix is a deliberate decision rather than a patch: make the shared state volatile
 in our own code, or route the mixer off the signal handler. It should not be reached for before the
 measurement.
 
-## The gap this exposes
+## The gap this exposes, and what actually closes it
 
-**The golden tier only ever runs the `headless` preset, which is a `Debug` build.** No test tier has
-ever exercised optimised code. The port could have been miscompiling something for phases and no
-test would have said so — this was found by listening, not by testing. Rendering happens to agree
-here, which is luck rather than coverage.
+**No test tier had ever exercised optimised code**: the golden tier runs the `headless` preset, which
+is a `Debug` build. That is a real gap and worth stating. But running the goldens against an optimised
+build would **not** have caught this, and it is worth being precise about why: the optimised build
+passes all four golden frames pixel-exactly, tolerance zero. Rendering is identical. A screenshot
+cannot see silence.
 
-Running the goldens against an optimised build as well is the obvious answer, and cheap: the golden
-harness already takes a binary path.
+What closes it is measuring the audio, which `tools/audio_check.py` now does as part of the test
+suite. It needs no sound hardware — the null host refuses to open a device and the port measures what
+the mixer produced regardless — and it fails on the optimised build today, which is the point.
+
+The general lesson is the one worth keeping: **a subsystem with no observable output has no tests, no
+matter how many tests it has.** The mixer had 119 passing unit tests and four passing golden frames
+while producing pure silence in the build we would ship.

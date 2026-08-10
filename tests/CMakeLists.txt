@@ -45,3 +45,11 @@ add_test(NAME golden
             --binary "$<TARGET_FILE:frlg-native>"
             --out "${CMAKE_BINARY_DIR}/golden")
 set_tests_properties(golden PROPERTIES LABELS golden TIMEOUT 900)
+
+# The mixer running and the mixer producing sound are different things, and only
+# one of them is visible in a screenshot. This needs no sound hardware: the null
+# host refuses to open a device and the port measures what it mixed regardless.
+add_test(NAME audio
+    COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/audio_check.py"
+            --binary "$<TARGET_FILE:frlg-native>")
+set_tests_properties(audio PROPERTIES LABELS golden TIMEOUT 600)

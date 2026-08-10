@@ -110,10 +110,36 @@ static void write_ppm(const char *path)
 // Called from the game thread every frame with the buffer the mixer has just
 // filled. The device opens on the first frame and reopens if the game changes
 // the mixer's rate, which m4aSoundMode can do at any time.
+// What the mixer produced, whether or not anything is playing it. Audio leaves
+// no trace if it is wrong -- a mixer that runs but produces nothing looks exactly
+// like a host that is not listening -- so this is measured on every run and
+// reported at the end. It is the only way a silent mixer fails a test.
+static uint32_t audio_frames;
+static uint32_t audio_loud_frames;
+static int audio_peak;
+
 static void audio_sink(const int8_t *right, const int8_t *left, int samples, int rate)
 {
     static int opened_rate;
-    static bool heard_sound;
+    bool loud = false;
+
+    // Measured before the device is considered, so a build with no audio output
+    // at all still reports what the mixer did.
+    audio_frames++;
+    for (int i = 0; i < samples; i++)
+    {
+        int a = right[i] < 0 ? -right[i] : right[i];
+        int b = left[i] < 0 ? -left[i] : left[i];
+
+        if (a > audio_peak)
+            audio_peak = a;
+        if (b > audio_peak)
+            audio_peak = b;
+        if (a != 0 || b != 0)
+            loud = true;
+    }
+    if (loud)
+        audio_loud_frames++;
 
     if (rate != opened_rate)
     {
@@ -122,26 +148,8 @@ static void audio_sink(const int8_t *right, const int8_t *left, int samples, int
             printf("frlg-native: audio at %d Hz\n", opened_rate);
     }
 
-    if (opened_rate == 0)
-        return;
-
-    // Audio leaves no trace if it is wrong, so say once that something other
-    // than silence arrived: a mixer that runs but produces nothing looks exactly
-    // like a host that is not listening.
-    if (!heard_sound)
-    {
-        for (int i = 0; i < samples; i++)
-        {
-            if (right[i] != 0 || left[i] != 0)
-            {
-                heard_sound = true;
-                printf("frlg-native: first non-silent audio frame\n");
-                break;
-            }
-        }
-    }
-
-    host_audio_submit(right, left, samples);
+    if (opened_rate != 0)
+        host_audio_submit(right, left, samples);
 }
 
 // The game's own data lives in the player's ROM, not in this binary
@@ -249,5 +257,7 @@ int main(int argc, char **argv)
     host_video_close();
 
     printf("frlg-native: ran %u frames\n", frames_ran);
+    printf("frlg-native: audio %u frames, %u non-silent, peak %d\n",
+           audio_frames, audio_loud_frames, audio_peak);
     return 0;
 }
