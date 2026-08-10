@@ -6,6 +6,8 @@
 // that is kept, because the sequencer above reads the same byte and expects the
 // numbering.
 
+#include <string.h>
+
 #include "agb/m4a.h"
 
 // Attack, decay and release are per-frame multipliers in 8.8; the envelope is
@@ -339,4 +341,58 @@ bool agb_m4a_mix_pitched(const struct SoundInfo *info, struct SoundChannel *chan
     // The pointer trails one behind, addressing the sample still being played.
     chan->currentPointer = (s8 *)next - 1;
     return true;
+}
+
+s8 *agb_m4a_frame_buffer(const struct SoundInfo *info)
+{
+    s8 *frame = (s8 *)info->pcmBuffer;
+    int counter = info->pcmDmaCounter;
+
+    // A counter of one or zero means the first frame of the area; anything
+    // higher steps forward by however many frames the DMA has left to read.
+    if (counter >= 2)
+        frame += (info->pcmDmaPeriod - (counter - 1)) * info->pcmSamplesPerVBlank;
+
+    return frame;
+}
+
+void agb_m4a_prepare_frame(const struct SoundInfo *info, s8 *frame, int samples)
+{
+    s8 *right = frame;
+    s8 *left = frame + PCM_DMA_BUF_SIZE;
+    int reverb = info->reverb;
+
+    if (reverb == 0)
+    {
+        // The original clears with word stores and never handles the last one to
+        // three bytes, so a sample count that is not a multiple of four leaves a
+        // tail of the previous frame behind. Every rate the sequencer uses is a
+        // multiple of four; the behaviour is kept rather than tidied.
+        int whole = samples & ~3;
+
+        memset(right, 0, (size_t)whole);
+        memset(left, 0, (size_t)whole);
+        return;
+    }
+
+    // Reverb sums both sides of this frame with both sides of another, which is
+    // the frame ahead -- or the very start of the area, when the DMA counter says
+    // this is the last frame in it.
+    const s8 *next = info->pcmDmaCounter == 2 ? (const s8 *)info->pcmBuffer : frame + samples;
+
+    for (int i = 0; i < samples; i++)
+    {
+        int sum = left[i] + right[i] + next[i + PCM_DMA_BUF_SIZE] + next[i];
+        int value = (sum * reverb) >> 9;
+
+        // The original tests bit seven of the result and adds one. For a negative
+        // result that rounds it back towards zero, the shift above having
+        // floored it -- but the test is on the bit rather than on the sign, so a
+        // positive result that has run up into the sign bit is nudged too.
+        if (value & 0x80)
+            value++;
+
+        left[i] = (s8)value;
+        right[i] = (s8)value;
+    }
 }

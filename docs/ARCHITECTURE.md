@@ -497,6 +497,16 @@ position by the sound header's `divFreq` times the channel's frequency and inter
 neighbouring samples; the position carries across frames in the channel, and overrunning a loop
 rewinds however many loop lengths it takes to land back inside.
 
+A frame's buffers are prepared before any channel reaches them: cleared, or seeded with a reverb
+that sums both sides of this frame with both sides of another — the frame ahead, or the start of the
+area when the DMA counter says this is the last one. Which frame of the area is written comes from
+that same counter, so the mixer stays ahead of what the hardware is reading out.
+
+The scanline budget in the original — bail out of the channel loop once `VCOUNT` passes a deadline —
+is **not reproduced, because it cannot fire**: `gMaxLines` is defined as absolute zero in every one
+of upstream's linker scripts, and zero means no maximum. Reproducing it would have meant giving our
+`VCOUNT` a meaning during V-blank that it does not have.
+
 The mixing accumulate **wraps at eight bits rather than clamping**. The original keeps four output
 samples packed in a register and rotates them past an accumulator, masking so one sample's low bits
 cannot reach its neighbour; nothing in that arrangement saturates, so a loud mix distorts the way

@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | **in progress** — envelope and both mixing paths done |
+| 4 | Audio — the m4a mixer in C | **in progress** — envelope, both mixing paths, buffers |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -248,7 +248,13 @@ The order, and where it stands:
    at its own rate; the pitched path resamples with linear interpolation off a 9.23 fractional
    position, carrying it across frames and rewinding repeatedly when a step clears a whole loop.
    Both share the eight-bit wrapping accumulate. `test_m4a_mix`.
-3. `SoundMain`, the per-frame driver and buffer management.
+3. **Buffer management** — **done**: which frame of the PCM area is written, and preparing its two
+   buffers by clearing or by folding in a reverb. `test_m4a_frame`. `SoundMain` itself is the rest of
+   this step and waits on the sequencer, since its job is to call it.
+
+   Found on the way: the original's scanline CPU budget **cannot fire**, because `gMaxLines` is
+   absolute zero in every upstream linker script. Reproducing it would have meant inventing a
+   meaning for `VCOUNT` during V-blank.
 4. The track interpreter and its jump table.
 5. Build upstream's `m4a.c` and drop the deferred entries. It is excluded for one line,
    `asm("swi 0x2A")`, and a per-file `-Dasm(x)=` clears it — so the 1781-line sequencer keeps

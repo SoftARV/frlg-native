@@ -45,4 +45,14 @@ bool agb_m4a_mix_fixed(struct SoundChannel *chan, s8 *right, s8 *left, int sampl
 bool agb_m4a_mix_pitched(const struct SoundInfo *info, struct SoundChannel *chan,
                          s8 *right, s8 *left, int samples);
 
+// Where in the PCM area this frame writes. The area holds several frames and
+// the DMA counter says which one is free, so the mixer writes ahead of what the
+// hardware is reading out.
+s8 *agb_m4a_frame_buffer(const struct SoundInfo *info);
+
+// Prepare that frame's two buffers before any channel is mixed in: either
+// cleared, or seeded with a reverb of what is already there. `frame` is the
+// right-hand buffer; the left sits PCM_DMA_BUF_SIZE further on.
+void agb_m4a_prepare_frame(const struct SoundInfo *info, s8 *frame, int samples);
+
 #endif // GUARD_AGB_M4A_H
