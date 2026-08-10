@@ -3,8 +3,20 @@
 
 #include <stdio.h>
 
-static int test_failures;
-static const char *test_case_name = "";
+// The PPU raises the scanline interrupts, so it reaches irq.c, which dispatches
+// through the game's own handler table. Tests link the agb archive without the
+// game, so they supply the table themselves -- and it is what lets a test
+// install a handler and watch the PPU call it.
+typedef void (*IntrFunc)(void);
+extern IntrFunc gIntrTable[14];
+
+// The slots are ordered by the BIOS vector's scan priority, not by IE bit.
+#define INTR_SLOT_VCOUNT 0
+#define INTR_SLOT_HBLANK 3
+#define INTR_SLOT_VBLANK 4
+
+extern int test_failures;
+extern const char *test_case_name;
 
 #define TEST_CASE(name) (test_case_name = (name))
 
@@ -20,10 +32,6 @@ static const char *test_case_name = "";
         }                                                                   \
     } while (0)
 
-static int test_report(const char *suite)
-{
-    printf("%s: %s (%d failures)\n", suite, test_failures ? "FAILED" : "ok", test_failures);
-    return test_failures != 0;
-}
+int test_report(const char *suite);
 
 #endif // GUARD_TESTS_HARNESS_H

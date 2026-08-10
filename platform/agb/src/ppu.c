@@ -2,11 +2,16 @@
 //
 // Every display mode and every layer feature the hardware has: backgrounds,
 // text, affine and bitmap; objects, regular and affine; the windows that mask
-// them; the colour effects; and mosaic. What is left of phase 3 is the
-// golden-image harness and the HBlank interrupt the per-scanline effects need.
+// them; the colour effects; and mosaic.
+//
+// Composition walks the screen a scanline at a time and re-reads every register
+// as it goes, so a per-scanline effect writing from an H-blank handler lands on
+// the following line -- which is what the game's battle transitions are built
+// out of.
 
 #include <string.h>
 
+#include "agb/irq.h"
 #include "agb/memmap.h"
 #include "agb/ppu.h"
 
@@ -14,6 +19,8 @@
 #define SCREEN_H 160
 
 #define REG_DISPCNT 0x000
+#define REG_DISPSTAT 0x004
+#define REG_VCOUNT 0x006
 #define REG_BG0CNT 0x008
 #define REG_BG0HOFS 0x010
 // BG2's affine block; BG3's follows 0x10 later.
@@ -52,6 +59,13 @@
 #define BGR_G(c) (((c) >> 5) & 0x1F)
 #define BGR_B(c) (((c) >> 10) & 0x1F)
 #define BGR(r, g, b) ((uint16_t)((r) | ((g) << 5) | ((b) << 10)))
+
+#define DISPSTAT_VBLANK_FLAG 0x0001
+#define DISPSTAT_HBLANK_FLAG 0x0002
+#define DISPSTAT_VCOUNT_FLAG 0x0004
+#define DISPSTAT_HBLANK_IRQ 0x0010
+#define DISPSTAT_VCOUNT_IRQ 0x0020
+#define DISPSTAT_VCOUNT_SETTING(d) (((d) >> 8) & 0xFF)
 
 #define DISPCNT_MODE_MASK 0x0007
 #define DISPCNT_FRAME_SELECT 0x0010
@@ -201,6 +215,11 @@ uint32_t agb_ppu_frame_serial(void)
 static uint16_t io16(int offset)
 {
     return *(const volatile uint16_t *)(agb_mem.io + offset);
+}
+
+static void io16_write(int offset, uint16_t value)
+{
+    *(volatile uint16_t *)(agb_mem.io + offset) = value;
 }
 
 static uint32_t io32(int offset)
@@ -794,22 +813,59 @@ static void resolve_line(int line, uint16_t backdrop)
     }
 }
 
+// A scanline begins: the line counter moves, and a game watching for one
+// particular line hears about it here.
+static void scanline_begin(int line)
+{
+    uint16_t dispstat = io16(REG_DISPSTAT) & ~(DISPSTAT_HBLANK_FLAG | DISPSTAT_VCOUNT_FLAG);
+
+    io16_write(REG_VCOUNT, (uint16_t)line);
+    if (DISPSTAT_VCOUNT_SETTING(dispstat) == line)
+        dispstat |= DISPSTAT_VCOUNT_FLAG;
+    io16_write(REG_DISPSTAT, dispstat);
+
+    if ((dispstat & DISPSTAT_VCOUNT_FLAG) && (dispstat & DISPSTAT_VCOUNT_IRQ))
+        agb_irq_raise(AGB_IRQ_VCOUNT);
+}
+
+// And ends. The handler runs after the line is drawn and before the next one,
+// which is the window a per-scanline effect writes its registers in -- every
+// layer re-reads them per line, so the write lands on the line after this.
+static void scanline_end(void)
+{
+    uint16_t dispstat = io16(REG_DISPSTAT);
+
+    io16_write(REG_DISPSTAT, dispstat | DISPSTAT_HBLANK_FLAG);
+
+    if (dispstat & DISPSTAT_HBLANK_IRQ)
+        agb_irq_raise(AGB_IRQ_HBLANK);
+}
+
 void agb_ppu_render_frame(void)
 {
-    uint16_t dispcnt = io16(REG_DISPCNT);
-    int mode = dispcnt & DISPCNT_MODE_MASK;
-
     frame_serial++;
-
-    if (dispcnt & DISPCNT_FORCED_BLANK)
-    {
-        for (int i = 0; i < SCREEN_W * SCREEN_H; i++)
-            framebuffer[i] = 0x00FFFFFF;
-        return;
-    }
 
     for (int line = 0; line < SCREEN_H; line++)
     {
+        // Read per scanline rather than per frame: a per-scanline effect may
+        // have changed any of this from the previous line's H-blank.
+        uint16_t dispcnt;
+        int mode;
+
+        scanline_begin(line);
+        dispcnt = io16(REG_DISPCNT);
+        mode = dispcnt & DISPCNT_MODE_MASK;
+
+        if (dispcnt & DISPCNT_FORCED_BLANK)
+        {
+            uint32_t *blank = framebuffer + line * SCREEN_W;
+
+            for (int x = 0; x < SCREEN_W; x++)
+                blank[x] = 0x00FFFFFF;
+            scanline_end();
+            continue;
+        }
+
         memset(layer_count, 0, sizeof(layer_count));
         // The object pass first: the object window is a region built from the
         // shapes of objects, so the mask cannot be resolved before it.
@@ -859,5 +915,6 @@ void agb_ppu_render_frame(void)
         }
 
         resolve_line(line, bg_palette(0));
+        scanline_end();
     }
 }

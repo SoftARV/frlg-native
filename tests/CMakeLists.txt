@@ -7,7 +7,7 @@
 # working; plain `ctest` runs both.
 
 function(frlg_add_test name)
-    add_executable("${name}" "${name}.c")
+    add_executable("${name}" "${name}.c" harness.c)
     target_link_libraries("${name}" PRIVATE agb)
     target_include_directories("${name}" PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options("${name}" PRIVATE -Wall -Wextra)
@@ -21,6 +21,7 @@ frlg_add_test(test_ppu_windows)
 frlg_add_test(test_ppu_blend)
 frlg_add_test(test_ppu_mosaic)
 frlg_add_test(test_ppu_bitmap)
+frlg_add_test(test_ppu_scanline_irq)
 
 set(golden "${CMAKE_SOURCE_DIR}/tools/golden.py")
 

@@ -407,6 +407,19 @@ to draw from.
 rule while it was being built — a feature that was absent read as absent, so the picture never
 lied about what existed.
 
+**The scanline interrupts are raised from inside the composition loop.** Each line sets `VCOUNT`,
+matches it against `DISPSTAT` and raises V-count if asked, draws, then sets the H-blank flag and
+raises H-blank. Every layer re-reads its registers per line, so a handler writing scroll, window or
+blend registers changes the picture from the following line down — which is exactly what the game's
+battle transitions do, and the only reason they can work. Forced blank stops the picture, not the
+interrupts.
+
+One divergence to know about: an affine background's reference point is recomputed per line from
+`BGxX`/`BGxY` rather than latched at the top of the frame and stepped. A handler that writes those
+mid-frame therefore acts as though it had written them before the frame began. Fixing it needs the
+internal registers to be latched, and writes to them intercepted, as the DMA control registers
+already are.
+
 The PPU composes on the game thread at V-blank, immediately after the game's own handler, so the
 register writes and DMA copies that handler performs appear in the same frame. The host thread
 copies the finished buffer out to present; a torn copy costs one frame of tearing and never blocks

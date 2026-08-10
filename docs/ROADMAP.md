@@ -11,7 +11,7 @@ Update the status column when a milestone lands.
 | 0 | Foundations: repo, pinned submodule, docs, reference ROM builds | **done** |
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
-| 3 | PPU — the first real frame, and the golden-screenshot harness | **in progress** — title screen matches the ROM exactly; HBlank left |
+| 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
 | 4 | Audio — the m4a mixer in C | |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
@@ -142,7 +142,7 @@ Deferred to their own phases:
 - **Determinism is an open problem** ([ADR 0009](adr/0009-preemptive-interrupts.md)). The phase 6
   harness cannot assume reproducible frame boundaries from a wall-clock timer.
 
-## Phase 3 — It draws *(in progress)*
+## Phase 3 — It draws *(done)*
 
 **The title screen renders.** Text backgrounds are done: all four layers, 4bpp and 8bpp, both
 flips, all four map sizes with their multi-block layouts, priority ordering, and forced blank.
@@ -222,7 +222,13 @@ match mGBA exactly and only animated sprites sit at a different phase, because s
 diverges wherever the game waits on the stubbed audio subsystem. Full evidence in
 [spike 0004](spikes/0004-mgba-frame-alignment.md); they are worth re-testing once phase 4 lands.
 
-Still to build: HBlank interrupts, since per-scanline effects depend on them.
+The scanline interrupts are in: H-blank and V-count match, raised from inside the composition loop,
+with the DISPSTAT flags and the three gates each one passes through. Every layer already re-read its
+registers per line, so a handler writing from H-blank changes the picture from the next line down —
+which `battle_transition.c` needs for its six per-scanline effects, and so does phase 6.
+
+**Phase 3 is done.** The renderer implements every display mode and layer feature the hardware has,
+the title screen is pixel-identical to the ROM, and the tier that proves it runs under CTest.
 
 Milestone: the title screen, pixel-comparable to the ROM.
 
