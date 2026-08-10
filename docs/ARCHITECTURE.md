@@ -714,6 +714,13 @@ needs no special case above it.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game
 state.
 
+**The PSG channels are not emulated.** The GBA has two sound systems and this section is only one of
+them: the m4a engine mixes direct sound in software, and separately drives four *hardware* channels
+— two squares, a programmable wave and noise — by writing registers. `CgbSound` runs every frame and
+writes them; nothing in the port reads them, so those channels are silent. It costs 88 of the 812
+instruments the song table reaches, about 11%, which is audible as parts of a tune missing rather
+than as silence. Implementing it is four channel generators mixed into the same PCM buffer.
+
 ### 6.8 Save data
 
 `agb_flash*.c` emulate 128 KiB of flash backed by a host file, byte-identical to the `.sav` format

@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | **done** |
+| 4 | Audio — the m4a mixer in C | **done** — but the PSG channels are not emulated, so ~11% of instruments are silent |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -367,6 +367,21 @@ The order, and where it stands:
    A build wrinkle fixed on the way: the bindings step writes `agb_stubs.c` but only declared
    `bindings.rsp` as its output, so a build that newly implemented a stubbed symbol linked against
    the previous stub object and failed once before succeeding.
+
+7. **The PSG channels are not emulated**, and this is what is still missing by ear. The GBA has two
+   sound systems: the m4a engine mixes direct sound in software -- which is everything phase 4 built --
+   and four **hardware PSG channels** (two squares, a programmable wave, noise) that it drives by
+   writing registers. `m4a.c` writes 25 of them, `CgbSound` runs every frame doing so, and **nothing
+   reads them**: the port's only reference to those addresses is `ply_port` storing a byte into the
+   register file.
+
+   Counting instruments reachable from the song table: 466 direct sound, 258 rhythm or key-split, and
+   **88 on PSG channels -- 11%, all silent**. Reported by ear first: the intro's cry and drums play,
+   the title screen is missing parts. That is the shape you would expect when the sampled half works
+   and the synthesised half does not.
+
+   This is a new subsystem rather than more of the mixer -- four channel generators with their own
+   envelopes, sweep and length counters, mixed into the same PCM buffer the host already consumes.
 
 6. **Host audio** — **done, with a caveat**. `host.h` gained an output stream, SDL3 implements it,
    and `null` stays silent. The mixer hands each finished frame to a sink the port installs, and the
