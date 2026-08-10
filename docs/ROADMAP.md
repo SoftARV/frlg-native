@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | |
+| 4 | Audio — the m4a mixer in C | **in progress** — envelope done |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -232,9 +232,29 @@ the title screen is pixel-identical to the ROM, and the tier that proves it runs
 
 Milestone: the title screen, pixel-comparable to the ROM.
 
-## Phase 4 — It sounds
+## Phase 4 — It sounds *(in progress)*
 
 `m4a_1.s` reimplemented in C, driven from the frame loop, resampled by the host layer.
+
+`m4a_1.s` is 1917 lines of ARM across 36 routines, and it is two subsystems: a track interpreter
+(`MPlayMain`, `TrackStop`, 24 `ply_*` opcodes) and the mixer (`SoundMain`, `SoundMainRAM`,
+`SoundMainBTM`, `m4aSoundVSync`). Upstream's `m4a.c` sequencer is not built at all yet.
+
+The order, and where it stands:
+
+1. **Envelope** — **done**. Attack, decay, sustain, release, the pseudo-echo tail and the volume
+   fold, in `platform/agb/src/m4a_mixer.c`, driven directly by `test_m4a_envelope`.
+2. PCM mixing loop and the sample walk.
+3. `SoundMain`, the per-frame driver and buffer management.
+4. The track interpreter and its jump table.
+5. Build upstream's `m4a.c` and drop the deferred entries. It is excluded for one line,
+   `asm("swi 0x2A")`, and a per-file `-Dasm(x)=` clears it — so the 1781-line sequencer keeps
+   receiving upstream fixes instead of being forked into an override.
+6. Host audio: `host.h` gains an output stream, SDL3 implements it, `null` stays silent.
+
+Waiting at the end of it: [spike 0004](spikes/0004-mgba-frame-alignment.md) excluded frames 400 and
+900 from the mGBA oracle **because** audio is stubbed and scene pacing drifts. They are the measure
+of whether this phase worked.
 
 ## Phase 5 — It remembers
 

@@ -479,8 +479,19 @@ and `HuffUnComp` are exercised against real game assets.
 
 ### 6.7 Audio
 
-`m4a.c`, the sequencer, is already C upstream and used as-is. `m4a_1.s` — 1917 lines of ARM
-implementing `SoundMain`, `SoundMainRAM` and the reverb path — is the mixer, reimplemented in C.
+`m4a.c`, the sequencer, is already C upstream and used as-is. `m4a_1.s` — 1917 lines of ARM across
+36 routines — is reimplemented in C as `platform/agb/src/m4a_mixer.c`. It is two subsystems, not
+one: a track interpreter (`MPlayMain`, `TrackStop` and 24 `ply_*` opcode handlers) and the mixer
+proper (`SoundMain`, `SoundMainRAM`, `SoundMainBTM`, `m4aSoundVSync`).
+
+It is **translated rather than rewritten**, so the result can be checked against a known-good
+emulator sample for sample, the way the PPU is checked frame for frame. Where the original relies on
+something a reader would take for a mistake, the comment says so and the code keeps the behaviour —
+the envelope's master-volume fold reaches a `SoundInfo` byte through a `SoundChannel` offset, and
+that is load-bearing.
+
+**Done so far: the envelope** — attack, decay, sustain, release, the pseudo-echo tail, and the
+volume fold the mixing loop reads.
 
 The mixer produces the GBA's native ~13.4 kHz PCM into a ring buffer; the host layer resamples.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game
