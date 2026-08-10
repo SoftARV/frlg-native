@@ -1967,6 +1967,99 @@ static void test_driver_zero_track_count(void)
     CHECK(player.status == 1, "the status came out %08X, not 1", player.status);
 }
 
+// ------------------------------------------------------------ the mixer driver ---
+
+static int cgb_sound_calls;
+static int sound_chain_calls;
+static struct MusicPlayerInfo *sound_chained_with;
+static u32 ident_during_sound_chain;
+
+static void spy_cgb_sound(void)
+{
+    cgb_sound_calls++;
+}
+
+static void spy_sound_chain(struct MusicPlayerInfo *p)
+{
+    sound_chain_calls++;
+    sound_chained_with = p;
+    ident_during_sound_chain = sound_header.ident;
+}
+
+// SoundMain drives the players and then mixes, so a test needs a sound header
+// that can survive both. The channels are left off: what is under test here is
+// the order and the lock, not the mixing.
+static void sound_reset(const char *name)
+{
+    TEST_CASE(name);
+    install_sound_header();
+    sound_header.ident = ID_NUMBER;
+    sound_header.CgbSound = spy_cgb_sound;
+    sound_header.maxChans = 1;
+    sound_header.pcmSamplesPerVBlank = 8;
+    sound_header.pcmDmaPeriod = 4;
+    sound_header.pcmDmaCounter = 0;
+    sound_header.reverb = 0;
+    sound_header.chans[0].statusFlags = 0;
+
+    cgb_sound_calls = 0;
+    sound_chain_calls = 0;
+    sound_chained_with = NULL;
+    ident_during_sound_chain = 0;
+}
+
+// The same lock the sequencer uses, for the same reason.
+static void test_sound_main_ident_guard(void)
+{
+    sound_reset("the mixer ignores a header mid-update");
+    sound_header.ident = ID_NUMBER + 1;
+    SoundMain();
+    CHECK(cgb_sound_calls == 0, "a locked header was mixed anyway");
+    CHECK(sound_header.ident == ID_NUMBER + 1, "the ident was disturbed");
+
+    sound_reset("the mixer releases the lock on the way out");
+    SoundMain();
+    CHECK(sound_header.ident == ID_NUMBER, "the ident was left at %08X",
+          sound_header.ident);
+}
+
+// The players run before the compatible-sound channels, and both before mixing.
+static void test_sound_main_drives_players(void)
+{
+    sound_reset("the mixer drives the players and the oscillators");
+    sound_header.MPlayMainHead = spy_sound_chain;
+    sound_header.musicPlayerHead = &player;
+
+    SoundMain();
+
+    CHECK(sound_chain_calls == 1, "the players were driven %d times", sound_chain_calls);
+    CHECK(sound_chained_with == &player, "the wrong player was driven");
+    CHECK(cgb_sound_calls == 1, "the oscillators were driven %d times", cgb_sound_calls);
+    CHECK(ident_during_sound_chain == ID_NUMBER + 1,
+          "the header was not locked while updating, its ident was %08X",
+          ident_during_sound_chain);
+
+    sound_reset("no players is not an error");
+    sound_header.MPlayMainHead = NULL;
+    SoundMain();
+    CHECK(sound_chain_calls == 0, "a null player list was called anyway");
+    CHECK(cgb_sound_calls == 1, "the oscillators were skipped as well");
+}
+
+// Mixing goes into the frame the sound DMA is not reading, which the counter
+// picks. With reverb off that frame is cleared, so which one it was is visible.
+static void test_sound_main_picks_the_frame(void)
+{
+    sound_reset("the mixer writes the frame the counter picks");
+    sound_header.pcmDmaCounter = 2; // period 4, so three frames in
+    memset(sound_header.pcmBuffer, 0x7F, sizeof(sound_header.pcmBuffer));
+
+    SoundMain();
+
+    CHECK(sound_header.pcmBuffer[3 * 8] == 0, "the chosen frame was not prepared");
+    CHECK(sound_header.pcmBuffer[0] == 0x7F, "the first frame was written instead");
+}
+
 // ---------------------------------------------------------- the V-blank tick ---
 
 #define DMA1_CNT REG_OFFSET_DMA1CNT
@@ -2123,6 +2216,9 @@ int main(void)
     test_driver_modulation();
     test_driver_applies_changes();
     test_driver_zero_track_count();
+    test_sound_main_ident_guard();
+    test_sound_main_drives_players();
+    test_sound_main_picks_the_frame();
     test_vsync_counts_down();
     test_vsync_reloads();
     test_vsync_zero_counter();

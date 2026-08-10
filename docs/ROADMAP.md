@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | **in progress** — interpreter done; mixer entry points, sequencer and host output left |
+| 4 | Audio — the m4a mixer in C | **in progress** — mixer and interpreter done; reversed waves, sequencer and host output left |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -248,9 +248,27 @@ The order, and where it stands:
    at its own rate; the pitched path resamples with linear interpolation off a 9.23 fractional
    position, carrying it across frames and rewinding repeatedly when a step clears a whole loop.
    Both share the eight-bit wrapping accumulate. `test_m4a_mix`.
-3. **Buffer management** — **done**: which frame of the PCM area is written, and preparing its two
-   buffers by clearing or by folding in a reverb. `test_m4a_frame`. `SoundMain` itself is the rest of
-   this step and waits on the sequencer, since its job is to call it.
+3. **Buffer management and the mixer driver** — **done**. Which frame of the PCM area is written,
+   preparing its two buffers by clearing or by folding in a reverb, and then `SoundMain` over the top:
+   the lock, the chain of music players, the compatible-sound oscillators, and a pass over every
+   channel that steps its envelope and hands it to the fixed or resampled path. `test_m4a_frame`.
+
+   Upstream reaches the mixing loop by copying its own machine code into IWRAM and jumping there.
+   **Not reproduced, and it could not be**: a copied x86 function's relative calls would resolve to
+   the wrong targets. `SoundMain` calls the loop directly, and it keeps our own name
+   (`agb_m4a_mix_frame`) because `SoundMainRAM` names a block of bytes upstream relocates rather than
+   a routine.
+
+   `SoundMainBTM` turned out not to be a mixer routine at all -- it is the 64-byte clear reached as
+   `gMPlayJumpTable[35]`. Upstream's header declares it as taking no argument although it receives a
+   pointer, which nothing noticed because it is only ever called through unprototyped table entries;
+   ours lives in its own file so that declaration is not in scope.
+
+   **Reversed and compressed waves are still not mixed**, and a channel asking for one is skipped
+   with a warning rather than mixed wrongly. Walking the ROM's own instrument tables prices the gap:
+   of 66 tone tables reachable from the song table, two instruments are reversed -- voices 1 and 33 of
+   one table -- and none is compressed. `SoundMainRAM_Unk1` and `Unk2`, 237 lines of ARM between
+   them, are what is left.
 
    Found on the way: the original's scanline CPU budget **cannot fire**, because `gMaxLines` is
    absolute zero in every upstream linker script. Reproducing it would have meant inventing a
@@ -285,8 +303,13 @@ The order, and where it stands:
    unreachable and the largest reachable sum is pinned instead.
 
    The driver, `MPlayMain`, is **done** — 338 lines of ARM, and with it the track interpreter is
-   complete. Its 58 mutants are all caught. Five of `m4a_1.s`'s 35 routines are still missing, all
-   of them the mixer's: `SoundMain`, `SoundMainRAM`, `SoundMainBTM` and the two wave helpers.
+   complete. Its 58 mutants are all caught.
+
+   Worth knowing when reading the binding report: implementing a caller before its callee makes the
+   unbound count **rise**. `ply_note`, `MPlayMain` and `SoundMain` between them reference five
+   sequencer routines (`ClearChain`, `TrkVolPitSet`, `MidiKeyToFreq`, `FadeOutBody`, `Clear64byte`)
+   that nothing built had asked for before, so the count went up even as symbols were provided. It is
+   a measure of what is referenced, not of what is missing.
 
    Two of its shapes are preserved rather than tidied, and both are pinned by a test: the track loops
    are `do`/`while`, so a player claiming no tracks still runs its first one; and the modulation

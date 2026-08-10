@@ -300,7 +300,7 @@ void ply_rept(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track)
 // agree without either knowing about the other.
 #define SOUND_INFO_SLOT 0x7FF0
 
-static struct SoundInfo *sound_info(void)
+struct SoundInfo *agb_sound_info(void)
 {
     return *(struct SoundInfo **)(agb_mem.iwram + SOUND_INFO_SLOT);
 }
@@ -326,7 +326,7 @@ void TrackStop(struct MusicPlayerInfo *player, struct MusicPlayerTrack *track)
             u8 cgb = chan->type & TONEDATA_TYPE_CGB;
 
             if (cgb != 0)
-                sound_info()->CgbOscOff(cgb);
+                agb_sound_info()->CgbOscOff(cgb);
 
             chan->statusFlags = 0;
         }
@@ -577,7 +577,7 @@ static void attach_channel(struct MusicPlayerInfo *player, struct MusicPlayerTra
 // opcode, and a note that supplies none of them simply repeats the last one.
 void ply_note(u32 clock, struct MusicPlayerInfo *player, struct MusicPlayerTrack *track)
 {
-    struct SoundInfo *info = sound_info();
+    struct SoundInfo *info = agb_sound_info();
     const struct ToneData *tone;
     struct SoundChannel *chan;
     u32 rhythm_pan;
@@ -918,7 +918,7 @@ void MPlayMain(struct MusicPlayerInfo *player)
     if (player->MPlayMainNext != NULL)
         player->MPlayMainNext(player->musicPlayerNext);
 
-    info = sound_info();
+    info = agb_sound_info();
 
     if ((s32)player->status < 0)
         goto done;
@@ -956,6 +956,33 @@ void MPlayMain(struct MusicPlayerInfo *player)
 
 done:
     player->ident = ID_NUMBER;
+}
+
+// ------------------------------------------------------------ the mixer driver ---
+
+// Called once a frame by the sequencer. Drives the music players, then the
+// compatible-sound channels, then mixes everything into the frame the sound DMA
+// is not currently reading out.
+void SoundMain(void)
+{
+    struct SoundInfo *info = agb_sound_info();
+
+    // The ident is a signature and a lock, exactly as the sequencer's is.
+    if (info->ident != ID_NUMBER)
+        return;
+
+    info->ident++;
+
+    if (info->MPlayMainHead != NULL)
+        info->MPlayMainHead(info->musicPlayerHead);
+
+    info->CgbSound();
+
+    agb_m4a_mix_frame(info, agb_m4a_frame_buffer(info), info->pcmSamplesPerVBlank);
+
+    // The original releases the lock at the end of the routine it tail-calls and
+    // never returns from. Ours returns, so the pair sits together.
+    info->ident = ID_NUMBER;
 }
 
 // ---------------------------------------------------------- the V-blank tick ---
@@ -1005,7 +1032,7 @@ static void dma_restart_if_repeating(int cnt)
 // written anyway, because the game can read them back and the cost is nothing.
 void m4aSoundVSync(void)
 {
-    struct SoundInfo *info = sound_info();
+    struct SoundInfo *info = agb_sound_info();
     int counter;
 
     // The header is locked while the mixer is inside it, which shows up as an

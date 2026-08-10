@@ -45,6 +45,16 @@ bool agb_m4a_mix_fixed(struct SoundChannel *chan, s8 *right, s8 *left, int sampl
 bool agb_m4a_mix_pitched(const struct SoundInfo *info, struct SoundChannel *chan,
                          s8 *right, s8 *left, int samples);
 
+// The sound header's address, which the sequencer keeps at a fixed spot in
+// IWRAM. Both halves of the m4a replacement reach it this way.
+struct SoundInfo *agb_sound_info(void);
+
+// Mix every channel into one frame's buffers: prepare them, then step each
+// channel's envelope and hand it to whichever path its tone type asks for.
+// This is what upstream calls SoundMainRAM, under our own name -- see the
+// comment on the definition for why.
+void agb_m4a_mix_frame(struct SoundInfo *info, s8 *frame, int samples);
+
 // Where in the PCM area this frame writes. The area holds several frames and
 // the DMA counter says which one is free, so the mixer writes ahead of what the
 // hardware is reading out.

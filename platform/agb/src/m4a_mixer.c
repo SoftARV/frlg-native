@@ -396,3 +396,55 @@ void agb_m4a_prepare_frame(const struct SoundInfo *info, s8 *frame, int samples)
         right[i] = (s8)value;
     }
 }
+
+// ------------------------------------------------------------- the mixer driver ---
+
+// Reversed and compressed waves. Two of FireRed's instruments are reversed
+// (voices 1 and 33 of one tone table); nothing in the game is compressed. The
+// routine that walks a wave backwards is not written yet, and a channel asking
+// for one is skipped rather than mixed as though it were an ordinary wave --
+// silence is wrong, but audibly wrong beats quietly wrong.
+#define TONEDATA_TYPE_REV 0x10
+#define TONEDATA_TYPE_CMP 0x20
+
+// Warned once per run, the way every other not-yet-written subsystem is. The
+// generated stubs declare this the same way; there is no header for it.
+int agb_deferred_named(const char *name);
+
+// Mix every channel into this frame. Upstream reaches this by copying the
+// routine's own machine code into IWRAM and jumping there, because IWRAM is
+// faster than ROM; that is a hardware optimisation with no meaning here, so
+// SoundMain calls this directly and the relocated copy is never made or used.
+// It keeps our own name for that reason: `SoundMainRAM` names a block of code
+// upstream copies about, and this is not that.
+//
+// The frame's buffers are prepared first, then each channel steps its envelope
+// and is mixed by whichever path its tone type asks for.
+void agb_m4a_mix_frame(struct SoundInfo *info, s8 *frame, int samples)
+{
+    struct SoundChannel *chan = info->chans;
+
+    agb_m4a_prepare_frame(info, frame, samples);
+
+    // Entered before the count is looked at, as the original does, so a header
+    // claiming no channels still has its first one mixed.
+    for (int left = info->maxChans;;)
+    {
+        // The original bails out of this loop once VCOUNT passes a deadline.
+        // Not reproduced, and it cannot fire: gMaxLines is absolute zero in
+        // every one of upstream's linker scripts. See ARCHITECTURE.md 6.7.
+        if (agb_m4a_envelope_step(info, chan))
+        {
+            if (chan->type & (TONEDATA_TYPE_CMP | TONEDATA_TYPE_REV))
+                agb_deferred_named("reversed or compressed wave");
+            else if (chan->type & TONEDATA_TYPE_FIX)
+                agb_m4a_mix_fixed(chan, frame, frame + PCM_DMA_BUF_SIZE, samples);
+            else
+                agb_m4a_mix_pitched(info, chan, frame, frame + PCM_DMA_BUF_SIZE, samples);
+        }
+
+        if (--left <= 0)
+            break;
+        chan++;
+    }
+}

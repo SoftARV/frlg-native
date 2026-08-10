@@ -3,6 +3,7 @@
 //
 // Expected values are worked out by hand from the original ARM.
 
+#include <stddef.h>
 #include <string.h>
 
 #include "agb/m4a.h"
@@ -192,6 +193,219 @@ static void test_reverb_wraps_to_the_start(void)
     CHECK(frame[0] == 2, "expected the area's start to be folded in, got %d", frame[0]);
 }
 
+
+// ------------------------------------------------------------- the mixer driver ---
+
+// The 64-byte clear the sequencer reaches through its dispatch table. It must
+// clear exactly 64 bytes: it is handed a MusicPlayerInfo, and the fields past
+// the first 64 are the ones a restarted player keeps.
+static void test_clear64(void)
+{
+    static u8 block[80];
+    // Upstream's header declares this with no parameter although it takes one.
+    // The game only ever reaches it through its unprototyped dispatch table, so
+    // this test reaches it the same way.
+    void (*clear64)(void *) = (void (*)(void *))SoundMainBTM;
+
+    TEST_CASE("the 64-byte clear stops at 64");
+    memset(block, 0xAB, sizeof(block));
+
+    clear64(block);
+
+    for (int i = 0; i < 64; i++)
+        CHECK(block[i] == 0, "byte %d was not cleared, it is %02X", i, block[i]);
+    for (int i = 64; i < 80; i++)
+        CHECK(block[i] == 0xAB, "byte %d was cleared and should not have been", i);
+}
+
+// A channel the driver can actually mix: one sample, held at sustain, at full
+// volume on both sides.
+static union
+{
+    struct WaveData header;
+    unsigned char raw[sizeof(struct WaveData) + 64];
+} driver_wave;
+
+static void arm_channel(struct SoundChannel *chan, u8 type)
+{
+    s8 *samples = (s8 *)(driver_wave.raw + offsetof(struct WaveData, data));
+
+    memset(chan, 0, sizeof(*chan));
+    driver_wave.header.size = 32;
+    driver_wave.header.freq = 1 << 20;
+    for (int i = 0; i < 32; i++)
+        samples[i] = 64;
+
+    chan->wav = &driver_wave.header;
+    chan->currentPointer = samples;
+    chan->count = 32;
+    chan->statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+    chan->envelopeVolume = 255;
+    chan->envelopeVolumeRight = 255;
+    chan->envelopeVolumeLeft = 255;
+    chan->rightVolume = 255;
+    chan->leftVolume = 255;
+    chan->sustain = 255;
+    chan->type = type;
+    chan->frequency = 1 << 16;
+}
+
+// The envelope rebuilds the per-side volumes every frame from the master volume,
+// so a driver test has to set one. At full master a sample of 64 arrives as
+// ((255 * 255) >> 8) * 64 >> 8 = 63, and that is what these expect.
+#define CONTRIBUTION 63
+
+// Every channel up to maxChans is mixed, and nothing past it is touched.
+static void test_driver_mixes_each_channel(void)
+{
+    s8 *frame;
+
+    reset("the driver mixes every channel it is given");
+    info.reverb = 0;
+    info.maxChans = 2;
+    info.divFreq = 1 << 4;
+    info.masterVolume = 15;
+    frame = info.pcmBuffer;
+
+    arm_channel(&info.chans[0], TONEDATA_TYPE_FIX);
+    arm_channel(&info.chans[1], TONEDATA_TYPE_FIX);
+    // A third channel, beyond maxChans, which must not be touched.
+    arm_channel(&info.chans[2], TONEDATA_TYPE_FIX);
+
+    agb_m4a_mix_frame(&info, frame, SAMPLES);
+
+    // Two channels at full volume, each contributing 64.
+    CHECK(frame[0] == 2 * CONTRIBUTION, "the frame came out %d, not two channels' worth",
+          frame[0]);
+    CHECK(info.chans[2].count == 32, "a channel past maxChans was mixed");
+    CHECK(info.chans[0].count == 32 - SAMPLES, "the first channel did not advance");
+}
+
+// A channel that is off is stepped but never mixed.
+static void test_driver_skips_silent_channels(void)
+{
+    s8 *frame;
+
+    reset("a channel that is off contributes nothing");
+    info.reverb = 0;
+    info.maxChans = 2;
+    info.divFreq = 1 << 4;
+    info.masterVolume = 15;
+    frame = info.pcmBuffer;
+
+    arm_channel(&info.chans[0], TONEDATA_TYPE_FIX);
+    info.chans[0].statusFlags = 0; // not on
+    arm_channel(&info.chans[1], TONEDATA_TYPE_FIX);
+
+    agb_m4a_mix_frame(&info, frame, SAMPLES);
+
+    CHECK(frame[0] == CONTRIBUTION, "the frame came out %d, not one channel's worth",
+          frame[0]);
+    CHECK(info.chans[0].count == 32, "a silent channel was advanced");
+}
+
+// The tone type picks the path. A reversed or compressed wave has no path yet
+// and is skipped outright rather than mixed as though it were an ordinary one.
+static void test_driver_dispatches_on_type(void)
+{
+    s8 *frame;
+
+    reset("a reversed wave is skipped, not mixed");
+    info.reverb = 0;
+    info.maxChans = 1;
+    info.divFreq = 1 << 4;
+    info.masterVolume = 15;
+    frame = info.pcmBuffer;
+
+    arm_channel(&info.chans[0], 0x10); // TONEDATA_TYPE_REV
+
+    agb_m4a_mix_frame(&info, frame, SAMPLES);
+
+    CHECK(frame[0] == 0, "a reversed wave was mixed anyway, the frame is %d", frame[0]);
+    CHECK(info.chans[0].count == 32, "a skipped channel was advanced");
+
+    reset("a compressed wave is skipped too");
+    info.reverb = 0;
+    info.maxChans = 1;
+    info.divFreq = 1 << 4;
+    info.masterVolume = 15;
+    frame = info.pcmBuffer;
+    arm_channel(&info.chans[0], 0x20); // TONEDATA_TYPE_CMP
+    agb_m4a_mix_frame(&info, frame, SAMPLES);
+    CHECK(frame[0] == 0, "a compressed wave was mixed anyway");
+}
+
+// A channel without the fixed-frequency bit is resampled instead, which walks
+// the wave at a different rate. A constant wave cannot tell the two paths apart
+// -- both produce the same number -- so this watches how far the wave advanced.
+static void test_driver_pitched_path(void)
+{
+    s8 *frame;
+
+    reset("a channel without the fixed bit is resampled");
+    info.reverb = 0;
+    info.maxChans = 1;
+    info.divFreq = 1 << 4;
+    info.masterVolume = 15;
+    frame = info.pcmBuffer;
+
+    arm_channel(&info.chans[0], 0); // neither FIX nor REV nor CMP
+
+    agb_m4a_mix_frame(&info, frame, SAMPLES);
+
+    // What matters here is which path ran, not its arithmetic -- that is pinned by
+    // the resampler's own tests. Over these eight outputs it consumes two input
+    // samples where the fixed path would have consumed eight.
+    CHECK(info.chans[0].count == 30, "the wave advanced to %d, not 30",
+          info.chans[0].count);
+    CHECK(info.chans[0].count != 32 - SAMPLES, "the fixed path ran instead");
+}
+
+// The buffers are prepared before any channel reaches them, so a frame does not
+// accumulate on top of what the last one left.
+static void test_driver_prepares_first(void)
+{
+    s8 *frame;
+
+    reset("the driver clears before it mixes");
+    info.reverb = 0;
+    info.maxChans = 1;
+    info.divFreq = 1 << 4;
+    info.masterVolume = 15;
+    frame = info.pcmBuffer;
+    memset(info.pcmBuffer, 0x40, sizeof(info.pcmBuffer));
+
+    arm_channel(&info.chans[0], TONEDATA_TYPE_FIX);
+
+    agb_m4a_mix_frame(&info, frame, SAMPLES);
+
+    // Had the stale 0x40 survived, this would be 0x40 + CONTRIBUTION.
+    CHECK(frame[0] == CONTRIBUTION, "the frame came out %d, so it was not cleared first",
+          frame[0]);
+}
+
+// The channel loop is entered before the count is looked at, as the original
+// does, so a header claiming no channels still mixes its first one.
+static void test_driver_zero_max_chans(void)
+{
+    s8 *frame;
+
+    reset("a maxChans of zero still mixes one channel");
+    info.reverb = 0;
+    info.maxChans = 0;
+    info.divFreq = 1 << 4;
+    info.masterVolume = 15;
+    frame = info.pcmBuffer;
+
+    arm_channel(&info.chans[0], TONEDATA_TYPE_FIX);
+
+    agb_m4a_mix_frame(&info, frame, SAMPLES);
+
+    CHECK(frame[0] == CONTRIBUTION, "the first channel was not mixed, the frame is %d",
+          frame[0]);
+    CHECK(info.chans[1].count == 0, "a second channel was mixed as well");
+}
+
 int main(void)
 {
     test_frame_position();
@@ -201,6 +415,13 @@ int main(void)
     test_reverb_negative_nudge();
     test_reverb_nudge_is_bit_seven();
     test_reverb_wraps_to_the_start();
+    test_clear64();
+    test_driver_mixes_each_channel();
+    test_driver_skips_silent_channels();
+    test_driver_dispatches_on_type();
+    test_driver_pitched_path();
+    test_driver_prepares_first();
+    test_driver_zero_max_chans();
 
     return test_report("m4a frame setup");
 }

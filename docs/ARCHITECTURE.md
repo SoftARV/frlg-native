@@ -532,6 +532,29 @@ The sequencer's dispatch table is filled by `MPlayJumpTableCopy` from a template
 against it; here it is an ordinary array, so the copy is just a copy. `SoundInit` fills the table
 before `MPlayExtender` overrides nine of its entries, so the order matters and is preserved.
 
+**The mixer driver.** `SoundMain` is what the sequencer calls once a frame: it takes the same kind
+of lock the sequencer does, drives the chain of music players, then the compatible-sound
+oscillators, and finally mixes every channel into whichever frame of the PCM area the sound DMA is
+not reading out. Each channel steps its envelope and is then handed to the path its tone type asks
+for — fixed-frequency, or resampled.
+
+Upstream reaches the mixing loop by **copying its own machine code into IWRAM** and jumping there,
+because IWRAM is faster than ROM. That is a hardware optimisation with no meaning on a host — and a
+copied x86 function would not survive it, since its relative calls would resolve to the wrong
+targets — so `SoundMain` calls the loop directly. It keeps our own name, `agb_m4a_mix_frame`, for
+that reason: `SoundMainRAM` names a block of bytes upstream relocates, and this is not that.
+
+`SoundMainBTM` is not a mixer routine at all despite the name — it is the 64-byte clear that
+`m4a.c`'s `Clear64byte` dispatches to as `gMPlayJumpTable[35]`. It lives in its own file because
+upstream's header declares it `void SoundMainBTM(void)` while it in fact receives a pointer; nothing
+upstream noticed, because it is only ever reached through a table of unprototyped entries.
+
+**Reversed and compressed waves are not mixed.** A channel whose tone type asks for one is skipped
+with a warning rather than mixed as though its wave were ordinary — audibly wrong beats quietly
+wrong. Walking the ROM's instrument tables says what this costs: of 66 tone tables reachable from the
+song table, **two instruments are reversed** (voices 1 and 33 of one table) and **none is
+compressed**.
+
 **The interpreter half of `m4a_1.s` is fully translated.** The parameter opcodes — priority, tempo, key shift, instrument
 select, volume, pan, bend, bend range, tune, both modulation controls and the delay, and the direct
 write to a compatible-sound register; control flow — the jump, the three-deep pattern call stack, the
