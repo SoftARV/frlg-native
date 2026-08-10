@@ -512,6 +512,17 @@ samples packed in a register and rotates them past an accumulator, masking so on
 cannot reach its neighbour; nothing in that arrangement saturates, so a loud mix distorts the way
 the hardware does rather than flattening against a ceiling.
 
+The **track interpreter** is the other half of `m4a_1.s`, in `platform/agb/src/m4a_track.c`. Its
+handlers keep the game's own names rather than an `agb_` prefix, deliberately: they are the symbols
+the sequencer's jump table names, and this is what supplies them. Each takes the player and the
+track, reads its operands from the track's command stream, and sets flags saying what it
+invalidated — the volume or the pitch has to be recomputed before the next note sounds.
+
+**Done so far: the parameter opcodes** — priority, tempo, key shift, instrument select, volume, pan,
+bend, bend range, tune, both modulation controls and the delay, and the direct write to a
+compatible-sound register. What remains is control flow (`ply_goto` and the pattern stack), the note
+allocator, `MPlayMain` and `TrackStop`.
+
 The mixer produces the GBA's native ~13.4 kHz PCM into a ring buffer; the host layer resamples.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game
 state.

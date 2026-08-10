@@ -8,6 +8,7 @@ add_library(agb STATIC
     src/irq.c
     src/ppu.c
     src/m4a_mixer.c
+    src/m4a_track.c
     src/unimplemented.c)
 
 target_include_directories(agb PUBLIC include)

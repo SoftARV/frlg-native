@@ -12,7 +12,7 @@ Update the status column when a milestone lands.
 | 1 | The game compiles and links natively and reaches `AgbMain` | **done** |
 | 2 | Frame loop, interrupts, DMA, BIOS — a window running at 59.7275 Hz | **done** |
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
-| 4 | Audio — the m4a mixer in C | **in progress** — envelope, both mixing paths, buffers |
+| 4 | Audio — the m4a mixer in C | **in progress** — mixer done; interpreter started |
 | 5 | Saves — flash backed by a host file | |
 | 6 | **Playable** — intro through the first battle, determinism harness | |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
@@ -255,7 +255,16 @@ The order, and where it stands:
    Found on the way: the original's scanline CPU budget **cannot fire**, because `gMaxLines` is
    absolute zero in every upstream linker script. Reproducing it would have meant inventing a
    meaning for `VCOUNT` during V-blank.
-4. The track interpreter and its jump table.
+4. **The track interpreter** — the parameter opcodes are **done** in
+   `platform/agb/src/m4a_track.c`, driven by `test_m4a_track`: priority, tempo, key shift,
+   instrument select, volume, pan, bend, bend range, tune, both modulation controls and the delay,
+   and the direct sound-register write. They are real symbols rather than stubs now, which the
+   binding report confirms.
+
+   Left in this step: control flow (`ply_goto`, `ply_patt`, `ply_pend`, `ply_rept`, `ply_fine`),
+   the note allocator (`ply_note`, `ply_endtie`, `ChnVolSetAsm`), and the drivers `MPlayMain`,
+   `TrackStop` and `m4aSoundVSync`. `MPlayMain` and `ply_note` are 338 and 279 lines of ARM on
+   their own.
 5. Build upstream's `m4a.c` and drop the deferred entries. It is excluded for one line,
    `asm("swi 0x2A")`, and a per-file `-Dasm(x)=` clears it — so the 1781-line sequencer keeps
    receiving upstream fixes instead of being forked into an override.

@@ -25,7 +25,7 @@ frlg_add_test(test_ppu_scanline_irq)
 
 # The mixer works on the game's own audio structures, so its test needs the
 # vendor headers -- by quote path only, as everywhere else.
-foreach(m4a_test test_m4a_envelope test_m4a_mix test_m4a_frame)
+foreach(m4a_test test_m4a_envelope test_m4a_mix test_m4a_frame test_m4a_track)
     frlg_add_test("${m4a_test}")
     target_compile_options("${m4a_test}" PRIVATE -iquote "${FRLG_VENDOR_DIR}/include")
 endforeach()
