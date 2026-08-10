@@ -172,6 +172,15 @@ bool agb_m4a_envelope_step(struct SoundInfo *info, struct SoundChannel *chan)
     return true;
 }
 
+// The fractional position is 9.23: twenty-three bits of fraction below the
+// sample index.
+#define FW_FRACTION 23
+
+// Advancing the position clears the whole-sample bits it just consumed. The
+// original masks exactly bits 23 to 29 rather than keeping the low twenty-three,
+// so a step big enough to reach bit 30 would leave it behind; kept as it is.
+#define FW_CONSUMED_MASK 0x3F800000u
+
 // Where a looping wave restarts, and how many samples it has from there. A
 // wave that does not loop reports a length of zero, which is what ends the
 // channel when its count runs out.
@@ -238,5 +247,96 @@ bool agb_m4a_mix_fixed(struct SoundChannel *chan, s8 *right, s8 *left, int sampl
 
     chan->currentPointer = (s8 *)src;
     chan->count = remaining;
+    return true;
+}
+
+// Find the way back into a looping wave after the position ran past its end,
+// possibly several loop lengths past it.
+//
+// `remaining` comes in at or below zero -- how far the step overshot -- and goes
+// out positive. The return is the offset into the loop to resume at.
+static int32_t loop_rewind(int32_t *remaining, uint32_t loop_length)
+{
+    int32_t offset = -*remaining;
+
+    for (;;)
+    {
+        *remaining += (int32_t)loop_length;
+        if (*remaining > 0)
+            return offset;
+        offset -= (int32_t)loop_length;
+    }
+}
+
+bool agb_m4a_mix_pitched(const struct SoundInfo *info, struct SoundChannel *chan,
+                         s8 *right, s8 *left, int samples)
+{
+    const s8 *loop_start = NULL;
+    uint32_t loop_length = loop_span(chan, &loop_start);
+    int32_t remaining = (int32_t)chan->count;
+    uint32_t phase = chan->fw;
+    uint32_t step = (uint32_t)info->divFreq * (uint32_t)chan->frequency;
+    int volume_right = chan->envelopeVolumeRight;
+    int volume_left = chan->envelopeVolumeLeft;
+    // `next` trails one ahead of `current`: the pointer kept in the channel
+    // addresses the sample being played, and the one after it is the far end of
+    // the interpolation.
+    const s8 *next = chan->currentPointer;
+    int current = *next++;
+    int delta = *next - current;
+
+    for (int i = 0; i < samples; i++)
+    {
+        // Interpolate the fraction of the way between this sample and the next.
+        // The product fits a signed 32-bit multiply for every step the sequencer
+        // produces, which is what the original relies on.
+        int32_t between = ((int32_t)phase * (int32_t)delta) >> FW_FRACTION;
+
+        right[i] = mix_sample(right[i], volume_right, current + between);
+        left[i] = mix_sample(left[i], volume_left, current + between);
+
+        phase += step;
+        uint32_t whole = phase >> FW_FRACTION;
+
+        if (whole == 0)
+            continue;
+
+        phase &= ~FW_CONSUMED_MASK;
+        remaining -= (int32_t)whole;
+
+        if (remaining <= 0)
+        {
+            if (loop_length == 0)
+            {
+                chan->statusFlags = 0;
+                chan->fw = phase;
+                chan->count = 0;
+                chan->currentPointer = (s8 *)next - 1;
+                return false;
+            }
+
+            next = loop_start + loop_rewind(&remaining, loop_length);
+            current = *next;
+        }
+        else if (whole == 1)
+        {
+            // One sample on: the far end of the last interpolation is the near
+            // end of the next, so it needs no reload.
+            current += delta;
+        }
+        else
+        {
+            next += whole - 1;
+            current = *next;
+        }
+
+        next++;
+        delta = *next - current;
+    }
+
+    chan->fw = phase;
+    chan->count = (uint32_t)remaining;
+    // The pointer trails one behind, addressing the sample still being played.
+    chan->currentPointer = (s8 *)next - 1;
     return true;
 }

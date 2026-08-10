@@ -17,6 +17,7 @@
 #define SF_ENV_SUSTAIN 0x01
 
 #define FRAME 8
+#define FW_FRACTION_BITS 23
 
 static struct SoundChannel chan;
 static s8 right[FRAME];
@@ -211,6 +212,166 @@ static void test_loop_from_start(void)
     CHECK(right[2] == 63 && right[3] == -64, "the wave did not repeat from its start");
 }
 
+// ---------------------------------------------------------------- pitched ---
+//
+// The step is divFreq * frequency in 9.23, so a step of 1<<23 walks the wave at
+// its own rate and interpolates nothing.
+#define ONE_STEP (1 << FW_FRACTION_BITS)
+
+static struct SoundInfo info;
+
+static void reset_pitched(const char *name, int count, uint32_t step)
+{
+    reset(name, count);
+    memset(&info, 0, sizeof(info));
+    // Any pair whose product is the wanted step will do.
+    info.divFreq = (int32_t)step;
+    chan.frequency = 1;
+    chan.fw = 0;
+}
+
+// At the wave's own rate the output is the wave, sample for sample.
+static void test_pitched_unit_step(void)
+{
+    const int samples[8] = {0, 32, 64, 96, 127, -32, -64, -128};
+
+    reset_pitched("pitched at the wave's own rate", 16, ONE_STEP);
+    set_samples(samples, 8);
+    CHECK(agb_m4a_mix_pitched(&info, &chan, right, left, 8), "the wave ended early");
+
+    for (int i = 0; i < 8; i++)
+    {
+        int expect = (255 * samples[i]) >> 8;
+
+        CHECK(right[i] == expect, "sample %d was %d, expected %d", i, right[i], expect);
+    }
+    CHECK(chan.fw == 0, "a whole-sample step left a fraction behind: %u", (unsigned)chan.fw);
+}
+
+// Half the rate puts an interpolated sample between each pair.
+static void test_pitched_half_step(void)
+{
+    const int samples[4] = {0, 64, 0, -64};
+
+    reset_pitched("pitched at half rate interpolates", 16, ONE_STEP / 2);
+    set_samples(samples, 4);
+    agb_m4a_mix_pitched(&info, &chan, right, left, 6);
+
+    // 0, then halfway to 64 is 32, then 64, then halfway back to 0 is 32, ...
+    const int source[6] = {0, 32, 64, 32, 0, -32};
+    for (int i = 0; i < 6; i++)
+    {
+        int expect = (255 * source[i]) >> 8;
+
+        CHECK(right[i] == expect, "sample %d was %d, expected %d (from %d)", i, right[i],
+              expect, source[i]);
+    }
+}
+
+// Double the rate takes every other sample and skips the one between.
+static void test_pitched_double_step(void)
+{
+    const int samples[8] = {0, 99, 32, 99, 64, 99, 96, 99};
+
+    reset_pitched("pitched at double rate skips samples", 16, ONE_STEP * 2);
+    set_samples(samples, 8);
+    agb_m4a_mix_pitched(&info, &chan, right, left, 4);
+
+    const int source[4] = {0, 32, 64, 96};
+    for (int i = 0; i < 4; i++)
+    {
+        int expect = (255 * source[i]) >> 8;
+
+        CHECK(right[i] == expect, "sample %d was %d, expected %d", i, right[i], expect);
+    }
+    CHECK(chan.count == 16 - 8, "double rate consumed %u samples, not 8",
+          (unsigned)(16 - chan.count));
+}
+
+// The fractional position carries across frames rather than restarting.
+static void test_pitched_phase_persists(void)
+{
+    // A rising ramp rather than an alternating pair: with a symmetric wave the
+    // midpoint is the same whichever sample you resume from, which hides a
+    // pointer left one place along.
+    const int samples[8] = {0, 40, 80, 120, 80, 40, 0, -40};
+
+    reset_pitched("the fractional position carries over", 16, ONE_STEP / 2);
+    set_samples(samples, 8);
+    agb_m4a_mix_pitched(&info, &chan, right, left, 1);
+    CHECK(chan.fw == ONE_STEP / 2, "expected a half-sample phase, got %u", (unsigned)chan.fw);
+    CHECK(chan.currentPointer == sample_storage(),
+          "the pointer left the sample still being played");
+
+    memset(right, 0, sizeof(right));
+    agb_m4a_mix_pitched(&info, &chan, right, left, 1);
+    // Halfway between sample 0 and sample 1 is 20, not 60.
+    CHECK(right[0] == ((255 * 20) >> 8), "the second frame resumed in the wrong place, got %d",
+          right[0]);
+}
+
+// Running out with no loop releases the channel part-way through the frame.
+static void test_pitched_end(void)
+{
+    const int samples[2] = {127, 127};
+
+    reset_pitched("a pitched wave that ends releases the channel", 2, ONE_STEP);
+    set_samples(samples, 2);
+    CHECK(!agb_m4a_mix_pitched(&info, &chan, right, left, FRAME), "a spent wave kept going");
+    CHECK(chan.statusFlags == 0, "the channel was not released");
+    CHECK(right[0] == 126, "the first sample did not sound");
+    CHECK(right[FRAME - 1] == 0, "samples were written past the end of the wave");
+}
+
+// Overrunning the loop point resumes the right distance into the loop, even
+// when the step jumps clean past the whole loop more than once.
+static void test_pitched_loop_overrun(void)
+{
+    const int samples[6] = {0, 0, 10, 20, 30, 40};
+
+    reset_pitched("a pitched loop resumes at the right offset", 6, ONE_STEP * 4);
+    set_samples(samples, 6);
+    chan.statusFlags = SF_ENV_SUSTAIN | SF_LOOP;
+    wave.header.loopStart = 2;   // the loop is samples 2..5, four long
+    chan.envelopeVolumeRight = 255;
+
+    // Four samples a step: 0, then 4, then 8 -- which is two past the end of a
+    // six-sample wave, so it resumes two into a four-sample loop, at sample 4.
+    agb_m4a_mix_pitched(&info, &chan, right, left, 3);
+
+    const int source[3] = {0, 30, 30};
+    for (int i = 0; i < 3; i++)
+    {
+        int expect = (255 * source[i]) >> 8;
+
+        CHECK(right[i] == expect, "sample %d was %d, expected %d (from %d)", i, right[i],
+              expect, source[i]);
+    }
+    CHECK(chan.statusFlags & SF_LOOP, "the loop flag was lost");
+}
+
+// A step that clears the whole loop more than once has to keep rewinding until
+// it lands inside it, which is the only reason that rewind is a loop.
+static void test_pitched_loop_overrun_twice(void)
+{
+    const int samples[6] = {0, 0, 0, 0, 50, 60};
+
+    reset_pitched("a pitched loop rewinds more than once", 6, ONE_STEP * 8);
+    set_samples(samples, 6);
+    chan.statusFlags = SF_ENV_SUSTAIN | SF_LOOP;
+    wave.header.loopStart = 4;   // a two-sample loop, samples 4 and 5
+    chan.envelopeVolumeRight = 255;
+
+    // Eight samples a step overshoots a six-sample wave by two, which is a whole
+    // two-sample loop plus nothing: it lands back at the loop's first sample.
+    agb_m4a_mix_pitched(&info, &chan, right, left, 2);
+
+    CHECK(right[0] == 0, "the first sample was not the wave's own start");
+    CHECK(right[1] == ((255 * 50) >> 8), "did not land on the loop's first sample, got %d",
+          right[1]);
+    CHECK(chan.statusFlags & SF_LOOP, "the loop flag was lost");
+}
+
 int main(void)
 {
     test_scaling();
@@ -221,6 +382,13 @@ int main(void)
     test_end_of_wave();
     test_loop();
     test_loop_from_start();
+    test_pitched_unit_step();
+    test_pitched_half_step();
+    test_pitched_double_step();
+    test_pitched_phase_persists();
+    test_pitched_end();
+    test_pitched_loop_overrun();
+    test_pitched_loop_overrun_twice();
 
     return test_report("m4a mixing");
 }

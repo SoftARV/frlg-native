@@ -490,9 +490,12 @@ something a reader would take for a mistake, the comment says so and the code ke
 the envelope's master-volume fold reaches a `SoundInfo` byte through a `SoundChannel` offset, and
 that is load-bearing.
 
-**Done so far: the envelope and the fixed-frequency mixing path** — attack, decay, sustain,
-release, the pseudo-echo tail, the volume fold, and walking a wave one sample per output sample
-with its loop handling.
+**Done so far: the envelope and both mixing paths** — attack, decay, sustain, release, the
+pseudo-echo tail, the volume fold, and the two ways a wave is walked. Fixed-frequency plays it at
+its own rate, one sample per output sample. The pitched path resamples, stepping a 9.23 fractional
+position by the sound header's `divFreq` times the channel's frequency and interpolating between
+neighbouring samples; the position carries across frames in the channel, and overrunning a loop
+rewinds however many loop lengths it takes to land back inside.
 
 The mixing accumulate **wraps at eight bits rather than clamping**. The original keeps four output
 samples packed in a register and rotates them past an accumulator, masking so one sample's low bits

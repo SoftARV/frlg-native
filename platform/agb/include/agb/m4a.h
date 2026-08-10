@@ -34,4 +34,15 @@ bool agb_m4a_envelope_step(struct SoundInfo *info, struct SoundChannel *chan);
 // released and the rest of the frame gets nothing from it.
 bool agb_m4a_mix_fixed(struct SoundChannel *chan, s8 *right, s8 *left, int samples);
 
+// The pitched path, taken when the tone type does not have TONEDATA_TYPE_FIX:
+// the wave is resampled to the output rate, interpolating between neighbouring
+// samples. The step comes from the sound header's divFreq times the channel's
+// own frequency, and the channel's `fw` carries the fractional position across
+// frames.
+//
+// Same contract as the fixed path otherwise: buffers are accumulated into, the
+// wave loops if it says to, and false means the channel has been released.
+bool agb_m4a_mix_pitched(const struct SoundInfo *info, struct SoundChannel *chan,
+                         s8 *right, s8 *left, int samples);
+
 #endif // GUARD_AGB_M4A_H
