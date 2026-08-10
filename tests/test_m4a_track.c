@@ -5,6 +5,7 @@
 // but the bookkeeping: how many bytes an opcode eats, and which recomputation it
 // asks for afterwards. Both are checked for every one.
 
+#include <stdint.h>
 #include <string.h>
 
 #include "agb/m4a.h"
@@ -249,6 +250,161 @@ static void test_port(void)
     CHECK(eaten() == 2, "port ate %d bytes, not 2", eaten());
 }
 
+// ------------------------------------------------------------ control flow ---
+
+static struct SoundChannel chans[3];
+
+// Put a pointer into the command stream as four little-endian bytes, the way
+// track data holds a jump target.
+static void put_target(int at, const void *target)
+{
+    uintptr_t value = (uintptr_t)target;
+
+    for (int i = 0; i < 4; i++)
+        stream[at + i] = (u8)(value >> (8 * i));
+}
+
+static void link_chain(int count)
+{
+    memset(chans, 0, sizeof(chans));
+    track.chan = &chans[0];
+    for (int i = 0; i < count; i++)
+    {
+        chans[i].track = &track;
+        chans[i].statusFlags = SOUND_CHANNEL_SF_ENV_SUSTAIN;
+        chans[i].nextChannelPointer = i + 1 < count ? &chans[i + 1] : NULL;
+        chans[i].prevChannelPointer = i > 0 ? &chans[i - 1] : NULL;
+    }
+}
+
+// The chain's head lives in the track, so unlinking the first channel is a
+// different case from unlinking one in the middle.
+static void test_clear_chain(void)
+{
+    reset("clear chain, middle", NULL, 0);
+    link_chain(3);
+    RealClearChain(&chans[1]);
+    CHECK(chans[0].nextChannelPointer == &chans[2], "the previous channel was not relinked");
+    CHECK(chans[2].prevChannelPointer == &chans[0], "the next channel was not relinked");
+    CHECK(chans[1].track == NULL, "the channel kept its track");
+    CHECK(track.chan == &chans[0], "the head moved when it should not have");
+
+    reset("clear chain, head", NULL, 0);
+    link_chain(3);
+    RealClearChain(&chans[0]);
+    CHECK(track.chan == &chans[1], "the head was not moved on");
+    CHECK(chans[1].prevChannelPointer == NULL, "the new head kept a previous pointer");
+
+    reset("clear chain, tail", NULL, 0);
+    link_chain(3);
+    RealClearChain(&chans[2]);
+    CHECK(chans[1].nextChannelPointer == NULL, "the new tail kept a forward pointer");
+    CHECK(track.chan == &chans[0], "the head moved when it should not have");
+
+    reset("clear chain, already free", NULL, 0);
+    link_chain(1);
+    chans[0].track = NULL;
+    track.chan = &chans[0];
+    RealClearChain(&chans[0]);
+    CHECK(track.chan == &chans[0], "a channel with no track still touched the chain");
+}
+
+// End of track: every channel is released rather than cut off, and unlinked.
+static void test_fine(void)
+{
+    reset("fine releases every channel", NULL, 0);
+    link_chain(3);
+    track.flags = 0xFF;
+    chans[1].statusFlags = 0; // already silent, so it should not be told to stop
+
+    ply_fine(&player, &track);
+
+    CHECK(chans[0].statusFlags & SOUND_CHANNEL_SF_STOP, "channel 0 was not released");
+    CHECK(chans[2].statusFlags & SOUND_CHANNEL_SF_STOP, "channel 2 was not released");
+    CHECK(chans[1].statusFlags == 0, "a silent channel was told to stop");
+    for (int i = 0; i < 3; i++)
+        CHECK(chans[i].track == NULL, "channel %d kept its track", i);
+    CHECK(track.chan == NULL, "the chain was not emptied");
+    CHECK(track.flags == 0, "the track's flags were not cleared, they are %02X", track.flags);
+}
+
+// A jump target is four little-endian bytes, and it replaces the pointer rather
+// than being stepped over.
+static void test_goto(void)
+{
+    reset("goto", NULL, 0);
+    put_target(0, &stream[9]);
+    ply_goto(&player, &track);
+    CHECK(track.cmdPtr == &stream[9], "goto did not land on its target");
+}
+
+// Calling a pattern remembers where to resume, three deep.
+static void test_patt_and_pend(void)
+{
+    reset("patt pushes and jumps", NULL, 0);
+    put_target(0, &stream[12]);
+    ply_patt(&player, &track);
+
+    CHECK(track.patternLevel == 1, "the level is %u, not 1", track.patternLevel);
+    CHECK(track.patternStack[0] == &stream[4], "the return address is past the operand, not at it");
+    CHECK(track.cmdPtr == &stream[12], "patt did not jump");
+
+    ply_pend(&player, &track);
+    CHECK(track.patternLevel == 0, "the level did not come back down");
+    CHECK(track.cmdPtr == &stream[4], "pend did not resume after the call");
+
+    reset("pend at the outermost level does nothing", NULL, 0);
+    track.cmdPtr = &stream[6];
+    track.patternLevel = 0;
+    ply_pend(&player, &track);
+    CHECK(track.cmdPtr == &stream[6], "pend moved the pointer with nothing to return to");
+    CHECK(track.patternLevel == 0, "pend underflowed the level");
+
+    reset("a fourth call ends the track instead of overflowing", NULL, 0);
+    link_chain(1);
+    track.patternLevel = 3;
+    put_target(0, &stream[12]);
+    ply_patt(&player, &track);
+    CHECK(track.patternLevel == 3, "the level went past three");
+    CHECK(chans[0].statusFlags & SOUND_CHANNEL_SF_STOP, "the track was not ended");
+    CHECK(track.cmdPtr != &stream[12], "an overflowing call jumped anyway");
+}
+
+// Repeat: a count of zero loops for ever; otherwise the jump is taken until the
+// count is reached, then the whole operand is stepped over.
+static void test_rept(void)
+{
+    reset("rept with a count of zero loops for ever", NULL, 0);
+    stream[0] = 0;
+    put_target(1, &stream[10]);
+    for (int i = 0; i < 3; i++)
+    {
+        track.cmdPtr = stream;
+        ply_rept(&player, &track);
+        CHECK(track.cmdPtr == &stream[10], "pass %d did not loop", i);
+        CHECK(track.repN == 0, "an endless repeat counted passes");
+    }
+
+    reset("rept counts its passes", NULL, 0);
+    stream[0] = 3;
+    put_target(1, &stream[10]);
+
+    track.cmdPtr = stream;
+    ply_rept(&player, &track);
+    CHECK(track.repN == 1 && track.cmdPtr == &stream[10], "the first pass did not loop");
+
+    track.cmdPtr = stream;
+    ply_rept(&player, &track);
+    CHECK(track.repN == 2 && track.cmdPtr == &stream[10], "the second pass did not loop");
+
+    // The third reaches the count: the counter resets and the operand is skipped.
+    track.cmdPtr = stream;
+    ply_rept(&player, &track);
+    CHECK(track.repN == 0, "the counter was not reset, it is %u", track.repN);
+    CHECK(track.cmdPtr == &stream[5], "did not step past the count and the address, at +%d",
+          (int)(track.cmdPtr - stream));
+}
+
 int main(void)
 {
     test_prio();
@@ -262,6 +418,11 @@ int main(void)
     test_modt();
     test_modulation_stop();
     test_port();
+    test_clear_chain();
+    test_fine();
+    test_goto();
+    test_patt_and_pend();
+    test_rept();
 
     return test_report("m4a track opcodes");
 }

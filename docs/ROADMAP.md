@@ -261,10 +261,14 @@ The order, and where it stands:
    and the direct sound-register write. They are real symbols rather than stubs now, which the
    binding report confirms.
 
-   Left in this step: control flow (`ply_goto`, `ply_patt`, `ply_pend`, `ply_rept`, `ply_fine`),
-   the note allocator (`ply_note`, `ply_endtie`, `ChnVolSetAsm`), and the drivers `MPlayMain`,
-   `TrackStop` and `m4aSoundVSync`. `MPlayMain` and `ply_note` are 338 and 279 lines of ARM on
-   their own.
+   Control flow is **done** as well: the jump, the three-deep pattern call stack, the repeat
+   counter, ending a track, and unlinking a channel from the chain its track keeps. Twenty of the
+   sequencer's symbols are provided rather than stubbed now, which took the deferred count from 127
+   to 107.
+
+   Left in this step: the note allocator (`ply_note`, `ply_endtie`, `ChnVolSetAsm`) and the drivers
+   `MPlayMain`, `TrackStop` and `m4aSoundVSync`. `MPlayMain` and `ply_note` are 338 and 279 lines of
+   ARM on their own, and are the two largest pieces left in the phase.
 5. Build upstream's `m4a.c` and drop the deferred entries. It is excluded for one line,
    `asm("swi 0x2A")`, and a per-file `-Dasm(x)=` clears it — so the 1781-line sequencer keeps
    receiving upstream fixes instead of being forked into an override.

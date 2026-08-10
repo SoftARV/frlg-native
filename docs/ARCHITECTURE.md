@@ -518,10 +518,16 @@ the sequencer's jump table names, and this is what supplies them. Each takes the
 track, reads its operands from the track's command stream, and sets flags saying what it
 invalidated — the volume or the pitch has to be recomputed before the next note sounds.
 
-**Done so far: the parameter opcodes** — priority, tempo, key shift, instrument select, volume, pan,
-bend, bend range, tune, both modulation controls and the delay, and the direct write to a
-compatible-sound register. What remains is control flow (`ply_goto` and the pattern stack), the note
-allocator, `MPlayMain` and `TrackStop`.
+**Done so far: the parameter opcodes and control flow** — priority, tempo, key shift, instrument
+select, volume, pan, bend, bend range, tune, both modulation controls and the delay, the direct
+write to a compatible-sound register, and then the jump, the three-deep pattern call stack, the
+repeat counter and the end of a track.
+
+Ending a track releases the channels it owns rather than cutting them off, so their envelopes
+finish, and unlinks each from the chain the track keeps. The chain's head lives in the track rather
+than in a channel, which makes losing the first one a separate case from losing a middle one.
+
+What remains is the note allocator (`ply_note`, `ply_endtie`), `MPlayMain` and `TrackStop`.
 
 The mixer produces the GBA's native ~13.4 kHz PCM into a ring buffer; the host layer resamples.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game
