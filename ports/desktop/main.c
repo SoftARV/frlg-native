@@ -21,6 +21,7 @@
 #endif
 
 #include "agb/frame.h"
+#include "agb/cart.h"
 #include "agb/memmap.h"
 #include "agb/ppu.h"
 #include "host.h"
@@ -105,6 +106,32 @@ static void write_ppm(const char *path)
     fprintf(stderr, "frlg-native: wrote %s\n", path);
 }
 
+// The game's own data lives in the player's ROM, not in this binary
+// (docs/adr/0006-rom-supplied-data.md). Until the phase 7 importer exists, the
+// path comes from the environment, falling back to the build the port is bound
+// against -- the two have to describe each other, so this is not a free choice.
+static void load_cart(void)
+{
+    const char *path = getenv("FRLG_ROM");
+    int err;
+
+    if (path == NULL)
+        path = FRLG_DEFAULT_ROM;
+
+    err = agb_cart_load(path);
+    if (err == 0)
+    {
+        printf("frlg-native: cart loaded from %s\n", path);
+        return;
+    }
+
+    // Not fatal: the game runs without it, badly. Everything read out of
+    // data/*.s reads as zeros, which is its own kind of wrong -- see
+    // docs/spikes/0003-empty-cart-region.md.
+    fprintf(stderr, "frlg-native: no cart image (%s): %s\n", path,
+            err == -2 ? "wrong size" : "cannot read");
+}
+
 int main(int argc, char **argv)
 {
     unsigned stall_secs = argc > 2 ? (unsigned)strtoul(argv[2], NULL, 0) : 10;
@@ -127,6 +154,8 @@ int main(int argc, char **argv)
 
     if (!host_video_open("frlg-native", SCREEN_W, SCREEN_H, 3))
         return 1;
+
+    load_cart();
 
     printf("frlg-native: starting, frame limit %u\n", frame_limit);
     if (pthread_create(&game, NULL, game_thread, NULL) != 0)

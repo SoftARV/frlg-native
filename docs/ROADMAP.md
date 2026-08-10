@@ -400,11 +400,17 @@ The shipping model ([ADR 0006](adr/0006-rom-supplied-data.md)): generate the man
 build, bind data symbols into the cart region with a generated linker fragment, and write the
 first-boot importer — verify SHA-1, load, relocate, cache, release.
 
-**The loading and relocation half of this is being pulled forward into phase 4**, because the sound
-engine is the first subsystem to follow a pointer stored inside ROM data and nothing works without
-it. [Spike 0005](spikes/0005-relocation-classes.md) settles what each of the 61,142 records needs:
-79% are a base shift, 10% resolve to a native symbol, and **11% must be left alone** — jump tables
-inside ROM functions we never execute, which have no native counterpart and which nothing reads.
+**The loading and relocation half of this is done, pulled forward into phase 4** — the sound engine
+is the first subsystem to follow a pointer stored inside ROM data, and nothing works without it. The
+ROM is loaded into the cart region and its pointers rewritten once, by a table generated from the
+same build the bindings come from ([ARCHITECTURE §5.3](ARCHITECTURE.md#53-relocating-what-the-image-points-at),
+[spike 0005](spikes/0005-relocation-classes.md)). Of 61,142 records, 51,227 are rewritten and 9,915
+are deliberately left alone. The golden tier is unchanged by it, which is the point: loading 16 MiB
+of real game data and rewriting 51,227 pointers inside it altered no pixel of the first 2,400 frames.
+
+That also settles [spike 0003](spikes/0003-empty-cart-region.md): the controls guide read
+`gControlsGuide_Text_DPad` as an unterminated run of spaces because the region was zeros. It now
+holds the real string, terminated 68 bytes in.
 
 What stays here is the shipping half: a *retail* cartridge rather than the development build, which
 means regenerating the manifest, the bindings and the relocation table together from the

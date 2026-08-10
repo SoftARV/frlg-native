@@ -247,6 +247,36 @@ Data symbols are **not compiled into the binary**. A generated linker fragment d
 its address inside the cart region, so `extern const struct SpeciesInfo gSpeciesInfo[]` resolves
 into the loaded image and game code reaches its data unmodified.
 
+### 5.3 Relocating what the image points at
+
+Loading the image is not enough, because the data in it holds pointers, and they are the addresses
+the *original* build gave its own code and RAM. `0x03004518` is not a place here. The sound engine
+is the first subsystem that follows one, which is what pulled this forward from phase 7.
+
+`tools/gen_relocations.py` reads the relocations the ROM's own link left behind and emits a table
+naming every pointer that has to be rewritten. It is C rather than data, because code and RAM
+targets are named symbols: writing them as `&symbol` lets our linker resolve them, so nothing looks
+symbols up at run time. `agb_cart_load` reads the image and applies the table once.
+
+Of 61,142 records, **three classes are rewritten and three are deliberately left alone**
+([spike 0005](spikes/0005-relocation-classes.md)):
+
+| Class | Count | What happens |
+| --- | --- | --- |
+| Data | 48,146 | shifted: `agb_cart + (addr - 0x08000000)` |
+| Global code or RAM | 3,081 | our symbol of that name, plus the addend |
+| Interior | 6,851 | **left alone** — jump tables inside ROM functions, which have no native counterpart and which nothing reads |
+| Local targets | 3,059 | **left alone** — statics have no linkable name, and every one sits in ROM data our build re-creates rather than reads |
+| 16-bit | 5 | **left alone** — script constants, not pointers |
+
+The 1,107 distinct symbols the table names are exactly the `data/*.s` symbols the binder maps into
+the cart region, which is the arrangement being consistent with itself.
+
+**The table, the bindings and the image must come from one build.** Ours come from
+`pokefirered_modern`, which already carries the relocation sections. §5.1's requirement that the
+manifest be byte-matching is about *shipping* — a player supplies a retail cartridge — and phase 7
+regenerates the whole set together.
+
 ### 5.3 Relocation
 
 Pointers embedded in ROM data are ROM addresses (`0x08xxxxxx`). After loading, the importer walks

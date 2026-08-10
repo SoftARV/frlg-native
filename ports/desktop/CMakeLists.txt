@@ -18,6 +18,28 @@ else()
 endif()
 message(STATUS "frlg-native: .text ends at ${text_end}")
 
+# The ROM's data holds the addresses the original build gave its own code and
+# RAM, so each is rewritten once when the image is loaded. The table naming them
+# is generated from the same build the bindings come from -- it has to be, since
+# the two describe each other. See docs/spikes/0005-relocation-classes.md.
+set(relocs "${CMAKE_CURRENT_BINARY_DIR}/agb_relocations.c")
+add_custom_command(
+    OUTPUT "${relocs}"
+    COMMAND "${CMAKE_COMMAND}" -E env python3
+            "${CMAKE_SOURCE_DIR}/tools/gen_relocations.py"
+            "${FRLG_VENDOR_DIR}/pokefirered_modern.elf"
+            "${FRLG_VENDOR_DIR}/pokefirered_modern.gba"
+            -o "${relocs}" --report
+    DEPENDS "${CMAKE_SOURCE_DIR}/tools/gen_relocations.py"
+            "${FRLG_VENDOR_DIR}/pokefirered_modern.elf"
+    COMMENT "generating the cart relocation table"
+    VERBATIM)
+
+# Its own library so that both links can pull it in whole: the trial link needs
+# to see the symbols it names, or they are never discovered as unbound.
+add_library(cartreloc STATIC "${relocs}")
+target_include_directories(cartreloc PRIVATE "${CMAKE_SOURCE_DIR}/platform/agb/include")
+
 set(bindings "${CMAKE_CURRENT_BINARY_DIR}/bindings.rsp")
 
 # --whole-archive pulls every game object in regardless, so the trial link needs
@@ -44,7 +66,8 @@ add_custom_command(
     COMMAND sh "${CMAKE_SOURCE_DIR}/tools/find_unbound.sh"
             "${CMAKE_CURRENT_BINARY_DIR}/missing.txt"
             "${CMAKE_C_COMPILER}" -m32 "${trial_main}"
-            -Wl,--whole-archive "$<TARGET_FILE:game>" -Wl,--no-whole-archive
+            -Wl,--whole-archive "$<TARGET_FILE:game>" "$<TARGET_FILE:cartreloc>"
+            -Wl,--no-whole-archive
             "$<TARGET_FILE:agb>" -lm
             -o "${CMAKE_CURRENT_BINARY_DIR}/trial.out"
     COMMAND "${CMAKE_COMMAND}" -E env python3
@@ -54,7 +77,7 @@ add_custom_command(
             --stub-source "${CMAKE_CURRENT_BINARY_DIR}/agb_stubs.c"
             --soft-list "${CMAKE_CURRENT_BINARY_DIR}/deferred.txt"
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-    DEPENDS game agb "${CMAKE_SOURCE_DIR}/tools/gen_symbol_bindings.py"
+    DEPENDS game agb cartreloc "${CMAKE_SOURCE_DIR}/tools/gen_symbol_bindings.py"
     COMMENT "resolving unbound game symbols"
     VERBATIM)
 
@@ -67,7 +90,12 @@ add_executable(frlg-native main.c "${CMAKE_CURRENT_BINARY_DIR}/agb_stubs.c")
 add_dependencies(frlg-native frlg_bindings)
 
 target_link_libraries(frlg-native PRIVATE
-    -Wl,--whole-archive game -Wl,--no-whole-archive
+    -Wl,--whole-archive game cartreloc -Wl,--no-whole-archive
     agb host pthread)
 # -rdynamic so the unimplemented-stub backtrace resolves names.
+# Development default only: the shipping build takes the path from the player,
+# and ships no ROM at all (ADR 0006).
+target_compile_definitions(frlg-native PRIVATE
+    FRLG_DEFAULT_ROM="${FRLG_VENDOR_DIR}/pokefirered_modern.gba")
+
 target_link_options(frlg-native PRIVATE "@${bindings}" -rdynamic)

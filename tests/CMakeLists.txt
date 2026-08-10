@@ -15,6 +15,7 @@ function(frlg_add_test name)
     set_tests_properties("${name}" PROPERTIES LABELS unit)
 endfunction()
 
+frlg_add_test(test_cart)
 frlg_add_test(test_ppu_objects)
 frlg_add_test(test_ppu_bg_affine)
 frlg_add_test(test_ppu_windows)
