@@ -85,10 +85,12 @@ static struct noise noise4;
 static int sequencer_step;
 static uint32_t sequencer_phase;
 
-// The duty cycles, as the fraction of a period the output is high.
-static const uint32_t duty_high[4] = {
-    PHASE_ONE / 8, PHASE_ONE / 4, PHASE_ONE / 2, PHASE_ONE * 3 / 4,
-};
+// The duty cycles, in eighths of a period spent high.
+static const int duty_eighths[4] = {1, 2, 4, 6};
+
+// Voices are generated at four times their natural scale so that the duty
+// correction below stays exact in integers; the final mix divides it out.
+#define VOICE_SCALE 4
 
 // The noise generator's divisor codes: zero means a half rather than a zero.
 static const int noise_divisor[8] = {8, 16, 32, 48, 64, 80, 96, 112};
@@ -286,6 +288,7 @@ static void sequencer_tick(void)
 static int square_sample(struct square *ch, int rate)
 {
     uint32_t step;
+    int high;
 
     if (!ch->enabled || ch->period >= 2048)
         return 0;
@@ -294,7 +297,18 @@ static int square_sample(struct square *ch, int rate)
                       / ((uint32_t)(2048 - ch->period) * (uint32_t)rate));
     ch->phase = (ch->phase + step) & (PHASE_ONE - 1);
 
-    return ch->phase < duty_high[ch->duty] ? ch->env.volume : -ch->env.volume;
+    // A channel's DAC puts out 0 to 15 and the hardware couples the result
+    // through a capacitor, so no duty carries a standing offset. Swinging
+    // symmetrically about zero instead would: at one eighth duty the mean sits
+    // at three quarters of the volume, and since the duty changes from note to
+    // note that offset moves, which is a thump rather than a tone. Weighting
+    // each side by the time spent on the other keeps the mean at zero and the
+    // swing unchanged.
+    high = duty_eighths[ch->duty];
+    if (ch->phase < (uint32_t)high * (PHASE_ONE / 8))
+        return ch->env.volume * (8 - high);
+
+    return -ch->env.volume * high;
 }
 
 static int wave_sample(int rate)
@@ -317,7 +331,9 @@ static int wave_sample(int rate)
     byte = agb_mem.io[REG_OFFSET_WAVE_RAM0 + (index >> 1)];
     nibble = (index & 1) ? (int)(byte & 0xF) : (int)(byte >> 4);
 
-    return (nibble - 8) >> wave3.volume_shift;
+    // Centred the same way, on the assumption the table is symmetric about its
+    // midpoint -- which the hardware's capacitor would take care of regardless.
+    return ((nibble - 8) * VOICE_SCALE) >> wave3.volume_shift;
 }
 
 static int noise_sample(int rate)
@@ -343,7 +359,8 @@ static int noise_sample(int rate)
             noise4.lfsr = (noise4.lfsr & ~0x40u) | (bit << 6);
     }
 
-    return (noise4.lfsr & 1) ? -noise4.env.volume : noise4.env.volume;
+    return (noise4.lfsr & 1) ? -noise4.env.volume * VOICE_SCALE
+                             : noise4.env.volume * VOICE_SCALE;
 }
 
 static int8_t add_clamped(int8_t existing, int addition)
@@ -413,8 +430,8 @@ void agb_psg_mix(int8_t *right, int8_t *left, int samples, int rate)
 
         // Per-side master volume is one of eight steps, and the ratio above
         // scales the whole side against the software mixer's output.
-        sum_right = sum_right * (volume_right + 1) * ratio / 32;
-        sum_left = sum_left * (volume_left + 1) * ratio / 32;
+        sum_right = sum_right * (volume_right + 1) * ratio / (32 * VOICE_SCALE);
+        sum_left = sum_left * (volume_left + 1) * ratio / (32 * VOICE_SCALE);
 
         right[i] = add_clamped(right[i], sum_right);
         left[i] = add_clamped(left[i], sum_left);

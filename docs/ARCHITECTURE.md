@@ -734,6 +734,13 @@ envelopes at 64 Hz. Registers are read as they stand at the start of each frame,
 reads its own — the sequencer rewrites them that often. The trigger bit is write-only on hardware, so
 it is cleared once acted on, which is what a read-back would see there.
 
+A square's two sides are weighted by the time spent on the other, so no duty carries a standing
+offset. A real channel's DAC puts out 0 to 15 and the hardware couples it through a capacitor;
+swinging symmetrically about zero instead would leave one eighth duty sitting at three quarters of
+the volume, and since the duty changes from note to note that offset moves — a thump under the tune,
+spending the headroom the melody needs. It measured as exactly that
+([spike 0007](spikes/0007-audio-against-mgba.md)).
+
 Two deliberate departures. Sampling happens at the **software mixer's rate** rather than the
 hardware's, because the result is added to that mixer's buffer; point-sampling a square is not what
 the hardware does, but the host would resample one stage later regardless. And the final add

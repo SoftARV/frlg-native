@@ -61,6 +61,40 @@ improve a band whose problem lies elsewhere, and keeping it would have left the 
 justification the evidence had already contradicted. The measurement stays here so that a future
 decision about band-limiting starts from data rather than from the same guess.
 
+## What it then found, once the arithmetic was read properly
+
+Comparing *shares* of a normalised total is treacherous: adding energy in one band lowers every other
+band's share, so "the mid band is 0.80x" did not mean the melody was quiet, it meant something else
+had grown. The figure that says what a listener hears is the **melody band against the bass band**:
+
+| | bass 0–200 | mid 200–1600 | mid ÷ bass |
+| --- | --- | --- | --- |
+| mGBA (reference) | 0.194 | 0.751 | **3.86** |
+| ours, PSG off | 0.232 | 0.686 | 2.96 |
+| ours, PSG on | 0.327 | 0.603 | **1.85** |
+
+Switching the PSG on **halved** the melody-to-bass balance. It was adding bass, not melody — which is
+what a listener reported independently as the new channels being hard to hear.
+
+The cause was a **standing offset on every duty but one**. Each square swung symmetrically about
+zero, so at one eighth duty its mean sat at three quarters of the volume, at a quarter duty at half.
+A real channel's DAC puts out 0 to 15 and the hardware couples it through a capacitor, so no duty
+carries an offset at all. Worse, the duty changes from note to note, so the offset moved: a thump
+under the tune, spending headroom the melody needed.
+
+Weighting each side of the square by the time spent on the other keeps the mean at zero and the swing
+unchanged:
+
+| | bass | mid | mid ÷ bass |
+| --- | --- | --- | --- |
+| before | 0.327 | 0.603 | 1.85 |
+| **after** | **0.213** | **0.706** | **3.31** |
+| mGBA | 0.194 | 0.751 | 3.86 |
+
+From less than half the reference's balance to 86% of it, and the overall level barely moved
+(1.34x to 1.29x mGBA). The remaining difference is small enough that it is no longer the obvious
+thing to chase.
+
 **Not established:** whether our direct-sound treble is wrong at all. The GBA's own PCM is 8-bit at
 about 13 kHz and its DAC produces exactly this kind of content; mGBA's `blip_buf` resampling
 deliberately removes it. Ours may be the more faithful of the two. Settling that needs a comparison
