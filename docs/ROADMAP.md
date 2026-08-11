@@ -434,8 +434,13 @@ reads 1, and the checksums are the game's own. It went to slot 2, which is the r
 does, and the remaining eighteen sectors are still erased. `ProgramFlashSectorAndVerify` read every
 sector back and accepted it, or the save-failed screen would have appeared instead.
 
-What is still untested is a **round trip through a restart** and whether mGBA reads the same file.
-Phase 6's determinism harness is where both belong, since neither should need a player.
+**And it round trips.** Restarting the port offers CONTINUE and resumes where the player left off, so
+the read path works through the game's own code and not merely through our tests. Phase 5 is done in
+the sense that matters: the game remembers.
+
+Still untested is whether **mGBA reads the same file**. It should -- the layout is the emulator
+convention, which is why it was chosen -- but that is a claim rather than a measurement. It needs no
+player, so it belongs with phase 6's harness.
 
 ## Phase 6 — It plays
 
