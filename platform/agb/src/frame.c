@@ -46,6 +46,8 @@ static void agb_reset_io(void)
     // Keys are active-low: a zeroed KEYINPUT reads as every button held, which
     // the game sees as the soft-reset combo before it draws a single frame.
     *(volatile uint16_t *)(agb_mem.io + REG_OFF_KEYINPUT) = KEYS_RELEASED;
+
+    agb_io_affine_identity();
 }
 
 static uint16_t (*agb_key_source)(uint32_t frame);

@@ -549,6 +549,13 @@ logic depends on the values — unit-tested against known vectors rather than tr
 `CpuSet`/`CpuFastSet` honour the fixed-source and 16/32-bit control bits. `LZ77UnComp`, `RLUnComp`
 and `HuffUnComp` are exercised against real game assets.
 
+`RegisterRamReset` clears the display registers, and the two affine matrices sit inside that range —
+but they are the identity at rest, not zero, and the game depends on it. `AgbMain` resets every
+register on the way in and the trainer pictures are still drawn on an affine BG2 a thousand frames
+later without anything writing a matrix; the reference emulator's renderer holds the identity across
+the same call. So the clear puts them back, through `agb_io_affine_identity()` in `memmap.c`, which
+is also what the power-on state uses. See docs/spikes/0008-missing-trainer-pics.md.
+
 ### 6.7 Audio
 
 `m4a.c`, the sequencer, **is built**, and needs no override. Two statements in it are hardware that

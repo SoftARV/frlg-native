@@ -3,10 +3,10 @@
 **Question:** Oak standing in the opening speech is missing, and so is the large player picture on the
 gender screen, while Oak's Nidorina animation on the same screens is fine. Where does it go wrong?
 
-**Status: located to one register, not yet explained.** Everything the picture needs is present and
-correct except the affine transform, which is all zeros — and the game never sets it, which means the
-attribution is still wrong somewhere. Recorded because the next step is a measurement, not a guess,
-and because the route to it is now reusable.
+**Status: solved.** The affine matrices are the identity at rest, not zero, and our
+`RegisterRamReset` was clearing them along with the rest of the display registers. Both trainer
+pictures appear, and Oak matches mGBA's frame. The route to the answer — asking the reference what
+its renderer holds, rather than reasoning about what the game ought to write — is the reusable part.
 
 ## What made it investigable
 
@@ -76,13 +76,49 @@ depths all agree, and the difference is not in the display configuration.
 BG2's affine parameters cannot be compared this way: they are write-only on hardware, and mGBA returns
 open bus for them — every one reads back as `421D`, the same value, which is the giveaway.
 
-So the attribution question is still open, and the remaining possibilities have narrowed to two: either
-our affine renderer is wrong for a case this screen hits, or the picture is drawn by something other
-than BG2 and the 8bpp coincidence misled the whole line of reasoning. Forcing an identity matrix in our
-renderer and re-capturing would separate them, and is the next thing to try.
+## Asking the renderer instead
 
-**Not attempted yet**, because the attempt ran into an unrelated crash that had to be dealt with
-first — see below.
+mGBA keeps every I/O write in a shadow array whatever the bus returns, and its software renderer keeps
+the matrix it is about to draw with. Neither is reachable through `mCore`, but `mgba-capture` links
+libmgba, so both are one cast away. At the same frame:
+
+```
+BG2PA=0100 BG2PB=0000 BG2PC=0000 BG2PD=0100   BG2X=0 BG2Y=0
+renderer bg2: enabled=4 dx=256 dy=0 sx=0 sy=0 refx=0 refy=0
+```
+
+**The identity.** The shadow array alone would not have been enough — it is only as truthful as mGBA's
+decision to store a write in it — but the renderer's `dx=256` is the state the frame is actually drawn
+from. So the reference draws Oak through an identity matrix that the game never writes, and the
+question becomes why ours is zero when the machine's is not.
+
+## The answer
+
+A hardware watchpoint on `agb_mem.io + 0x20` across 400 frames caught exactly two writes:
+
+```
+BG2PA <- 0100  agb_reset_io ()                     frame.c:61
+BG2PA <- 0000  RegisterRamReset (resetFlags=255)   bios.c:71   <- from AgbMain, src/main.c:134
+```
+
+`AgbMain` resets every register on the way in, and our `RESET_REGS` branch memsets `io[0x00..0x60)`,
+which covers both affine blocks. Nothing writes a matrix for the next eleven hundred frames, so the
+picture is composed against `PA=0`: every pixel of a scanline samples texel (0, 0), which is
+transparent.
+
+The affine matrices are the identity at rest, then, and the register clear has to leave them there.
+That fact now lives in one place, `agb_io_affine_identity()`, which both the power-on path and the
+BIOS reset call.
+
+Oak appears, the player picture on the gender screen appears, and the frame matches mGBA's apart from
+the dialogue-pacing offset below.
+
+## What the wrong turn cost
+
+The first attempt read the registers through `busRead16`, got `421D` for all six affine parameters, and
+concluded they were unreadable. They were — through the bus. Half a measurement read as a whole one
+made the answer look out of reach, and it was two casts away. **A write-only register is unreadable on
+the hardware, not in the emulator modelling it.**
 
 **Also unexplained:** our run and mGBA's diverge in how far the same A-mashing trace advances the
 dialogue — at frame 1500 ours is two lines behind. Harmless for this investigation, since both reach

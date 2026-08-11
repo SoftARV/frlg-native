@@ -18,6 +18,10 @@ struct agb_memory
 
 extern struct agb_memory agb_mem;
 
+// BG2's and BG3's affine matrices, which are not zero at rest. Both the power-on
+// state and the BIOS's register reset leave them here, so both call this.
+void agb_io_affine_identity(void);
+
 // The player's ROM image. Data symbols the host cannot build — the scripts and
 // map data in data/*.s — are bound to offsets inside this array at link time by
 // tools/gen_cart_syms.py, so game code reaches them as the symbols it always used.

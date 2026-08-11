@@ -68,7 +68,15 @@ void RegisterRamReset(u32 resetFlags)
     if (resetFlags & RESET_SOUND_REGS)
         memset(agb_mem.io + 0x60, 0, 0x50);
     if (resetFlags & RESET_REGS)
+    {
         memset(agb_mem.io, 0, 0x60);
+        // The clear covers both affine blocks, and the game does not put them
+        // back: AgbMain resets every register on the way in and the trainer
+        // pictures are still drawn with the identity a thousand frames later.
+        // The reference emulator's renderer holds the identity there across the
+        // same call, so the register clear cannot be leaving them at zero.
+        agb_io_affine_identity();
+    }
 }
 
 s32 Div(s32 num, s32 denom)
