@@ -428,9 +428,14 @@ the end of a sector proves nothing, because the clip yields a size of zero there
 only earns its place *beyond* the end, where the subtraction underflows and asks for a copy of nearly
 four gigabytes.
 
-**Not yet exercised by the game itself.** Saving needs a player to reach a save point, which no test
-does; what is verified is the chip's behaviour and that the game accepts it at boot. Phase 6's
-determinism harness is where a real save round trip belongs.
+**Exercised by the game itself.** A player reached a save point and saved: the file is 131,072 bytes,
+fourteen sectors carry the `0x08012025` signature with ids 0 to 13 each exactly once, the save counter
+reads 1, and the checksums are the game's own. It went to slot 2, which is the rotation the save code
+does, and the remaining eighteen sectors are still erased. `ProgramFlashSectorAndVerify` read every
+sector back and accepted it, or the save-failed screen would have appeared instead.
+
+What is still untested is a **round trip through a restart** and whether mGBA reads the same file.
+Phase 6's determinism harness is where both belong, since neither should need a player.
 
 ## Phase 6 — It plays
 
