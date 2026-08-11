@@ -65,7 +65,7 @@ set(FRLG_PATCH_LAYOUT "${CMAKE_SOURCE_DIR}/tools/patch_layout_assumptions.py")
 # The GBA has no MMU, so upstream may read through a null pointer and get
 # garbage rather than a fault. naming_screen.c does. See
 # tools/patch_null_tolerance.py.
-set(FRLG_GAME_PATCH_NULL naming_screen.c)
+set(FRLG_GAME_PATCH_NULL naming_screen.c load_save.c)
 set(FRLG_PATCH_NULL "${CMAKE_SOURCE_DIR}/tools/patch_null_tolerance.py")
 
 # main.c's only ARM assembly is an IWRAM clear inside `#if MODERN`, so upstream's
@@ -102,18 +102,20 @@ function(frlg_preprocess_game rel out_var)
         list(TRANSFORM cppflags REPLACE "^-DMODERN=1$" "-DMODERN=0")
     endif()
 
+    # A file may need more than one of these, so they accumulate rather than
+    # choosing between themselves.
     set(post "")
     set(extra_deps "")
-    if(base IN_LIST FRLG_GAME_STRIP_WAITS)
-        set(post COMMAND "${CMAKE_COMMAND}" -E env python3 "${FRLG_STRIP_WAITS}" "${c}")
-        set(extra_deps "${FRLG_STRIP_WAITS}")
-    elseif(base IN_LIST FRLG_GAME_PATCH_LAYOUT)
-        set(post COMMAND "${CMAKE_COMMAND}" -E env python3 "${FRLG_PATCH_LAYOUT}" "${c}")
-        set(extra_deps "${FRLG_PATCH_LAYOUT}")
-    elseif(base IN_LIST FRLG_GAME_PATCH_NULL)
-        set(post COMMAND "${CMAKE_COMMAND}" -E env python3 "${FRLG_PATCH_NULL}" "${c}")
-        set(extra_deps "${FRLG_PATCH_NULL}")
-    endif()
+    foreach(pair "FRLG_GAME_STRIP_WAITS;${FRLG_STRIP_WAITS}"
+                 "FRLG_GAME_PATCH_LAYOUT;${FRLG_PATCH_LAYOUT}"
+                 "FRLG_GAME_PATCH_NULL;${FRLG_PATCH_NULL}")
+        list(GET pair 0 list_name)
+        list(GET pair 1 script)
+        if(base IN_LIST ${list_name})
+            list(APPEND post COMMAND "${CMAKE_COMMAND}" -E env python3 "${script}" "${c}")
+            list(APPEND extra_deps "${script}")
+        endif()
+    endforeach()
 
     add_custom_command(
         OUTPUT "${c}"

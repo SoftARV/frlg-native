@@ -444,6 +444,22 @@ player, so it belongs with phase 6's harness.
 
 ## Phase 6 — It plays
 
+**Input traces record and replay.** `FRLG_INPUT_RECORD=<file>` writes what the keyboard did, a line
+per frame on which it changed; `FRLG_INPUT=<file>` replays one. The keys are supplied by the frame
+driver on the game's own thread, at the same point in every frame, rather than by the presenting
+thread writing the register whenever it gets round to it — which is what makes a replay repeatable.
+Three replays of the same trace produce a byte-identical frame 900.
+
+That is the harness the rest of the phase needs: reaching a place in the game reproducibly is what
+lets the save round trip, the mGBA save read and any visual defect be checked without a player.
+
+**Building it found something worse than it was for.** With a save file present, the game **could not
+boot** — `LoadGameSave` runs before the save blocks' pointers are set, so its sector copy wrote
+through null. On hardware those writes are ignored and the real load happens later; here every build
+crashed. It was invisible until phase 5 produced a save to load, and it is the same no-MMU class as
+the naming screen, now with writes rather than reads
+([ARCHITECTURE §4.3](ARCHITECTURE.md#43-files-not-built)).
+
 **The script VM is built**, which was the thing standing between the intro and the game. `script.c`
 was excluded for one statement -- `svc 2`, BIOS Halt, inside a loop that never ends, reached only on
 finding a corrupt script pointer. The game means to stop there, and waiting for the next V-blank for

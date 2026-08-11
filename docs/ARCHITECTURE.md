@@ -201,7 +201,7 @@ target is absent, so a submodule bump is reported rather than silently changing 
 | --- | --- | --- |
 | `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `script.c` |
 | `patch_layout_assumptions.py` | assumes upstream's linker script | `load_save.c` |
-| `patch_null_tolerance.py` | reads what only a machine without an MMU tolerates | `naming_screen.c` |
+| `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c` |
 
 The third is worth understanding, because more of it will turn up. **The GBA has no MMU**: every
 address in its map is readable, address zero included — that region is BIOS ROM — so a read through a
@@ -213,8 +213,20 @@ stopped a player naming their character.
 
 Mapping a readable page at address zero would answer the whole class at once, and is not available:
 `vm.mmap_min_addr` forbids it without privileges we should not want. So each site is repaired where
-it is, by leaving the pointer dangling into freed-but-mapped heap rather than clearing it — the same
-harmless single read, somewhere that exists.
+it is.
+
+**The class covers writes as well**, which is worse, because a write cannot be redirected somewhere
+harmless — it has to go somewhere real. `load_save.c` is the second instance: the save blocks'
+pointers start null and are not set until the title screen, but `LoadGameSave` runs at boot, so the
+sector copy writes through null plus the sector's offset. On hardware those writes land on the BIOS
+region and are ignored, and the real load happens later and works. Here the game **could not boot at
+all with a save present**. Pointing the three pointers at their own objects makes that early copy land
+where it belongs; offset zero is one of the offsets `SetSaveBlocksPointers` itself picks, so it is a
+state the game already handles.
+
+Two instances in six phases, both found by playing rather than by reading, and the second only after
+the first save existed to load. A file may need more than one of these scripts, so they accumulate
+rather than choosing between themselves — `load_save.c` takes both a layout repair and a null one.
 | `m4a.c` | `swi 0x2A` | the mixer ([§6.7](#67-audio)) — a build seam, not an override |
 | `multiboot.c` | ARM busy-wait | GameCube link, out of scope |
 | `librfu_intr.c` | naked ARM trampolines | link play ([§6.9](#69-serial-and-link-play)) |

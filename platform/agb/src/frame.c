@@ -48,6 +48,13 @@ static void agb_reset_io(void)
     *(volatile uint16_t *)(agb_mem.io + REG_OFF_KEYINPUT) = KEYS_RELEASED;
 }
 
+static uint16_t (*agb_key_source)(uint32_t frame);
+
+void agb_frame_set_key_source(uint16_t (*source)(uint32_t frame))
+{
+    agb_key_source = source;
+}
+
 static void agb_on_vblank(int sig)
 {
     (void)sig;
@@ -61,6 +68,12 @@ static void agb_on_vblank(int sig)
         siglongjmp(agb_exit_point, 1);
 
     agb_in_irq = 1;
+
+    // Before the handler, so the keys the game samples this frame are the ones
+    // the trace names for it, whatever the presenting thread is doing.
+    if (agb_key_source != NULL)
+        *(volatile uint16_t *)(agb_mem.io + REG_OFF_KEYINPUT) =
+            agb_key_source((uint32_t)agb_frames);
 
     // VCOUNT reads inside the handler must see the V-blank period; the game
     // samples it around the sound mixer.

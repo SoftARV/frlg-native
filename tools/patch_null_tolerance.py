@@ -36,6 +36,39 @@ import sys
 # whose halves are separated by line directives -- hence a pattern rather than a
 # string. The free stays; only the assignment goes.
 EDITS = {
+    # The save blocks' pointers start null and are not set until the title
+    # screen, but LoadGameSave runs at boot -- so the sector copy writes through
+    # null plus the sector's offset. On hardware those writes land on the BIOS
+    # region and are ignored; the real load happens later and works. Here they
+    # fault, and the game cannot boot with a save present at all.
+    #
+    # Pointing them at their own objects makes that early copy land where it
+    # belongs instead of nowhere. Offset zero is one of the offsets
+    # SetSaveBlocksPointers itself picks, so it is a state the game already
+    # handles.
+    "load_save.c": [
+        (
+            "the save block pointers' null start",
+            re.compile(
+                r"struct SaveBlock1 \*gSaveBlock1Ptr =\s*(?:#[^\n]*\n\s*)*\(\(void \*\)0\)"
+            ),
+            "struct SaveBlock1 *gSaveBlock1Ptr = &gSaveBlock1",
+        ),
+        (
+            "the second save block pointer's null start",
+            re.compile(
+                r"struct SaveBlock2 \*gSaveBlock2Ptr =\s*(?:#[^\n]*\n\s*)*\(\(void \*\)0\)"
+            ),
+            "struct SaveBlock2 *gSaveBlock2Ptr = &gSaveBlock2",
+        ),
+        (
+            "the storage pointer's null start",
+            re.compile(
+                r"struct PokemonStorage \*gPokemonStoragePtr =\s*(?:#[^\n]*\n\s*)*\(\(void \*\)0\)"
+            ),
+            "struct PokemonStorage *gPokemonStoragePtr = &gPokemonStorage",
+        ),
+    ],
     "naming_screen.c": [
         (
             "the naming screen's read through its freed state",

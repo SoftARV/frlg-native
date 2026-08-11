@@ -153,7 +153,6 @@ static void audio_sink(const int8_t *right, const int8_t *left, int samples, int
     // FRLG_PCM dumps what the mixer produced, in the same raw signed 16-bit
     // stereo mgba-audio writes, so the two can be compared directly. Audio is
     // the one subsystem a screenshot cannot check.
-    agb_flash_close();
     if (audio_dump != NULL)
     {
         for (int i = 0; i < samples; i++)
@@ -166,6 +165,101 @@ static void audio_sink(const int8_t *right, const int8_t *left, int samples, int
 
     if (opened_rate != 0)
         host_audio_submit(right, left, samples);
+}
+
+// Input traces.
+//
+// FRLG_INPUT_RECORD writes what the keyboard did, a line per frame on which it
+// changed; FRLG_INPUT replays one. A replayed run is deterministic because the
+// frame driver asks for the keys on the game's own thread at the same point in
+// every frame, rather than the presenting thread writing the register whenever
+// it gets round to it.
+//
+// The format is a frame number and a key mask, active-low like the register, so
+// a trace can be read, diffed and hand-edited.
+#define TRACE_MAX 65536
+
+static struct
+{
+    uint32_t frame;
+    uint16_t keys;
+} trace[TRACE_MAX];
+
+static unsigned trace_count;
+static unsigned trace_pos;
+static uint16_t trace_keys = HOST_KEYS_RELEASED;
+static FILE *trace_out;
+static uint16_t trace_last_written = HOST_KEYS_RELEASED;
+
+// Called by the frame driver, on the game thread, once a frame.
+static uint16_t replay_keys(uint32_t frame)
+{
+    while (trace_pos < trace_count && trace[trace_pos].frame <= frame)
+        trace_keys = trace[trace_pos++].keys;
+
+    return trace_keys;
+}
+
+static uint16_t record_keys(uint32_t frame)
+{
+    uint16_t keys = host_input_keys();
+
+    if (keys != trace_last_written)
+    {
+        fprintf(trace_out, "%u %04X\n", frame, keys);
+        trace_last_written = keys;
+    }
+    return keys;
+}
+
+static void load_trace(void)
+{
+    const char *replay = getenv("FRLG_INPUT");
+    const char *record = getenv("FRLG_INPUT_RECORD");
+    FILE *fh;
+    char line[128];
+
+    if (record != NULL)
+    {
+        trace_out = fopen(record, "w");
+        if (trace_out == NULL)
+        {
+            fprintf(stderr, "frlg-native: cannot record to %s\n", record);
+            return;
+        }
+        setvbuf(trace_out, NULL, _IOLBF, 0);
+        fprintf(trace_out, "# frame keys (active low)\n");
+        printf("frlg-native: recording input to %s\n", record);
+        agb_frame_set_key_source(record_keys);
+        return;
+    }
+
+    if (replay == NULL)
+        return;
+
+    fh = fopen(replay, "r");
+    if (fh == NULL)
+    {
+        fprintf(stderr, "frlg-native: cannot read %s\n", replay);
+        return;
+    }
+
+    while (trace_count < TRACE_MAX && fgets(line, sizeof(line), fh) != NULL)
+    {
+        unsigned frame, keys;
+
+        if (line[0] == '#' || line[0] == '\n')
+            continue;
+        if (sscanf(line, "%u %x", &frame, &keys) != 2)
+            continue;
+        trace[trace_count].frame = frame;
+        trace[trace_count].keys = (uint16_t)keys;
+        trace_count++;
+    }
+    fclose(fh);
+
+    printf("frlg-native: replaying %u input events from %s\n", trace_count, replay);
+    agb_frame_set_key_source(replay_keys);
 }
 
 // The save chip is backed by a file, in the layout emulators use, so a save
@@ -236,6 +330,7 @@ int main(int argc, char **argv)
 
     load_cart();
     load_save();
+    load_trace();
 
     {
         const char *dump = getenv("FRLG_PCM");
@@ -260,7 +355,10 @@ int main(int argc, char **argv)
         if (!host_pump_events())
             break;
 
-        *(volatile uint16_t *)(agb_mem.io + REG_OFF_KEYINPUT) = host_input_keys();
+        // Left to the frame driver when a trace is driving the keys, so that
+        // the two do not write the register against each other.
+        if (trace_out == NULL && trace_count == 0)
+            *(volatile uint16_t *)(agb_mem.io + REG_OFF_KEYINPUT) = host_input_keys();
 
         copy_frame();
         host_video_present(framebuffer, SCREEN_W, SCREEN_H);
@@ -295,6 +393,9 @@ int main(int argc, char **argv)
 
     if (audio_dump != NULL)
         fclose(audio_dump);
+    agb_flash_close();
+    if (trace_out != NULL)
+        fclose(trace_out);
     host_audio_close();
     host_video_close();
 
