@@ -191,7 +191,7 @@ into two groups, and every one describes hardware rather than game logic.
 
 | Excluded | Assembly it carries | Owned by |
 | --- | --- | --- |
-| `script.c` | `svc 2` (HALT) | override — the pointer accessor ([§12](#12-pointer-width)) |
+| `script.c` | `svc 2` (HALT) | **built** — the halt becomes `VBlankIntrWait`, which is what it meant; the pointer accessor is a 64-bit concern ([§12](#12-pointer-width)) |
 | `m4a.c` | `swi 0x2A` | the mixer ([§6.7](#67-audio)) — a build seam, not an override |
 | `multiboot.c` | ARM busy-wait | GameCube link, out of scope |
 | `librfu_intr.c` | naked ARM trampolines | link play ([§6.9](#69-serial-and-link-play)) |

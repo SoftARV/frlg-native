@@ -22,7 +22,6 @@ set(FRLG_GAME_CPPFLAGS
 # Sources carrying ARM inline assembly that no host target can assemble.
 # See the override table in docs/ARCHITECTURE.md.
 set(FRLG_GAME_EXCLUDED
-    script.c          # svc 2 (HALT); overridden anyway for the pointer accessor
     multiboot.c       # ARM busy-wait; GameCube link, out of scope
     librfu_intr.c     # naked ARM trampolines; RFU wireless, stubbed until phase 10
 
@@ -54,7 +53,7 @@ set(FRLG_GAME_EXCLUDED
 # frame model can never present. Both are removed from the preprocessed copy by
 # a script that fails when either is absent, so a submodule bump is reported
 # rather than silently changing what gets built. See docs/ARCHITECTURE.md 6.7.
-set(FRLG_GAME_STRIP_WAITS m4a.c)
+set(FRLG_GAME_STRIP_WAITS m4a.c script.c)
 set(FRLG_STRIP_WAITS "${CMAKE_SOURCE_DIR}/tools/strip_hardware_waits.py")
 
 # load_save.c clears one variable using the combined size of two, which is only

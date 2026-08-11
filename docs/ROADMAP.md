@@ -434,6 +434,18 @@ determinism harness is where a real save round trip belongs.
 
 ## Phase 6 — It plays
 
+**The script VM is built**, which was the thing standing between the intro and the game. `script.c`
+was excluded for one statement -- `svc 2`, BIOS Halt, inside a loop that never ends, reached only on
+finding a corrupt script pointer. The game means to stop there, and waiting for the next V-blank for
+ever does the same without the BIOS, so the same seam that handles m4a.c handles this.
+
+That one line was holding back **forty-eight routines**, all of them called while showing a message:
+hard stubs fell from 54 to 6, and the six left are libc internals, the ARM interrupt entry we replace,
+and two ROM header symbols -- none reachable in play. Found by running the game rather than by
+reading: it stopped on `IsMsgSignpost`.
+
+
+
 Intro through Pallet Town through the first battle without a crash or a visual defect. The
 determinism harness runs in CI over a scripted input trace, and the autopilot captures shots.
 
