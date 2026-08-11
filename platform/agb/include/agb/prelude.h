@@ -16,6 +16,8 @@
 
 #include "memmap.h"
 #include "dma.h"
+// For the V-blank spin the pipeline rewrites in main.c -- see ADR 0013.
+#include "frame.h"
 
 // Derived macros (EWRAM_END, BG_PLTT, OBJ_VRAM0, REG_ADDR_*, ...) expand at
 // point of use, so redefining the bases redirects everything built on them.

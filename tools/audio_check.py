@@ -39,6 +39,9 @@ def main():
     # Works whether the port was built against SDL or the null host.
     env.setdefault("SDL_VIDEODRIVER", "dummy")
     env.setdefault("SDL_AUDIODRIVER", "dummy")
+    # The mixer is measured by what it produced, not by when: lockstep makes the
+    # run reproducible and drops it from real time to a few seconds.
+    env.setdefault("FRLG_LOCKSTEP", "1")
 
     run = subprocess.run([args.binary, str(args.frames), str(args.stall)],
                          capture_output=True, text=True, env=env, timeout=600)

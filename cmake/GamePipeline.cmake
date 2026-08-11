@@ -53,7 +53,7 @@ set(FRLG_GAME_EXCLUDED
 # frame model can never present. Both are removed from the preprocessed copy by
 # a script that fails when either is absent, so a submodule bump is reported
 # rather than silently changing what gets built. See docs/ARCHITECTURE.md 6.7.
-set(FRLG_GAME_STRIP_WAITS m4a.c script.c)
+set(FRLG_GAME_STRIP_WAITS m4a.c main.c script.c)
 set(FRLG_STRIP_WAITS "${CMAKE_SOURCE_DIR}/tools/strip_hardware_waits.py")
 
 # load_save.c clears one variable using the combined size of two, which is only

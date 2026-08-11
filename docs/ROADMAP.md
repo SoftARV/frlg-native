@@ -484,6 +484,22 @@ determinism harness runs in CI over a scripted input trace, and the autopilot ca
 
 This is the point the project becomes something a person can play.
 
+**The capture clock is deterministic** ([ADR 0013](adr/0013-lockstep-capture-clock.md)). It was not,
+and the tier was passing on luck: with frames driven by a wall-clock timer, a capture on a loaded
+machine misses a V-blank and lands a frame behind one on an idle machine. Six concurrent captures of
+one binary produced three different frames, each of them pixel-exact against some real mGBA frame.
+Under `FRLG_LOCKSTEP` they produce one, and the tier runs in a tenth of the time.
+
+**The trainer pictures appear.** Oak in the opening speech and the player on the gender screen were
+missing because the affine matrices are the identity at rest, not zero, and `RegisterRamReset` was
+clearing them along with the rest of the display registers — the game never writes a matrix for those
+screens. [Spike 0008](spikes/0008-missing-trainer-pics.md); the answer came from reading what mGBA's
+renderer was about to draw with, not from reasoning about what the game ought to write.
+
+**Continuing a saved game works.** A map with no object events has a legitimately null pointer and the
+loop copying their scripts reads sixty-four entries regardless — the third instance of the no-MMU
+class, and the first one reachable only because saving worked.
+
 **Blocked on the cart region having bytes in it.** The game already crashes on the controls guide,
 the first screen that reads text out of `data/*.s`: the symbols are bound, but nothing has filled
 the region behind them, and a run of `0x00` is `CHAR_SPACE` rather than `EOS`. Evidence, and the

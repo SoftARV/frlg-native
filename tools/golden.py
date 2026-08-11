@@ -106,7 +106,11 @@ def write_diff(path, golden, actual, mask):
 
 def capture(binary, frame, out_dir):
     path = os.path.join(out_dir, f"frame{frame.number}.ppm")
-    env = dict(os.environ, FRLG_SHOT=path)
+    # Lockstep, or the comparison is against a moving target: with a wall-clock
+    # frame timer a capture on a loaded machine misses a V-blank and lands a
+    # frame behind one on an idle machine, and every animated pixel differs.
+    # It is also some eight times faster, which is most of this tier's runtime.
+    env = dict(os.environ, FRLG_SHOT=path, FRLG_LOCKSTEP="1")
     # Stall detection off: the harness has its own timeout and a false positive
     # here would look like a rendering failure.
     result = subprocess.run(

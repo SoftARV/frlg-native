@@ -35,6 +35,12 @@ static volatile sig_atomic_t agb_frames;
 static uint32_t agb_frame_limit;
 static volatile sig_atomic_t agb_running;
 static volatile sig_atomic_t agb_in_irq;
+static int agb_lockstep;
+
+void agb_frame_set_lockstep(int on)
+{
+    agb_lockstep = on;
+}
 
 uint32_t agb_frame_count(void)
 {
@@ -57,13 +63,8 @@ void agb_frame_set_key_source(uint16_t (*source)(uint32_t frame))
     agb_key_source = source;
 }
 
-static void agb_on_vblank(int sig)
+static void agb_frame_advance(void)
 {
-    (void)sig;
-
-    if (!agb_running || agb_in_irq)
-        return;
-
     agb_frames++;
 
     if (agb_frame_limit && (uint32_t)agb_frames >= agb_frame_limit)
@@ -89,6 +90,27 @@ static void agb_on_vblank(int sig)
 
     *(volatile uint16_t *)(agb_mem.io + REG_OFF_VCOUNT) = 0;
     agb_in_irq = 0;
+}
+
+static void agb_on_vblank(int sig)
+{
+    (void)sig;
+
+    if (!agb_running || agb_in_irq)
+        return;
+
+    agb_frame_advance();
+}
+
+// The game's main loop ends in a spin on a flag only the V-blank handler sets,
+// which is why a real-time run needs a signal to preempt it (ADR 0009). In
+// lockstep that spin is the one place the game is provably doing nothing, so the
+// frame can be advanced from inside it instead of from a timer -- and a run then
+// depends on nothing but the game's own state. See ADR 0013.
+void agb_frame_idle(void)
+{
+    if (agb_lockstep && agb_running && !agb_in_irq)
+        agb_frame_advance();
 }
 
 static void agb_timer_set(int on)
@@ -123,7 +145,10 @@ uint32_t agb_frame_run(void (*entry)(void), uint32_t max_frames)
 
     if (sigsetjmp(agb_exit_point, 1) == 0)
     {
-        agb_timer_set(1);
+        // Lockstep drives frames from the game's own idle point, so no timer:
+        // one that also fired would preempt real work and put back the very
+        // dependence on wall-clock time lockstep exists to remove.
+        agb_timer_set(!agb_lockstep);
         entry();
         fprintf(stderr, "agb: AgbMain returned after %u frames\n",
                 (uint32_t)agb_frames);
@@ -140,6 +165,12 @@ void agb_wait_vblank(void)
 
     if (!agb_running)
         return;
+
+    if (agb_lockstep)
+    {
+        agb_frame_idle();
+        return;
+    }
 
     while (agb_frames == start)
         ;

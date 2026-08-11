@@ -340,6 +340,17 @@ int main(int argc, char **argv)
     }
     agb_m4a_set_audio_sink(audio_sink);
 
+    // A capture has to be reproducible to be worth comparing, and a wall-clock
+    // frame timer is not: a frame whose work overruns the tick misses a V-blank
+    // and the run slips one frame behind a less loaded one. FRLG_LOCKSTEP drives
+    // frames from the game's own idle point instead. Not for playing -- there is
+    // nothing left pacing the game to real time.
+    if (getenv("FRLG_LOCKSTEP") != NULL)
+    {
+        agb_frame_set_lockstep(1);
+        printf("frlg-native: lockstep clock, frames advance with the game\n");
+    }
+
     printf("frlg-native: starting, frame limit %u\n", frame_limit);
     if (pthread_create(&game, NULL, game_thread, NULL) != 0)
     {

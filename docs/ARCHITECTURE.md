@@ -199,7 +199,7 @@ target is absent, so a submodule bump is reported rather than silently changing 
 
 | Script | Class | Files |
 | --- | --- | --- |
-| `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `script.c` |
+| `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `main.c`, `script.c` |
 | `patch_layout_assumptions.py` | assumes upstream's linker script | `load_save.c` |
 | `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c`, `overworld.c` |
 
@@ -536,10 +536,15 @@ context already holds it deadlocks.
 The clock runs at the GBA's true 59.7275 Hz, not 60. Measured: 1200 frames in 20.10 s against
 20.09 s expected.
 
-**Determinism is an open problem**, not a solved one: interrupts arrive on wall-clock time, so the
-point in game code where a frame boundary lands varies. Boundaries that land inside the idle spin
-are deterministic in effect; ones landing mid-callback are not. The phase 6 harness will need a
-headless clock that advances only at known-safe points.
+That clock is for **playing**. A frame boundary lands wherever wall-clock time puts it, so a frame
+whose work overruns the tick misses a V-blank and the run falls one frame behind a less loaded one —
+which is fine at a controller and fatal to a comparison. `FRLG_LOCKSTEP` therefore advances frames
+from the idle spin itself, which is the one point the game is provably doing nothing: the pipeline
+rewrites that spin's empty body to call `agb_frame_idle()`, no timer is armed, and a run depends on
+nothing but the game's own state. Six concurrent captures then produce byte-identical frames where
+before they produced three different ones, and the golden tier runs in a tenth of the time.
+[ADR 0013](adr/0013-lockstep-capture-clock.md); every capturing harness sets it, and nothing else
+should.
 
 ### 6.6 BIOS
 

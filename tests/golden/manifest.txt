@@ -14,6 +14,11 @@
 # settled screens match mGBA pixel for pixel, which is what makes them an oracle
 # rather than a regression net.
 #
+# Captures run under FRLG_LOCKSTEP. Under the wall-clock clock a frame whose work
+# overruns the tick misses a V-blank, so a loaded machine lands one frame behind
+# an idle one and every animated pixel differs -- the offset was only stable by
+# luck. See docs/adr/0013-lockstep-capture-clock.md.
+#
 # Frames 400 and 900 have no reference because scene pacing diverges wherever
 # the game waits on the audio subsystem, which is stubbed until phase 4. Their
 # backgrounds match mGBA exactly; only animated sprites sit at a different phase,

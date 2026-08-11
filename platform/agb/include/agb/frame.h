@@ -23,4 +23,15 @@ uint32_t agb_frame_count(void);
 // port is driving the register itself.
 void agb_frame_set_key_source(uint16_t (*source)(uint32_t frame));
 
+// Advance frames from the game's own idle point rather than from a wall-clock
+// timer. A run is then reproducible -- the same binary reaches the same frame
+// with the same contents however loaded the machine is -- which is what the
+// golden, audio and trace harnesses compare. It also runs as fast as the host
+// allows, since nothing waits out a frame period. See docs/adr/0013-lockstep-capture-clock.md.
+void agb_frame_set_lockstep(int on);
+
+// Called from the game's V-blank spin. Nothing in real time; the frame boundary
+// in lockstep.
+void agb_frame_idle(void);
+
 #endif // GUARD_AGB_FRAME_H

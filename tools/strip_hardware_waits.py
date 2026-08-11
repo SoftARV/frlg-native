@@ -2,8 +2,8 @@
 """Replace the statements that reach hardware no host has.
 
 Three files are upstream C that would compile but for one statement each of
-hardware. Rather than override a whole file for a line, the line is replaced in
-the preprocessed copy:
+hardware -- and a fourth spins on one. Rather than override a whole file for a
+line, the line is replaced in the preprocessed copy:
 
   m4a.c     swi 0x2A     asks the BIOS to fill the sequencer's dispatch table.
                          Nothing in this game calls the function holding it --
@@ -17,6 +17,14 @@ the preprocessed copy:
                          whenever it resumes: the wait can never end. Nothing is
                          lost, because the host reads the mixer's PCM buffer
                          directly rather than through timer 0.
+
+  main.c    VBlank spin  the main loop's wait for the V-blank flag. It stays a
+                         spin in a real-time run, where a signal preempts it
+                         (ADR 0009), and the body is empty. In lockstep it is the
+                         one point the game is provably idle, so the frame is
+                         advanced from inside it and a run stops depending on
+                         wall-clock time at all -- see ADR 0013. Calling out of
+                         the loop is what makes that possible.
 
   script.c  svc 2        BIOS Halt, inside a loop that never ends, on finding a
                          corrupt script pointer. The game means to stop there,
@@ -58,6 +66,17 @@ EDITS = {
                 r"[ \t]*;\n"
             ),
             "",
+        ),
+    ],
+    "main.c": [
+        (
+            "the main loop's V-blank spin",
+            re.compile(
+                r"while \(!\(gMain\.intrCheck & \(1 << 0\)\)\)\n[ \t]*;\n"
+            ),
+            # Spelled out rather than captured: replacements here are taken
+            # literally, so a group reference would land as one.
+            "while (!(gMain.intrCheck & (1 << 0)))\n        agb_frame_idle();\n",
         ),
     ],
     "script.c": [
