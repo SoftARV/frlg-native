@@ -192,6 +192,29 @@ into two groups, and every one describes hardware rather than game logic.
 | Excluded | Assembly it carries | Owned by |
 | --- | --- | --- |
 | `script.c` | `svc 2` (HALT) | **built** — the halt becomes `VBlankIntrWait`, which is what it meant; the pointer accessor is a 64-bit concern ([§12](#12-pointer-width)) |
+
+**Three classes of statement are replaced in the preprocessed copy** rather than by overriding a whole
+file for a line. Each has its own script, each match is exact, and each fails the build when its
+target is absent, so a submodule bump is reported rather than silently changing what compiles:
+
+| Script | Class | Files |
+| --- | --- | --- |
+| `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `script.c` |
+| `patch_layout_assumptions.py` | assumes upstream's linker script | `load_save.c` |
+| `patch_null_tolerance.py` | reads what only a machine without an MMU tolerates | `naming_screen.c` |
+
+The third is worth understanding, because more of it will turn up. **The GBA has no MMU**: every
+address in its map is readable, address zero included — that region is BIOS ROM — so a read through a
+null pointer returns garbage instead of killing the program, and upstream code is entitled to that.
+`naming_screen.c` frees its own state inside `RunTasks()` and then animates its sprites in the same
+frame, so the cursor's callback reads through the pointer just cleared. On hardware that is one
+frame of a misplaced cursor and then the callback is gone. Here it was a segfault, and it is what
+stopped a player naming their character.
+
+Mapping a readable page at address zero would answer the whole class at once, and is not available:
+`vm.mmap_min_addr` forbids it without privileges we should not want. So each site is repaired where
+it is, by leaving the pointer dangling into freed-but-mapped heap rather than clearing it — the same
+harmless single read, somewhere that exists.
 | `m4a.c` | `swi 0x2A` | the mixer ([§6.7](#67-audio)) — a build seam, not an override |
 | `multiboot.c` | ARM busy-wait | GameCube link, out of scope |
 | `librfu_intr.c` | naked ARM trampolines | link play ([§6.9](#69-serial-and-link-play)) |

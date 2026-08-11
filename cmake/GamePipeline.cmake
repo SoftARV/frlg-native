@@ -62,6 +62,12 @@ set(FRLG_STRIP_WAITS "${CMAKE_SOURCE_DIR}/tools/strip_hardware_waits.py")
 set(FRLG_GAME_PATCH_LAYOUT load_save.c)
 set(FRLG_PATCH_LAYOUT "${CMAKE_SOURCE_DIR}/tools/patch_layout_assumptions.py")
 
+# The GBA has no MMU, so upstream may read through a null pointer and get
+# garbage rather than a fault. naming_screen.c does. See
+# tools/patch_null_tolerance.py.
+set(FRLG_GAME_PATCH_NULL naming_screen.c)
+set(FRLG_PATCH_NULL "${CMAKE_SOURCE_DIR}/tools/patch_null_tolerance.py")
+
 # main.c's only ARM assembly is an IWRAM clear inside `#if MODERN`, so upstream's
 # own non-modern path avoids it. MODERN gates nothing but NOINLINE and an abs()
 # macro, so this changes no layout or ABI -- and RegisterRamReset is ours anyway,
@@ -104,6 +110,9 @@ function(frlg_preprocess_game rel out_var)
     elseif(base IN_LIST FRLG_GAME_PATCH_LAYOUT)
         set(post COMMAND "${CMAKE_COMMAND}" -E env python3 "${FRLG_PATCH_LAYOUT}" "${c}")
         set(extra_deps "${FRLG_PATCH_LAYOUT}")
+    elseif(base IN_LIST FRLG_GAME_PATCH_NULL)
+        set(post COMMAND "${CMAKE_COMMAND}" -E env python3 "${FRLG_PATCH_NULL}" "${c}")
+        set(extra_deps "${FRLG_PATCH_NULL}")
     endif()
 
     add_custom_command(
