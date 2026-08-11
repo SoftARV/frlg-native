@@ -26,6 +26,12 @@
 #include <mgba/core/core.h>
 #include <mgba/core/config.h>
 #include <mgba/core/log.h>
+// The affine parameters are write-only on hardware, so the bus returns open bus
+// for them and busRead16 cannot see what the game wrote. mGBA keeps every I/O
+// write in its own shadow array regardless, which is the only way to read them
+// back -- hence reaching past the core interface into the GBA it is driving.
+#include <mgba/internal/gba/gba.h>
+#include <mgba/internal/gba/renderers/video-software.h>
 
 // mGBA narrates every DMA and BIOS call to stderr otherwise, which buries the
 // harness output and says nothing about whether a frame is right.
@@ -189,18 +195,34 @@ int main(int argc, char** argv)
             if (getenv("FRLG_DUMP_REGS"))
             {
                 static const struct { const char* name; unsigned off; } regs[] = {
-                    {"DISPCNT", 0x000}, {"BG0CNT", 0x008}, {"BG1CNT", 0x00A},
-                    {"BG2CNT", 0x00C},  {"BG3CNT", 0x00E}, {"BG2HOFS", 0x018},
-                    {"BG2VOFS", 0x01A}, {"BG2PA", 0x020},  {"BG2PB", 0x022},
-                    {"BG2PC", 0x024},   {"BG2PD", 0x026},  {"BLDCNT", 0x050},
+                    {"DISPCNT", 0x000}, {"BG0CNT", 0x008},  {"BG1CNT", 0x00A},
+                    {"BG2CNT", 0x00C},  {"BG3CNT", 0x00E},  {"BG2PA", 0x020},
+                    {"BG2PB", 0x022},   {"BG2PC", 0x024},   {"BG2PD", 0x026},
+                    {"BG2X_LO", 0x028}, {"BG2X_HI", 0x02A}, {"BG2Y_LO", 0x02C},
+                    {"BG2Y_HI", 0x02E}, {"BLDCNT", 0x050},
                 };
+                const uint16_t* io = ((struct GBA*)core->board)->memory.io;
                 unsigned r;
 
                 printf("    frame %u registers:", frame);
                 for (r = 0; r < sizeof(regs) / sizeof(regs[0]); r++)
-                    printf(" %s=%04X", regs[r].name,
-                           core->busRead16(core, 0x04000000 + regs[r].off));
+                    printf(" %s=%04X", regs[r].name, io[regs[r].off >> 1]);
                 printf("\n");
+
+                // The shadow array is only as truthful as mGBA's decision to
+                // store a write in it. What its renderer is about to draw with
+                // is not a decision -- it is the state the frame comes from.
+                {
+                    const struct GBAVideoSoftwareRenderer* sr =
+                        (const struct GBAVideoSoftwareRenderer*)((struct GBA*)core->board)->video.renderer;
+                    unsigned b;
+
+                    for (b = 2; b < 4; b++)
+                        printf("    frame %u renderer bg%u: enabled=%d dx=%d dy=%d "
+                               "sx=%d sy=%d refx=%d refy=%d\n",
+                               frame, b, sr->bg[b].enabled, sr->bg[b].dx, sr->bg[b].dy,
+                               sr->bg[b].sx, sr->bg[b].sy, sr->bg[b].refx, sr->bg[b].refy);
+                }
             }
             if (++next >= count)
                 break;
