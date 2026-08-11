@@ -484,6 +484,12 @@ determinism harness runs in CI over a scripted input trace, and the autopilot ca
 
 This is the point the project becomes something a person can play.
 
+**A trace replays exactly here, and diverges on the reference** — by construction, not by defect. The
+port does a frame's work in microseconds where the hardware needs more than its 16.743 ms, and FRLG
+loses a V-blank outright whenever that happens: 73 of them across the intro, none here. So the intro
+plays a little faster than on a cartridge, and frame numbers cannot be carried between the two across a
+heavy scene. [Spike 0009](spikes/0009-trace-pacing-vs-mgba.md).
+
 **The capture clock is deterministic** ([ADR 0013](adr/0013-lockstep-capture-clock.md)). It was not,
 and the tier was passing on luck: with frames driven by a wall-clock timer, a capture on a loaded
 machine misses a V-blank and lands a frame behind one on an idle machine. Six concurrent captures of

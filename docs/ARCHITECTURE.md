@@ -1050,6 +1050,20 @@ instead: their backgrounds match, but scene pacing diverges wherever the game wa
 audio subsystem, so animated sprites sit at a different phase
 ([spike 0004](spikes/0004-mgba-frame-alignment.md)).
 
+**The offset is per row because no single one exists.** mGBA emulates an ARM7 at 16.78 MHz, and FRLG's
+`WaitForVBlank` clears the interrupt flag before waiting — so a frame whose work overruns loses that
+V-blank outright, and the scene takes an extra frame. Across the intro the reference loses 73 of them
+and the port loses none, which is measurable directly: `gMain.intrCheck` sampled at a frame boundary
+says whether the game had reached its wait. The port is not mispaced, it is faster than the machine,
+and a trace is therefore portable within the port but not to the reference
+([spike 0009](spikes/0009-trace-pacing-vs-mgba.md)). Matching hardware would need a cycle model, which
+nothing on the roadmap requires — link play would be the first thing that did.
+
+`mgba-capture` reads the reference's **own variables**, not only its pixels: `gMain`'s address comes
+from `pokefirered_modern.map`, so `FRLG_DUMP_KEYS` can report what the reference game made of an input
+and whether it was keeping up. Asking the reference what it thinks, rather than inferring it from a
+screenshot, is what settled spikes 0008 and 0009.
+
 CI gates expensive per-platform jobs behind change-detection jobs, and runs SDK-free self-tests
 everywhere, so platform count stays affordable.
 

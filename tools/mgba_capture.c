@@ -176,6 +176,20 @@ int main(int argc, char** argv)
     }
     core->reset(core);
 
+    // FRLG_DUMP_KEYS=FIRST:LAST asks what the game itself made of the input over
+    // a range of frames -- the register it read, and the held/new keys it
+    // derived. gMain is at a known address in the reference build's map, so this
+    // is the same question the port can answer about itself, asked of the
+    // reference. Pixels cannot answer it: two runs can look identical and be one
+    // press apart.
+    unsigned keys_first = 0, keys_last = 0;
+    {
+        const char* range = getenv("FRLG_DUMP_KEYS");
+
+        if (range)
+            sscanf(range, "%u:%u", &keys_first, &keys_last);
+    }
+
     // One pass for every frame asked for: the emulator is cheap, but running it
     // from reset once per frame would not be.
     while (next < count)
@@ -229,6 +243,19 @@ int main(int argc, char** argv)
         }
         if (next >= count)
             break;
+
+        if (keys_last && frame >= keys_first && frame <= keys_last)
+        {
+            // gMain, from pokefirered_modern.map; heldKeys at +0x2C, newKeys at
+            // +0x2E, and KEYINPUT is the register the game read them from.
+            uint32_t gmain = 0x0300462C;
+
+            printf("keys %u KEYINPUT=%04X held=%04X new=%04X intrCheck=%04X\n", frame,
+                   core->busRead16(core, 0x04000130),
+                   core->busRead16(core, gmain + 0x2C),
+                   core->busRead16(core, gmain + 0x2E),
+                   core->busRead16(core, gmain + 0x1C));
+        }
 
         // Applied before the frame runs, so the keys this frame sees are the
         // ones the trace names for it -- the same rule the port follows.

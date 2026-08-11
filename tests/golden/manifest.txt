@@ -14,6 +14,13 @@
 # settled screens match mGBA pixel for pixel, which is what makes them an oracle
 # rather than a regression net.
 #
+# That offset holds only while both machines keep up. mGBA emulates an ARM7 at
+# 16.78 MHz and the game loses a V-blank whenever a frame's work overruns -- 73 of
+# them across this intro -- where the port loses none. So every frame carries its
+# own reference number rather than deriving one, and a golden wants a settled
+# screen: on a moving one a frame number means two different things on the two
+# machines. See docs/spikes/0009-trace-pacing-vs-mgba.md.
+#
 # Captures run under FRLG_LOCKSTEP. Under the wall-clock clock a frame whose work
 # overruns the tick misses a V-blank, so a loaded machine lands one frame behind
 # an idle one and every animated pixel differs -- the offset was only stable by
