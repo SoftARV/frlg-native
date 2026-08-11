@@ -9,6 +9,11 @@
 // with it but the PPM format the harness reads.
 //
 // usage: mgba-capture ROM OUTDIR FRAME [FRAME...]     (frames in any order)
+//
+// FRLG_INPUT=<trace> replays the port's own input trace here too, so a frame
+// that can only be reached by playing can still be compared. The trace holds
+// active-low masks, the way the key register reads; mGBA wants the pressed bits,
+// so they are inverted on the way in.
 
 // mGBA's headers use PATH_MAX, which is POSIX rather than ISO -- hence gnu11
 // for this file. It is a host tool; the port itself stays strict C11.
@@ -71,6 +76,48 @@ static int write_ppm(const char* path, const color_t* pixels, unsigned width, un
     return 1;
 }
 
+#define TRACE_MAX 65536
+
+static struct
+{
+    unsigned frame;
+    unsigned keys;   // already inverted to mGBA's sense
+} trace[TRACE_MAX];
+
+static unsigned trace_count;
+
+static void load_trace(void)
+{
+    const char* path = getenv("FRLG_INPUT");
+    FILE* fh;
+    char line[128];
+
+    if (!path)
+        return;
+
+    fh = fopen(path, "r");
+    if (!fh)
+    {
+        fprintf(stderr, "mgba-capture: cannot read %s\n", path);
+        return;
+    }
+
+    while (trace_count < TRACE_MAX && fgets(line, sizeof(line), fh))
+    {
+        unsigned frame, keys;
+
+        if (line[0] == '#' || line[0] == '\n')
+            continue;
+        if (sscanf(line, "%u %x", &frame, &keys) != 2)
+            continue;
+        trace[trace_count].frame = frame;
+        trace[trace_count].keys = (~keys) & 0x3FF;
+        trace_count++;
+    }
+    fclose(fh);
+    fprintf(stderr, "mgba-capture: replaying %u input events\n", trace_count);
+}
+
 int main(int argc, char** argv)
 {
     struct mCore* core;
@@ -80,6 +127,16 @@ int main(int argc, char** argv)
     int count = argc - 3;
     int i, next = 0;
     unsigned frame = 0;
+    unsigned trace_pos = 0;
+    unsigned keys = 0;
+    unsigned trace_offset = 38;
+
+    {
+        const char* off = getenv("FRLG_INPUT_OFFSET");
+
+        if (off)
+            trace_offset = (unsigned)strtoul(off, NULL, 10);
+    }
 
     if (argc < 4)
     {
@@ -92,6 +149,7 @@ int main(int argc, char** argv)
         frames[i] = (unsigned)strtoul(argv[3 + i], NULL, 10);
     qsort(frames, (size_t)count, sizeof(*frames), compare_unsigned);
 
+    load_trace();
     mLogSetDefaultLogger(&silent);
 
     core = mCoreFind(argv[1]);
@@ -129,6 +187,18 @@ int main(int argc, char** argv)
         }
         if (next >= count)
             break;
+
+        // Applied before the frame runs, so the keys this frame sees are the
+        // ones the trace names for it -- the same rule the port follows.
+        // mGBA runs the BIOS and the ROM's crt0 where the port enters AgbMain
+        // directly, so its frame numbering leads ours by a fixed offset -- the
+        // same one the golden manifest records. The trace is indexed by our
+        // numbering, so it is shifted here rather than rewritten.
+        while (trace_pos < trace_count
+               && trace[trace_pos].frame + trace_offset <= frame)
+            keys = trace[trace_pos++].keys;
+        core->setKeys(core, keys);
+
         core->runFrame(core);
         frame++;
     }

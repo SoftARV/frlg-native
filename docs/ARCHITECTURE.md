@@ -749,6 +749,10 @@ needs no special case above it.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game
 state.
 
+**The oracle takes input.** `mgba-capture` replays the port's own trace format, shifted by the +38
+frame boot offset, so a frame that can only be reached by playing can still be compared against the
+reference. That is what made [spike 0008](spikes/0008-missing-trainer-pics.md) investigable at all.
+
 **Sound has an oracle too.** `tools/mgba_audio.c` captures PCM from mGBA running the same ROM, and
 `FRLG_PCM=<path>` makes the port dump the same format — measured before the device is considered, so
 it needs no sound hardware. Between them a tune can be compared rather than described.

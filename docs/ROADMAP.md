@@ -452,6 +452,13 @@ Three replays of the same trace produce a byte-identical frame 900.
 
 That is the harness the rest of the phase needs: reaching a place in the game reproducibly is what
 lets the save round trip, the mGBA save read and any visual defect be checked without a player.
+`mgba-capture` takes the same trace, so the oracle reaches those moments too.
+
+**The first thing it was pointed at**: the missing trainer pictures -- Oak standing in the opening
+speech, and the large player picture on the gender screen. [Spike 0008](spikes/0008-missing-trainer-pics.md)
+narrows it to BG2's affine transform being all zeros, which draws nothing, and then finds that the game
+never sets that transform -- so the attribution is not finished. The next step is reading mGBA's own
+registers at the same moment, which libmgba allows and which settles it without more reasoning.
 
 **Building it found something worse than it was for.** With a save file present, the game **could not
 boot** — `LoadGameSave` runs before the save blocks' pointers are set, so its sector copy wrote
