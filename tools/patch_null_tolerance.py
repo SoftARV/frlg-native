@@ -69,6 +69,27 @@ EDITS = {
             "struct PokemonStorage *gPokemonStoragePtr = &gPokemonStorage",
         ),
     ],
+    # A map with no object events has a null objectEvents pointer, and the loop
+    # copying their scripts ignores the count and reads sixty-four entries
+    # regardless. On hardware that reads the BIOS region and copies garbage into
+    # templates nothing goes on to use, because the count is zero. Here it faults,
+    # and continuing a saved game cannot get past it.
+    #
+    # Guarding the loop leaves those templates holding whatever they held instead
+    # of holding garbage -- both unused, and neither read.
+    "overworld.c": [
+        (
+            "the object event script copy from a map with none",
+            re.compile(
+                r"(?P<keep>const struct ObjectEventTemplate \* src = "
+                r"gMapHeader\.events->objectEvents;\n"
+                r"    struct ObjectEventTemplate \* savObjTemplates = "
+                r"gSaveBlock1Ptr->objectEventTemplates;\n\n)"
+                r"    for \(i = 0; i < 64; i\+\+\)"
+            ),
+            r"\g<keep>    for (i = 0; src != ((void *)0) && i < 64; i++)",
+        ),
+    ],
     "naming_screen.c": [
         (
             "the naming screen's read through its freed state",

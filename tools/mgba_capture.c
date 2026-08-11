@@ -182,6 +182,26 @@ int main(int argc, char** argv)
             if (!write_ppm(path, buffer, width, height))
                 return 1;
             printf("  captured frame %u\n", frame);
+
+            // FRLG_DUMP_REGS asks what the reference had in its display
+            // registers at the same moment. Comparing those rather than pixels
+            // is what settles which layer a missing picture belongs to.
+            if (getenv("FRLG_DUMP_REGS"))
+            {
+                static const struct { const char* name; unsigned off; } regs[] = {
+                    {"DISPCNT", 0x000}, {"BG0CNT", 0x008}, {"BG1CNT", 0x00A},
+                    {"BG2CNT", 0x00C},  {"BG3CNT", 0x00E}, {"BG2HOFS", 0x018},
+                    {"BG2VOFS", 0x01A}, {"BG2PA", 0x020},  {"BG2PB", 0x022},
+                    {"BG2PC", 0x024},   {"BG2PD", 0x026},  {"BLDCNT", 0x050},
+                };
+                unsigned r;
+
+                printf("    frame %u registers:", frame);
+                for (r = 0; r < sizeof(regs) / sizeof(regs[0]); r++)
+                    printf(" %s=%04X", regs[r].name,
+                           core->busRead16(core, 0x04000000 + regs[r].off));
+                printf("\n");
+            }
             if (++next >= count)
                 break;
         }

@@ -58,15 +58,58 @@ So one of these is true, and the measurement below distinguishes them:
 - mGBA's registers at that moment are **not** what ours are, and the difference is upstream of the
   affine layer entirely — a mode, an enable, or a priority.
 
-## The next measurement
+## What the registers said
 
-`mgba-capture` links libmgba, which exposes `busRead16`. Reading mGBA's `DISPCNT`, `BG0-3CNT` and
-BG2's affine parameters at the frame it draws Oak, and diffing them against ours, says which of the
-two it is without further reasoning. The oracle has been used on pixels and on audio; this is the same
-idea applied to registers, and it is the cheapest way to settle an attribution question.
+`mgba-capture` now dumps them, so the reference can be asked directly. At the frame mGBA draws Oak:
+
+| | mGBA | ours |
+| --- | --- | --- |
+| `DISPCNT` | `1741` | `1741` |
+| `BG0CNT` | `1F08` | `1F08` |
+| `BG1CNT` | `1E02` | `1E02` |
+| `BG2CNT` | `5C81` | `5C81` |
+| `BG3CNT` | `1C0F` | `1C0F` |
+
+**Identical.** So the mode, the enables, the priorities, the character and screen bases and the colour
+depths all agree, and the difference is not in the display configuration.
+
+BG2's affine parameters cannot be compared this way: they are write-only on hardware, and mGBA returns
+open bus for them — every one reads back as `421D`, the same value, which is the giveaway.
+
+So the attribution question is still open, and the remaining possibilities have narrowed to two: either
+our affine renderer is wrong for a case this screen hits, or the picture is drawn by something other
+than BG2 and the 8bpp coincidence misled the whole line of reasoning. Forcing an identity matrix in our
+renderer and re-capturing would separate them, and is the next thing to try.
+
+**Not attempted yet**, because the attempt ran into an unrelated crash that had to be dealt with
+first — see below.
 
 **Also unexplained:** our run and mGBA's diverge in how far the same A-mashing trace advances the
 dialogue — at frame 1500 ours is two lines behind. Harmless for this investigation, since both reach
 the speech, but it means frame numbers are not directly comparable between the two and a golden
 capture of this screen cannot use a fixed offset. Worth understanding before the determinism harness
 leans on one.
+
+
+## An unrelated crash found on the way
+
+Restoring a save so the traced run would pick NEW GAME instead of CONTINUE was a mistake that turned
+out to be useful: it selected CONTINUE, and continuing a saved game crashed in every build.
+
+```
+LoadSaveblockObjEventScripts () at src/overworld.c:444
+  gMapHeader.events = 0x8f659f0   (a valid cart address)
+  objectEventCount  = 0
+  objectEvents      = (nil)
+  fault address     = 0x10
+```
+
+A map with no object events has a **legitimately null** `objectEvents`, and the loop copying their
+scripts ignores the count and reads sixty-four entries regardless. On hardware that reads the BIOS
+region and copies garbage into templates nothing goes on to use, because the count is zero. Here it
+faulted, and continuing a saved game could not get past it.
+
+This is the **third instance** of the no-MMU class, and the clearest: nothing is wrong with the pointer,
+the data or our relocation — the code simply reads where it should not and the hardware does not mind.
+Guarding the loop leaves those templates holding whatever they held rather than holding garbage; both
+are unused and neither is read.
