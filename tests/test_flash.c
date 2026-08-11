@@ -17,7 +17,13 @@
 #include "harness.h"
 
 #define SECTOR_BYTES 4096
-#define SAVE_PATH "/tmp/frlg-test-flash.sav"
+
+// The build names it, inside the build directory, so two presets' suites running
+// at once do not share one chip.
+#ifndef FRLG_TEST_SAVE_PATH
+#error "FRLG_TEST_SAVE_PATH is set by tests/CMakeLists.txt"
+#endif
+#define SAVE_PATH FRLG_TEST_SAVE_PATH
 
 static u8 buffer[SECTOR_BYTES];
 static u8 pattern[SECTOR_BYTES];

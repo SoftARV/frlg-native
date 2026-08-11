@@ -18,6 +18,10 @@ endfunction()
 frlg_add_test(test_cart)
 frlg_add_test(test_flash)
 target_compile_options(test_flash PRIVATE -iquote "${FRLG_VENDOR_DIR}/include")
+# The one test that writes a file. Per build directory, not /tmp: two presets'
+# suites running at once shared the fixed path and erased each other's chip.
+target_compile_definitions(test_flash PRIVATE
+    FRLG_TEST_SAVE_PATH="${CMAKE_CURRENT_BINARY_DIR}/test_flash.sav")
 frlg_add_test(test_psg)
 frlg_add_test(test_ppu_objects)
 frlg_add_test(test_ppu_bg_affine)
