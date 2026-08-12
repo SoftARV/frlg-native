@@ -22,6 +22,7 @@ target_compile_options(test_flash PRIVATE -iquote "${FRLG_VENDOR_DIR}/include")
 # suites running at once shared the fixed path and erased each other's chip.
 target_compile_definitions(test_flash PRIVATE
     FRLG_TEST_SAVE_PATH="${CMAKE_CURRENT_BINARY_DIR}/test_flash.sav")
+frlg_add_test(test_dma_timed)
 frlg_add_test(test_psg)
 frlg_add_test(test_ppu_objects)
 frlg_add_test(test_ppu_bg_affine)

@@ -11,6 +11,7 @@
 
 #include <string.h>
 
+#include "agb/dma.h"
 #include "agb/irq.h"
 #include "agb/memmap.h"
 #include "agb/ppu.h"
@@ -836,6 +837,11 @@ static void scanline_end(void)
     uint16_t dispstat = io16(REG_DISPSTAT);
 
     io16_write(REG_DISPSTAT, dispstat | DISPSTAT_HBLANK_FLAG);
+
+    // Before the handler: a channel armed for H-blank outranks the CPU, so what
+    // it writes is already there when the handler runs and can be overwritten by
+    // it, which is the order the hardware gives them.
+    agb_dma_trigger(AGB_DMA_START_HBLANK);
 
     if (dispstat & DISPSTAT_HBLANK_IRQ)
         agb_irq_raise(AGB_IRQ_HBLANK);

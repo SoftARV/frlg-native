@@ -512,8 +512,24 @@ happens above the framebuffer.
 ### 6.4 DMA
 
 Four channels. Immediate transfers run synchronously when the enable bit is written, covering the
-great majority of use. Beyond that: HBlank-triggered DMA drives per-scanline effects and must fire
-from inside the PPU's scanline loop; FIFO DMA feeds the sound mixer.
+great majority of use.
+
+A channel armed with a **start timing** transfers nothing when it is armed and runs when the display
+reaches the moment it names: `agb_dma_trigger` is called by the frame driver at the start of V-blank
+and by the PPU at the end of every visible scanline, before the matching interrupt handler, since a
+channel outranks the CPU. Channels run lowest number first, as their priority runs. A repeating
+channel keeps its source where it left off — that is what feeds a scanline effect its next entry —
+while a destination in reload mode goes back to where it started, which is what feeds one register.
+One without the repeat bit clears its own enable bit, which is how the game tells that a transfer has
+happened.
+
+Per-scanline DMA is not a corner: the battle transitions are built on it, writing one 16-bit entry per
+line into `WIN0H` from a 160-entry buffer to sweep a window across the screen, and so is everything
+`scanline_effect.c` does. Without it those transitions are a black screen — which is how the gap was
+found, by playing into a battle.
+
+FIFO DMA (start timing 3) feeds the sound mixer on hardware and is not implemented: the port reads the
+mixer's PCM buffer directly instead ([§6.7](#67-audio)).
 
 ### 6.5 Interrupts and the frame loop
 

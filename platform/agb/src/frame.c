@@ -19,6 +19,7 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "agb/dma.h"
 #include "agb/frame.h"
 #include "agb/irq.h"
 #include "agb/ppu.h"
@@ -143,6 +144,10 @@ static void agb_frame_advance(void)
     // VCOUNT reads inside the handler must see the V-blank period; the game
     // samples it around the sound mixer.
     *(volatile uint16_t *)(agb_mem.io + REG_OFF_VCOUNT) = SCREEN_LINES;
+
+    // Same order as H-blank: the channels waiting for V-blank run before the
+    // handler that may re-arm them.
+    agb_dma_trigger(AGB_DMA_START_VBLANK);
 
     agb_irq_raise(AGB_IRQ_VBLANK);
 

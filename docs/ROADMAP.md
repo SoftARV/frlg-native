@@ -484,6 +484,11 @@ determinism harness runs in CI over a scripted input trace, and the autopilot ca
 
 This is the point the project becomes something a person can play.
 
+**Timed DMA runs.** A channel armed to wait for V-blank or for the end of a scanline was armed and
+never served, which made every battle transition a black screen: they sweep a window across the display
+by feeding `WIN0H` one entry per line from an H-blank channel. Found by playing into a battle, after
+the crash in front of it was fixed — the two hid behind each other.
+
 **A trace replays exactly here, and diverges on the reference** — by construction, not by defect. The
 port does a frame's work in microseconds where the hardware needs more than its 16.743 ms, and FRLG
 loses a V-blank outright whenever that happens: 73 of them across the intro, none here. So the intro
