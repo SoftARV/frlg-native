@@ -274,6 +274,80 @@ static void test_adds_to_existing(void)
     CHECK(span(right, FRAME) > 0, "the existing content was replaced by silence");
 }
 
+// A sample is an interval, not an instant, and a channel can flip more than once
+// inside one. Reading the level at a single point of it keeps energy the speaker
+// never sees, which is aliasing: the tone comes back as something else, at full
+// amplitude, instead of cancelling. The mix runs at 13379 Hz, so anything above
+// about 6.7 kHz cannot be represented and should fade rather than fold back.
+static int energy(const int8_t *buf, int n)
+{
+    long sum = 0;
+
+    for (int i = 0; i < n; i++)
+        sum += (long)buf[i] * buf[i];
+    return (int)(sum / n);
+}
+
+static void test_a_square_below_nyquist_keeps_its_swing(void)
+{
+    reset("a square below the mix rate is untouched");
+    put(REG_OFFSET_SOUND1CNT_H, 0xF080);
+    put(REG_OFFSET_SOUND1CNT_X, 0x8000 | TONE);   // about 885 Hz
+    agb_psg_mix(right, left, FRAME, RATE);
+
+    CHECK(span(right, FRAME) > 20, "an audible tone came out quiet: span %d",
+          span(right, FRAME));
+}
+
+// 2047 is the highest the frequency register goes, 131 kHz, ten times the mix
+// rate. Every sample spans whole cycles, and a square's two levels are weighted
+// to cancel across one, so almost nothing should be left.
+static void test_a_square_above_nyquist_does_not_alias(void)
+{
+    int quiet;
+
+    reset("a square above the mix rate fades instead of folding back");
+    put(REG_OFFSET_SOUND1CNT_H, 0xF080);
+    put(REG_OFFSET_SOUND1CNT_X, 0x8000 | 2047);
+    agb_psg_mix(right, left, FRAME, RATE);
+    quiet = span(right, FRAME);
+
+    reset("and the audible one it is measured against");
+    put(REG_OFFSET_SOUND1CNT_H, 0xF080);
+    put(REG_OFFSET_SOUND1CNT_X, 0x8000 | TONE);
+    agb_psg_mix(right, left, FRAME, RATE);
+
+    CHECK(quiet * 3 < span(right, FRAME),
+          "a tone far above the mix rate came back nearly as loud as an audible "
+          "one: %d against %d", quiet, span(right, FRAME));
+}
+
+// The noise channel is the one that was doing this in play: its clock reaches
+// 262 kHz, twenty times the mix rate, and the drums came out too loud and harsh
+// with the effects buried under them. Faster than the mix rate, it has to
+// average down rather than stay at full amplitude.
+static void test_noise_above_nyquist_averages_down(void)
+{
+    int fast, slow;
+
+    reset("the fastest noise clock");
+    put(REG_OFFSET_SOUND4CNT_L, 0xF000);           // full volume, no decay
+    put(REG_OFFSET_SOUND4CNT_H, 0x8004);           // shift 0
+    agb_psg_mix(right, left, FRAME, RATE);
+    fast = energy(right, FRAME);
+
+    reset("a clock the mix rate can follow");
+    put(REG_OFFSET_SOUND4CNT_L, 0xF000);
+    put(REG_OFFSET_SOUND4CNT_H, 0x8044);           // shift 4
+    agb_psg_mix(right, left, FRAME, RATE);
+    slow = energy(right, FRAME);
+
+    CHECK(slow > 0, "the slower noise should sound at all");
+    CHECK(fast * 10 < slow * 8,
+          "noise far above the mix rate should average down: %d against %d",
+          fast, slow);
+}
+
 int main(void)
 {
     test_silent_until_triggered();
@@ -287,6 +361,9 @@ int main(void)
     test_noise_channel();
     test_master_controls();
     test_adds_to_existing();
+    test_a_square_below_nyquist_keeps_its_swing();
+    test_a_square_above_nyquist_does_not_alias();
+    test_noise_above_nyquist_averages_down();
 
     return test_report("psg");
 }

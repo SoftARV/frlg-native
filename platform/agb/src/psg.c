@@ -295,7 +295,6 @@ static int square_sample(struct square *ch, int rate)
 
     step = (uint32_t)(((uint64_t)SQUARE_CLOCK * PHASE_ONE)
                       / ((uint32_t)(2048 - ch->period) * (uint32_t)rate));
-    ch->phase = (ch->phase + step) & (PHASE_ONE - 1);
 
     // A channel's DAC puts out 0 to 15 and the hardware couples the result
     // through a capacitor, so no duty carries a standing offset. Swinging
@@ -305,10 +304,44 @@ static int square_sample(struct square *ch, int rate)
     // each side by the time spent on the other keeps the mean at zero and the
     // swing unchanged.
     high = duty_eighths[ch->duty];
-    if (ch->phase < (uint32_t)high * (PHASE_ONE / 8))
-        return ch->env.volume * (8 - high);
+    {
+        // What the sample covers is an interval, not an instant. A square above
+        // half the mix rate flips more than once inside one sample, and taking
+        // the level at a single point of it keeps energy the speaker never sees
+        // -- the same aliasing the noise channel had. Averaging over the
+        // interval is exact here rather than iterative: the wave is two levels,
+        // so only the time spent on each is needed, and whole cycles contribute
+        // nothing because the two sides are already weighted to cancel.
+        uint32_t threshold = (uint32_t)high * (PHASE_ONE / 8);
+        uint32_t start = ch->phase;
+        uint32_t remainder = step & (PHASE_ONE - 1);
+        uint32_t end = start + remainder;
+        uint32_t time_high;
+        int level_high = ch->env.volume * (8 - high);
+        int level_low = -ch->env.volume * high;
 
-    return -ch->env.volume * high;
+        if (remainder == 0)
+            return 0;
+
+        if (end <= PHASE_ONE)
+        {
+            time_high = (end < threshold ? end : threshold)
+                        - (start < threshold ? start : threshold);
+        }
+        else
+        {
+            uint32_t wrapped = end - PHASE_ONE;
+
+            time_high = threshold - (start < threshold ? start : threshold);
+            time_high += wrapped < threshold ? wrapped : threshold;
+        }
+
+        ch->phase = (start + step) & (PHASE_ONE - 1);
+
+        return (int)(((int64_t)time_high * level_high
+                      + (int64_t)(remainder - time_high) * level_low)
+                     / (int32_t)remainder);
+    }
 }
 
 static int wave_sample(int rate)
@@ -325,15 +358,40 @@ static int wave_sample(int rate)
     // so the tone it produces is that over thirty-two.
     step = (uint32_t)(((uint64_t)WAVE_CLOCK * PHASE_ONE)
                       / ((uint32_t)(2048 - wave3.period) * (uint32_t)rate * 32u));
-    wave3.phase = (wave3.phase + step) & (PHASE_ONE - 1);
+    // The table advances thirty-two times per cycle, so its entries go by faster
+    // than the mix rate for any ordinary note -- a 500 Hz tone steps them at
+    // 16 kHz. Reading whichever entry the phase happens to land on turns that
+    // into aliasing; averaging the entries the sample actually spans is what the
+    // speaker does with them. See the same treatment on the noise channel.
+    {
+        uint32_t left = step;
+        int64_t acc = 0;
+        uint32_t weight = 0;
+        // One entry is this much phase; the loop walks entry boundaries.
+        const uint32_t entry = PHASE_ONE / 32u;
 
-    index = (wave3.phase * 32u) >> PHASE_BITS;
-    byte = agb_mem.io[REG_OFFSET_WAVE_RAM0 + (index >> 1)];
-    nibble = (index & 1) ? (int)(byte & 0xF) : (int)(byte >> 4);
+        do
+        {
+            uint32_t into = wave3.phase % entry;
+            uint32_t room = entry - into;
+            uint32_t take = left < room ? left : room;
 
-    // Centred the same way, on the assumption the table is symmetric about its
-    // midpoint -- which the hardware's capacitor would take care of regardless.
-    return ((nibble - 8) * VOICE_SCALE) >> wave3.volume_shift;
+            if (take == 0)
+                take = room;
+
+            index = (wave3.phase * 32u) >> PHASE_BITS;
+            byte = agb_mem.io[REG_OFFSET_WAVE_RAM0 + (index >> 1)];
+            nibble = (index & 1) ? (int)(byte & 0xF) : (int)(byte >> 4);
+
+            acc += (int64_t)(((nibble - 8) * VOICE_SCALE) >> wave3.volume_shift) * take;
+            weight += take;
+
+            wave3.phase = (wave3.phase + take) & (PHASE_ONE - 1);
+            left -= take < left ? take : left;
+        } while (left > 0);
+
+        return weight ? (int)(acc / weight) : 0;
+    }
 }
 
 static int noise_sample(int rate)

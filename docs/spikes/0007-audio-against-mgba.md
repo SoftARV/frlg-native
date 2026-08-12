@@ -165,3 +165,52 @@ with mGBA's API**, and an afternoon went into finding that out:
 So per-channel numbers from that method are not evidence, and the two attempts recorded here in an
 earlier draft were withdrawn for that reason. Full-mix band ratios are what this spike can honestly
 compare, which is what the table above uses.
+
+
+## Is the treatment system-wide? Only where a channel outruns the mix rate
+
+Asked directly after the noise fix: does band-limiting belong on every channel, rather than being
+applied one sound at a time? The answer is yes in principle and **measurably only for the noise
+channel and for sweeps**, which is worth writing down so the next person does not re-derive it.
+
+Each channel was given the same treatment — the two squares analytically, since a square is two levels
+and only the time spent on each is needed, and the wave by walking the table entries a sample spans —
+and then measured against the reference over the intro:
+
+| | before | squares band-limited | wave too |
+| --- | --- | --- | --- |
+| bass 40–250 | 1.122 | 1.121 | 1.121 |
+| low-mid 250–900 | 1.245 | 1.242 | 1.242 |
+| high-mid 0.9–2.5k | 1.186 | 1.186 | 1.186 |
+| treble 2.5–6k | 1.196 | 1.195 | 1.196 |
+
+Nothing. Musical squares sit at a few hundred hertz against a 6.7 kHz Nyquist, and the wave's table
+advances barely more than one entry per sample at ordinary pitches, so neither was aliasing to begin
+with. The noise channel was the outlier because its clock reaches 262 kHz — twenty times the mix rate.
+
+**Where the squares do matter is the sweeps**, which is what the reports were about. Rendering the
+exclamation-bubble effect from a recorded trace, band-limiting changes **15.6% of that signal** while
+leaving the music untouched — a sound that sweeps out of the audible range is exactly the case
+point-sampling folds back as a squeal.
+
+So the rule is not "band-limit everything because it is correct", it is **"band-limit anything whose
+rate can exceed the mix rate"**, which is the noise channel always and the squares whenever a sweep
+takes them there. Both now have tests naming that boundary rather than a level.
+
+## What the rival theme's "missing instruments" was not
+
+The same report was chased through the sequencer first, and four things were ruled out with
+measurements worth keeping:
+
+- **Voice count.** `maxChans` is 5 in this port and 5 in the reference, read out of `gSoundInfo` at the
+  same frame. Not a limit we imposed.
+- **Tracks going silent.** All ten tracks of the theme sound over a 65-second window. An earlier
+  13-second window showed two of them silent throughout, which was **too short a sample** — track 1
+  rests for many bars by design, and reporting it as dead was wrong.
+- **Channel allocation.** 2065 notes requested over that window, **2 refused a channel** (0.1%). The
+  allocation loop was also read against the original ARM line by line, including the parts that decide
+  between a releasing channel and a sounding one, and it matches.
+- **Dead instrument paths.** Every track, rendered on its own, produces audible output.
+
+So nothing structural is missing, and what is left is timbre — which is where the aliasing above
+belongs.
