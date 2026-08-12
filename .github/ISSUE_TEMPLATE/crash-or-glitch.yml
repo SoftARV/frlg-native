@@ -1,0 +1,47 @@
+name: Something broke while playing
+description: A crash, a freeze, or anything that looked or sounded wrong
+labels: ["bug", "found-by-playing"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Playing is the most useful thing anyone can do for this project — most of
+        the bugs found so far were only reachable once the thing before them
+        worked. A vague report is still worth filing; "the music sounded off" has
+        already led to two real fixes.
+
+        If it crashed, **the trace and the save it started from replay it exactly**,
+        which is the difference between a report and a fix. See the README.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what were you doing?
+      placeholder: |
+        Opened the town map from the bag and it closed itself, then the game died.
+        Or: the sound when the player drops down a ledge does not sound right.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Terminal output
+      description: The backtrace if it crashed, plus the few lines before it.
+      render: text
+  - type: input
+    id: trace
+    attributes:
+      label: Trace file
+      description: What FRLG_INPUT_RECORD wrote. Attach it by dragging it into the box above.
+  - type: input
+    id: save
+    attributes:
+      label: The save the run started from
+      description: >
+        The copy taken before launching. A trace only replays against the state
+        the run began with, and playing changes it — without this one, a crash
+        from a save cannot be reproduced.
+  - type: input
+    id: build
+    attributes:
+      label: Which build
+      placeholder: linux-release, commit abc1234

@@ -1,0 +1,31 @@
+name: Work item
+description: Something the project knows it needs to do
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write it so it can be picked up cold, months later, by someone who was not
+        in the room. In practice that means four things, and the last one is the
+        one people skip.
+  - type: textarea
+    id: what
+    attributes:
+      label: What, and why it matters
+      description: The mechanism if it is known, not just the symptom.
+    validations:
+      required: true
+  - type: textarea
+    id: where
+    attributes:
+      label: Where to look
+      description: Files, functions, and the docs that already cover it — ADRs and spikes.
+  - type: textarea
+    id: trap
+    attributes:
+      label: The trap
+      description: >
+        What will mislead whoever picks this up. A measurement that looks right
+        and is not, a repair that fixes one thing and breaks another, an
+        assumption that only holds on the machine. Most of this project's lost
+        hours are here, and writing it down is what stops them being lost twice.

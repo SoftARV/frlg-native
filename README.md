@@ -103,6 +103,9 @@ That needs the `headless` preset, which wants no SDL at all:
 cmake --preset headless && cmake --build --preset headless
 ```
 
+Issues go to [the tracker](https://github.com/SoftARV/frlg-native/issues) — the
+"Something broke while playing" template asks for exactly the four things above.
+
 **Sound and visuals count too.** Several real bugs were found by ear — effects too quiet, music
 missing instruments, a sound that would not bend — and none of them showed up in any measurement
 until somebody said it sounded wrong. If something looks or sounds off, say so even vaguely; that is
