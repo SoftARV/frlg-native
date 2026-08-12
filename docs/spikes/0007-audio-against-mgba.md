@@ -119,3 +119,49 @@ full, which is a mono downmix at unity gain rather than the hard-panned pair the
 **What this says about the remaining ~14% gap** is that it should be re-measured somewhere the game
 actually spends its time. `mgba-audio` cannot replay an input trace, so the oracle stops where the
 intro does — that is the thing to fix before trusting another number from it.
+
+
+## The noise channel was aliasing, and per-channel comparison is not available
+
+**Chased after a player reported that the sound for fleeing a battle was not playing.** It was: the
+effect starts on SE1, claims a CGB channel — `type=0C`, the noise channel, fixed pitch — and its
+envelope decays from 10 the way it should. Every step of the sequencer's side was correct.
+
+What was wrong is what that channel *sounds* like. The noise clock runs at up to 262 kHz against the
+13.4 kHz this is mixed at, so one output sample spans many shift-register states. The port took the
+last of them, at full amplitude, where the hardware's output is the average over the interval and the
+reference's resampler band-limits it. Point-sampling a signal twenty times above Nyquist keeps energy
+that should have cancelled, which is a channel both louder and harsher than it should be — and the
+drums and the flee effect share it, so the effect had nothing to stand out against.
+
+Averaging over each sample, weighted by how long each state lasted, is the fix. Below the mix rate it
+reduces to what it replaced.
+
+**Measured on the full mix against the reference**, per-band ratios over the intro:
+
+| | before | after |
+| --- | --- | --- |
+| bass 40–250 | 1.152 | 1.122 |
+| low-mid 250–900 | 1.321 | 1.245 |
+| high-mid 0.9–2.5k | 1.230 | 1.186 |
+| treble 2.5–6k | 1.239 | 1.196 |
+| **spread** | **0.169** | **0.123** |
+
+A uniform ratio across bands is what "same spectrum, different scale" looks like, and the scale is a
+constant between two tools rather than a fault. The spread narrowing by a quarter is the shape getting
+closer.
+
+## Why this was not measured per channel
+
+The obvious experiment — render one hardware channel at a time in both and compare — **cannot be done
+with mGBA's API**, and an afternoon went into finding that out:
+
+- `core->listAudioChannels` reports a single channel for the GBA core, not the four.
+- `core->getAudioChannel(core, 0|1)` is the left and right of the *mixed* output, not a per-voice tap.
+- Forcing the enable bits in `SOUNDCNT_L` every frame **leaks**: the sequencer rewrites them from
+  inside the frame, so what is captured is "mostly one channel". It looks like a clean measurement and
+  is not — the tell was a soloed square changing level when only the noise code had changed.
+
+So per-channel numbers from that method are not evidence, and the two attempts recorded here in an
+earlier draft were withdrawn for that reason. Full-mix band ratios are what this spike can honestly
+compare, which is what the table above uses.
