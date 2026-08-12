@@ -123,6 +123,28 @@ EDITS = {
     #
     # The pointer cannot be left dangling the way the naming screen's is:
     # GetCardType tests it for null and answers differently.
+    # The summary screen's V-blank callback outlives the screen the same way the
+    # trainer card's does -- CB2 frees the data, the callback runs on until the
+    # next screen installs its own, and it reads a flag through the pointer.
+    #
+    # Here the pointer can simply be left where it was: nothing tests it for null
+    # except the check immediately after the allocation that sets it, so a read
+    # lands on freed heap -- mapped, garbage, read once or twice -- rather than on
+    # address zero. That covers every dereference in the file's callbacks rather
+    # than the one that happened to be reached.
+    "pokemon_summary_screen.c": [
+        (
+            "the summary screen's read through its freed state",
+            re.compile(
+                r"\{ if \(sMonSummaryScreen !=\s*"
+                r"(?:#[^\n]*\n\s*)*\(\(void \*\)0\)\s*"
+                r"(?:#[^\n]*\n\s*)*\) \{ Free\(sMonSummaryScreen\); \(sMonSummaryScreen\) =\s*"
+                r"(?:#[^\n]*\n\s*)*\(\(void \*\)0\)\s*"
+                r"(?:#[^\n]*\n\s*)*; \} \}"
+            ),
+            "{ if (sMonSummaryScreen != ((void *)0)) { Free(sMonSummaryScreen); } }",
+        ),
+    ],
     "trainer_card.c": [
         (
             "the time colon's blink through freed state",
