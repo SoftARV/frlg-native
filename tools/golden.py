@@ -110,7 +110,12 @@ def capture(binary, frame, out_dir):
     # frame timer a capture on a loaded machine misses a V-blank and lands a
     # frame behind one on an idle machine, and every animated pixel differs.
     # It is also some eight times faster, which is most of this tier's runtime.
+    # No window: a capture has no use for one, and opening a real one makes the
+    # tier depend on the desktop being in a mood to create it. The audio check
+    # has always run this way.
     env = dict(os.environ, FRLG_SHOT=path, FRLG_LOCKSTEP="1")
+    env.setdefault("SDL_VIDEODRIVER", "dummy")
+    env.setdefault("SDL_AUDIODRIVER", "dummy")
     # Stall detection off: the harness has its own timeout and a false positive
     # here would look like a rendering failure.
     result = subprocess.run(

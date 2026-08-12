@@ -201,7 +201,7 @@ target is absent, so a submodule bump is reported rather than silently changing 
 | --- | --- | --- |
 | `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `main.c`, `script.c` |
 | `patch_layout_assumptions.py` | assumes upstream's linker script | `load_save.c` |
-| `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c`, `overworld.c`, `battle_transition.c`, `sprite.c`, `trainer_card.c`, `pokemon_summary_screen.c`, `pokemon_storage_system_tasks.c`, `region_map.c` |
+| `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c`, `overworld.c`, `battle_transition.c`, `sprite.c`, `trainer_card.c`, `pokemon_summary_screen.c`, `pokemon_storage_system_tasks.c`, `region_map.c`, `battle_controllers.c` |
 
 The third is worth understanding, because more of it will turn up. **The GBA has no MMU**: every
 address in its map is readable, address zero included — that region is BIOS ROM — so a read through a
@@ -224,7 +224,7 @@ all with a save present**. Pointing the three pointers at their own objects make
 where it belongs; offset zero is one of the offsets `SetSaveBlocksPointers` itself picks, so it is a
 state the game already handles.
 
-Seven instances in six phases, every one found by playing rather than by reading, and each only
+Nine instances in six phases, every one found by playing rather than by reading, and each only
 reachable once the phase before it worked: a save to exist, a save to load, a battle to reach, a
 Pokémon worth looking at, a trainer card worth opening.
 

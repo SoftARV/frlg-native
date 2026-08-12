@@ -153,6 +153,26 @@ EDITS = {
     # The same screen also writes through a fly icon that has no sprite -- not
     # every entry in the table gets one -- while the map opens. That write goes
     # to the BIOS region on hardware and is ignored.
+    # The opponent's controller passes a null party order when it announces which
+    # Pokemon it is switching to -- upstream writes the NULL itself -- and the
+    # emitter copies six bytes through it regardless. On hardware those six bytes
+    # come from the BIOS region and land in a transfer buffer the AI's side never
+    # reads back; only the player's controller uses that field.
+    #
+    # Reached by the opponent switching, which is any battle with more than one
+    # Pokemon on the other side.
+    "battle_controllers.c": [
+        (
+            "the party order copied from a null pointer",
+            re.compile(
+                r"(?P<keep>    for \(i = 0; i < \(int\)\(sizeof\(gBattlePartyCurrentOrder\)"
+                r" / sizeof\(\(gBattlePartyCurrentOrder\)\[0\]\)\); i\+\+\)\n)"
+                r"        sBattleBuffersTransferData\[2 \+ i\] = battlePartyOrder\[i\];"
+            ),
+            r"\g<keep>        if (battlePartyOrder != ((void *)0))\n"
+            r"            sBattleBuffersTransferData[2 + i] = battlePartyOrder[i];",
+        ),
+    ],
     "region_map.c": [
         (
             "the map section under a freed cursor",
