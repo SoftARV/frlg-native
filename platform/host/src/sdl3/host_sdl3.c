@@ -79,6 +79,26 @@ bool host_video_open(const char *title, int width, int height, int scale)
         return false;
     }
 
+    // A window is asked for in the units the driver works in, and those differ:
+    // Wayland takes logical pixels and the compositor scales them up, X11 takes
+    // real ones. On a display asking for 200% that is the difference between a
+    // comfortable window and a postage stamp, so the display's own content scale
+    // is folded in. FRLG_SCALE overrides the lot.
+    {
+        const char *want = getenv("FRLG_SCALE");
+        float content = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
+        char line[96];
+
+        if (want != NULL)
+            scale = atoi(want) > 0 ? atoi(want) : scale;
+        else if (content >= 1.5f)
+            scale = (int)(scale * content + 0.5f);
+
+        snprintf(line, sizeof(line), "window scale %d (display asks for %.2f)",
+                 scale, content);
+        host_log(line);
+    }
+
     if (!SDL_CreateWindowAndRenderer(title, width * scale, height * scale,
                                      SDL_WINDOW_RESIZABLE, &window, &renderer))
     {

@@ -932,6 +932,11 @@ cannot load libdecor and an X server is there, the host asks SDL for X11, whose 
 decorates. Installing a 32-bit libdecor removes the need for that, and the log line says which was
 used.
 
+The two drivers also disagree about what a window size *means* — Wayland takes logical pixels and
+scales them itself, X11 takes real ones — so the display's content scale is folded into the request.
+On a panel asking for 200% that is the difference between a comfortable window and a postage stamp.
+`FRLG_SCALE` overrides it.
+
 `host.h` is the whole porting surface. A new platform implements it and nothing else:
 
 | Group | Responsibility |
