@@ -484,6 +484,12 @@ determinism harness runs in CI over a scripted input trace, and the autopilot ca
 
 This is the point the project becomes something a person can play.
 
+**Battle move animations run.** A pointer from a cart animation script to a sprite template our own
+build compiles was being shifted into the cart, so the game read the ROM's copy of the template and
+jumped through a callback that was still a GBA address. Named ROM data now resolves through our symbol
+of that name — the same address as before for data only the ROM has, and our own copy for data we
+compile. [Spike 0005, finding 4](spikes/0005-relocation-classes.md).
+
 **Timed DMA runs.** A channel armed to wait for V-blank or for the end of a scanline was armed and
 never served, which made every battle transition a black screen: they sweep a window across the display
 by feeding `WIN0H` one entry per line from an H-blank channel. Found by playing into a battle, after

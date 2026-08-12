@@ -90,3 +90,44 @@ Only 63 distinct RAM symbols are involved, against 3,475 distinct code symbols.
 **Not established:** whether relocating in stages is safe. Data-only relocation would leave code
 pointers reading as GBA addresses rather than the zeros they read today, which turns a null
 dereference into a wild jump. The classes should probably land together.
+
+
+## Finding 4: "data" was too coarse, and the game jumped through the gap
+
+**Added after a play-through crashed in the first battle.** `CreateSpriteAndAnimate` jumped to
+`0x0802210d` — a GBA ROM address with the Thumb bit still on, from a sprite template at
+`agb_cart + 2041036`.
+
+The chain took three hops, and every one of them behaved as designed:
+
+1. A battle animation script in `data/battle_anim_scripts.s` — cart data, since we cannot compile it —
+   holds a pointer to `gSlideMonToOriginalPosSpriteTemplate`.
+2. That pointer's target is ROM data, so it was classified **Data** and shifted into the cart. The
+   game therefore read the cart's copy of the template.
+3. The cart's copy is raw ROM bytes. Its `.callback` field points at `DoHorizontalLunge`, a **static**
+   — the **Local** class, left alone on the reasoning quoted above: *"every one of these sits in ROM
+   data our own build re-creates rather than reads from the cart"*.
+
+That reasoning was true of the data and false of the pointer to it. Our build does re-create the
+template, correctly, with a working callback — and nothing ever read it, because step 2 handed the
+game the stale copy instead.
+
+**The fix is at step 2.** A relocation whose target has a name now resolves through *our* symbol of
+that name rather than through the cart:
+
+- for data only the ROM has, that resolves into the cart region anyway, because those symbols are
+  bound there at link time ([ADR 0006](../adr/0006-rom-supplied-data.md)) — same address as before;
+- for data our build compiles, it is the difference between reading our copy and reading the ROM's.
+
+23,171 records moved from Data to a named symbol, leaving 14,028 genuinely anonymous ones. The Local
+class stays untouched, and its justification is now actually true: with named data resolved to our
+own, nothing reads the cart's copy of anything we compile.
+
+**What the class table missed** was that "where does this pointer point" and "who owns the object it
+points at" are different questions. The first was answered by the address; the second needed the name,
+and only the second decides which copy the game should get.
+
+Nothing before the first battle read one of these — the intro, the title screen, the overworld and the
+save all worked, and the two mGBA-referenced goldens still match to the pixel after the change. It took
+a move animation to find it, because that is the first thing that follows a cart pointer into data the
+port itself compiles.

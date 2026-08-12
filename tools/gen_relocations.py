@@ -8,15 +8,23 @@ them mean anything here, so each one is rewritten once, at load.
 What each record needs depends on where it points, and two of the classes need
 nothing at all -- see docs/spikes/0005-relocation-classes.md:
 
-  data           the target is ROM data, which we loaded: shift it to the cart
+  data           the target is ROM data with no name to link against: shift the
+                 pointer into the cart
   global code    the target is a function: use ours of that name
   global RAM     the target is a variable: use ours, plus the addend
+  global data    the target is named ROM data: use ours of that name too. For
+                 data only the ROM has, that resolves into the cart anyway, since
+                 those symbols are bound there at link time. For data our build
+                 compiles, it is the difference between the game reading our copy
+                 and reading the cart's -- and the cart's is raw ROM bytes, whose
+                 own pointers were never rewritten.
   interior       the target is inside a ROM function -- a jump table the
                  original compiler emitted. No native counterpart exists and
                  nothing reads it. Left alone.
   local          the target is a static, so it has no name to link against.
-                 Every one of these sits in ROM data our own build re-creates
-                 rather than reads from the cart, so leaving it is safe.
+                 Every one sits in ROM data our own build re-creates, and with
+                 named data resolved above, the game reads our copy rather than
+                 the cart's -- which is what makes leaving these alone safe.
   16-bit         not a pointer at all but a script constant. Left alone.
 
 The output is C rather than data because the code and RAM targets are named
@@ -138,7 +146,18 @@ def main():
             # Thumb function pointers carry bit 0; native addresses do not.
             symbol_records.append((site, name, 0))
         elif text_end <= word < rom_end:
-            data_offsets.append(site)
+            # ROM data. If the target has a name, use ours of that name rather
+            # than the copy in the cart -- and it comes to the same thing for
+            # data only the ROM has, because those symbols are bound into the
+            # cart region at link time (ADR 0006). It does not come to the same
+            # thing for data our build compiles: the cart's copy of it is raw ROM
+            # bytes, so any pointer *inside* it is still a GBA address. Shifting
+            # a pointer to such a table hands the game that stale copy, and it
+            # jumps through whatever the table holds.
+            if name in SECTION_SYMBOLS or name not in global_names:
+                data_offsets.append(site)
+            else:
+                symbol_records.append((site, name, word - symval))
         else:
             sys.exit(f"gen_relocations: {offset:#x} stores {word:#010x}, "
                      "which is in no region this knows about")
