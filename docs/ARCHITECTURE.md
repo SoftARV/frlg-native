@@ -201,7 +201,7 @@ target is absent, so a submodule bump is reported rather than silently changing 
 | --- | --- | --- |
 | `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `main.c`, `script.c` |
 | `patch_layout_assumptions.py` | assumes upstream's linker script | `load_save.c` |
-| `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c`, `overworld.c`, `battle_transition.c`, `sprite.c`, `trainer_card.c`, `pokemon_summary_screen.c`, `pokemon_storage_system_tasks.c`, `region_map.c`, `battle_controllers.c` |
+| `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c`, `overworld.c`, `battle_transition.c`, `sprite.c`, `trainer_card.c`, `pokemon_summary_screen.c`, `pokemon_storage_system_tasks.c`, `region_map.c`, `battle_controllers.c`, `trade_scene.c` |
 
 The third is worth understanding, because more of it will turn up. **The GBA has no MMU**: every
 address in its map is readable, address zero included — that region is BIOS ROM — so a read through a
@@ -240,6 +240,11 @@ applies is decided by whether anything tests the pointer for null:
   Mapped, garbage, read once or twice, and it covers every dereference in that screen at once.
 - **Something does** — guard the dereferences themselves, leaving the rest of the callback running,
   because the work before them is what the *next* screen depends on.
+
+"Tests it" includes `if (ptr)`, not only `if (ptr != NULL)`. A sweep that looked for the second form
+alone reported the trade scene as safe to leave dangling when `DoTradeAnim_Cable` guards its teardown
+with the first — and that screen has three free sites, so the dangling repair would have freed twice.
+The allocation-failure check immediately after an `Alloc` does not count; every screen has one.
 
 There is a **cost to the first choice that was missed when it was first made**. `Free(NULL)` is a no-op
 in upstream's allocator — `FreeInternal` opens with `if (p)` — so clearing the pointer is also what

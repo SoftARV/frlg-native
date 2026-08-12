@@ -173,6 +173,27 @@ EDITS = {
             r"            sBattleBuffersTransferData[2 + i] = battlePartyOrder[i];",
         ),
     ],
+    # The trade scene's V-blank callback outlives the scene: SetVBlankCallback is
+    # only ever called to install it, never to take it away, and the scene is torn
+    # down from three places. The next V-blank reads the scroll offsets through
+    # the pointer that teardown cleared.
+    #
+    # Guarded rather than left dangling, and the reason is the same as the town
+    # map's: DoTradeAnim_Cable frees only `if (sTradeAnim)`, and there are three
+    # free sites, so a pointer left in place would be freed twice. Only the read
+    # is guarded, not the callback -- OAM, the sprite copy queue and the palette
+    # buffer behind it are what the screen after this one depends on.
+    #
+    # Reachable without a link cable: this is the in-game NPC trades too.
+    "trade_scene.c": [
+        (
+            "the trade scene's scroll registers, read through freed state",
+            re.compile(
+                r"(?P<keep>static void SetTradeGpuRegs\(void\)\n\{\n    u16 dispcnt;\n\n)"
+            ),
+            r"\g<keep>    if (sTradeAnim == ((void *)0))\n        return;\n\n",
+        ),
+    ],
     "region_map.c": [
         (
             "the map section under a freed cursor",
