@@ -10,12 +10,14 @@
 // concurrently. That is what keeps this free of the data races a thread would
 // introduce.
 
+#include <errno.h>
 #include <math.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
 
 #include "agb/frame.h"
 #include "agb/irq.h"
@@ -36,10 +38,45 @@ static uint32_t agb_frame_limit;
 static volatile sig_atomic_t agb_running;
 static volatile sig_atomic_t agb_in_irq;
 static int agb_lockstep;
+static int agb_paced;
+static volatile sig_atomic_t agb_watchdog_ticks;
+
+// How long the watchdog gives the game to reach its idle point before advancing
+// a frame itself. Three frame periods is far longer than any frame's work takes
+// on a host CPU, and short enough that a spin costs a barely visible pause.
+#define WATCHDOG_PERIODS 3
 
 void agb_frame_set_lockstep(int on)
 {
     agb_lockstep = on;
+}
+
+void agb_frame_set_pace(int on)
+{
+    agb_paced = on;
+}
+
+// Lockstep runs as fast as the host will go, which is right for a capture and
+// unplayable for a person. Pacing waits out what is left of the frame period
+// after the work, so the game keeps time without the frame boundary depending on
+// how long the work took -- which is the property a recorded trace needs.
+static void agb_pace_frame(void)
+{
+    static struct timespec due;
+    struct timespec now;
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (due.tv_sec == 0 || now.tv_sec - due.tv_sec > 1)
+        due = now;
+
+    due.tv_nsec += FRAME_PERIOD_US * 1000L;
+    if (due.tv_nsec >= 1000000000L)
+    {
+        due.tv_nsec -= 1000000000L;
+        due.tv_sec++;
+    }
+    while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &due, NULL) == EINTR)
+        ;
 }
 
 uint32_t agb_frame_count(void)
@@ -61,6 +98,31 @@ static uint16_t (*agb_key_source)(uint32_t frame);
 void agb_frame_set_key_source(uint16_t (*source)(uint32_t frame))
 {
     agb_key_source = source;
+}
+
+// Lockstep advances frames from the game's idle point, but not every wait the
+// game does is that point: DoMapLoadLoop runs its state machine to completion
+// with a bare spin, and one of its steps waits for the DMA3 manager, which only
+// drains in the V-blank handler. On hardware the interrupt preempts the spin.
+// Rather than find and rewrite every such loop -- there are a dozen candidates
+// and only some can block -- the timer stays armed as a watchdog and advances
+// the frame the game is waiting for. See ADR 0014.
+//
+// It costs nothing in determinism where it matters: a loop that spins is a loop
+// doing nothing, so it does not matter when the frame lands. Firings are counted
+// and reported, because one during real work would mean otherwise.
+static void agb_watchdog_arm(void)
+{
+    struct itimerval it;
+
+    memset(&it, 0, sizeof(it));
+    it.it_value.tv_usec = FRAME_PERIOD_US * WATCHDOG_PERIODS;
+    setitimer(ITIMER_REAL, &it, NULL);
+}
+
+uint32_t agb_frame_watchdog_ticks(void)
+{
+    return (uint32_t)agb_watchdog_ticks;
 }
 
 static void agb_frame_advance(void)
@@ -90,6 +152,9 @@ static void agb_frame_advance(void)
 
     *(volatile uint16_t *)(agb_mem.io + REG_OFF_VCOUNT) = 0;
     agb_in_irq = 0;
+
+    if (agb_lockstep)
+        agb_watchdog_arm();
 }
 
 static void agb_on_vblank(int sig)
@@ -98,6 +163,9 @@ static void agb_on_vblank(int sig)
 
     if (!agb_running || agb_in_irq)
         return;
+
+    if (agb_lockstep)
+        agb_watchdog_ticks++;
 
     agb_frame_advance();
 }
@@ -109,8 +177,12 @@ static void agb_on_vblank(int sig)
 // depends on nothing but the game's own state. See ADR 0013.
 void agb_frame_idle(void)
 {
-    if (agb_lockstep && agb_running && !agb_in_irq)
-        agb_frame_advance();
+    if (!agb_lockstep || !agb_running || agb_in_irq)
+        return;
+
+    if (agb_paced)
+        agb_pace_frame();
+    agb_frame_advance();
 }
 
 static void agb_timer_set(int on)
@@ -145,10 +217,13 @@ uint32_t agb_frame_run(void (*entry)(void), uint32_t max_frames)
 
     if (sigsetjmp(agb_exit_point, 1) == 0)
     {
-        // Lockstep drives frames from the game's own idle point, so no timer:
-        // one that also fired would preempt real work and put back the very
-        // dependence on wall-clock time lockstep exists to remove.
-        agb_timer_set(!agb_lockstep);
+        // In lockstep the timer is a watchdog rather than the clock: it is
+        // re-armed a few frame periods out after every frame, so it only fires
+        // where the game is spinning somewhere that never reaches the idle hook.
+        if (agb_lockstep)
+            agb_watchdog_arm();
+        else
+            agb_timer_set(1);
         entry();
         fprintf(stderr, "agb: AgbMain returned after %u frames\n",
                 (uint32_t)agb_frames);

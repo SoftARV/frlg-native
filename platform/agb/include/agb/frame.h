@@ -30,6 +30,16 @@ void agb_frame_set_key_source(uint16_t (*source)(uint32_t frame));
 // allows, since nothing waits out a frame period. See docs/adr/0013-lockstep-capture-clock.md.
 void agb_frame_set_lockstep(int on);
 
+// In lockstep, wait out the rest of the frame period before advancing, so the
+// game keeps real time without the frame boundary depending on how long the
+// work took. What a recording wants: playable, and still one frame per step.
+void agb_frame_set_pace(int on);
+
+// How many frames the watchdog had to advance because the game was spinning
+// somewhere that never reaches the idle hook. Zero means the run was driven
+// entirely by the game itself. See docs/adr/0014-lockstep-stall-watchdog.md.
+uint32_t agb_frame_watchdog_ticks(void);
+
 // Called from the game's V-blank spin. Nothing in real time; the frame boundary
 // in lockstep.
 void agb_frame_idle(void);

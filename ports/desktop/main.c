@@ -345,10 +345,18 @@ int main(int argc, char **argv)
     // and the run slips one frame behind a less loaded one. FRLG_LOCKSTEP drives
     // frames from the game's own idle point instead. Not for playing -- there is
     // nothing left pacing the game to real time.
-    if (getenv("FRLG_LOCKSTEP") != NULL)
     {
-        agb_frame_set_lockstep(1);
-        printf("frlg-native: lockstep clock, frames advance with the game\n");
+        const char *lockstep = getenv("FRLG_LOCKSTEP");
+
+        if (lockstep != NULL)
+        {
+            int paced = strcmp(lockstep, "pace") == 0;
+
+            agb_frame_set_lockstep(1);
+            agb_frame_set_pace(paced);
+            printf("frlg-native: lockstep clock%s\n",
+                   paced ? ", paced to real time" : ", frames advance with the game");
+        }
     }
 
     printf("frlg-native: starting, frame limit %u\n", frame_limit);
@@ -411,6 +419,9 @@ int main(int argc, char **argv)
     host_video_close();
 
     printf("frlg-native: ran %u frames\n", frames_ran);
+    if (agb_frame_watchdog_ticks() != 0)
+        printf("frlg-native: %u frames advanced by the stall watchdog\n",
+               agb_frame_watchdog_ticks());
     printf("frlg-native: audio %u frames, %u non-silent, peak %d\n",
            audio_frames, audio_loud_frames, audio_peak);
     return 0;

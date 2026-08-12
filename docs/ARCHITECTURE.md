@@ -546,6 +546,14 @@ before they produced three different ones, and the golden tier runs in a tenth o
 [ADR 0013](adr/0013-lockstep-capture-clock.md); every capturing harness sets it, and nothing else
 should.
 
+Not every wait reaches that spin — `DoMapLoadLoop` runs its state machine to completion with a bare
+one, and a step of it waits on the DMA3 manager, which only drains in the V-blank handler. The timer
+therefore stays armed in lockstep as a **watchdog**, re-armed three frame periods out after each
+frame, advancing the frame the game is waiting for when it fires. Firings are counted and reported,
+because one during real work would mean the run depended on wall-clock time after all
+([ADR 0014](adr/0014-lockstep-stall-watchdog.md)). `FRLG_LOCKSTEP=pace` additionally waits out the
+frame period, which is what makes the clock playable — and so what a recorded trace is made on.
+
 ### 6.6 BIOS
 
 `libagbsyscall.s` becomes C. The arithmetic entry points (`Div`, `Sqrt`, `ArcTan2`, `BgAffineSet`,
