@@ -8,6 +8,10 @@
 // register and presents the framebuffer. It never runs game code, so it races
 // with nothing; a real GBA updates its key register asynchronously too.
 
+// pthread_timedjoin_np is a GNU extension, and this port is the desktop one:
+// OS-specific code is allowed here and nowhere below it.
+#define _GNU_SOURCE
+
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -191,7 +195,8 @@ static uint16_t trace_keys = HOST_KEYS_RELEASED;
 static FILE *trace_out;
 static uint16_t trace_last_written = HOST_KEYS_RELEASED;
 
-// TEMPORARY PROBE: FRLG_SHOT_RANGE=FIRST:LAST:STEP:DIR
+// FRLG_SHOT_RANGE=FIRST:LAST:STEP:DIR writes every frame in a range, which is
+// how an animation is inspected: one run instead of one run per frame.
 static unsigned shot_first, shot_last, shot_step = 1;
 static const char *shot_dir;
 
@@ -426,7 +431,20 @@ int main(int argc, char **argv)
         nanosleep(&tick, NULL);
     }
 
-    pthread_join(game, NULL);
+    // The game only stops when asked: its main loop has no exit of its own, and
+    // a plain join on a thread still running it is the hang the desktop offers to
+    // force-quit out of. The wait is bounded for the same reason -- a game thread
+    // wedged somewhere that never reaches a frame boundary must not keep the
+    // window alive either.
+    agb_frame_stop();
+    {
+        struct timespec deadline;
+
+        clock_gettime(CLOCK_REALTIME, &deadline);
+        deadline.tv_sec += 2;
+        if (pthread_timedjoin_np(game, NULL, &deadline) != 0)
+            fprintf(stderr, "frlg-native: the game thread did not stop; closing anyway\n");
+    }
 
     const char *shot = getenv("FRLG_SHOT");
     if (shot)

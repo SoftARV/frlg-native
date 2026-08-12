@@ -40,12 +40,22 @@ static volatile sig_atomic_t agb_running;
 static volatile sig_atomic_t agb_in_irq;
 static int agb_lockstep;
 static int agb_paced;
+static volatile sig_atomic_t agb_stopping;
 static volatile sig_atomic_t agb_watchdog_ticks;
 
 // How long the watchdog gives the game to reach its idle point before advancing
 // a frame itself. Three frame periods is far longer than any frame's work takes
 // on a host CPU, and short enough that a spin costs a barely visible pause.
 #define WATCHDOG_PERIODS 3
+
+// The game's main loop never returns, so a port that wants to shut down has to
+// ask: the next frame boundary leaves through the same non-local jump the frame
+// limit uses. Without it, closing the window left the game thread running and the
+// join behind it never finished, which is a hang the desktop offers to kill.
+void agb_frame_stop(void)
+{
+    agb_stopping = 1;
+}
 
 void agb_frame_set_lockstep(int on)
 {
@@ -133,6 +143,9 @@ static void agb_frame_advance(void)
     if (agb_frame_limit && (uint32_t)agb_frames >= agb_frame_limit)
         siglongjmp(agb_exit_point, 1);
 
+    if (agb_stopping)
+        siglongjmp(agb_exit_point, 3);
+
     agb_in_irq = 1;
 
     // Before the handler, so the keys the game samples this frame are the ones
@@ -210,6 +223,7 @@ uint32_t agb_frame_run(void (*entry)(void), uint32_t max_frames)
     agb_frames = 0;
     agb_frame_limit = max_frames;
     agb_in_irq = 0;
+    agb_stopping = 0;
     agb_reset_io();
 
     memset(&sa, 0, sizeof(sa));

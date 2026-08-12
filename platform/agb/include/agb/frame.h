@@ -11,6 +11,11 @@ uint32_t agb_frame_run(void (*entry)(void), uint32_t max_frames);
 
 uint32_t agb_frame_count(void);
 
+// Ask the game to stop at the next frame boundary. AgbMain never returns on its
+// own, so this is how a port closes: agb_frame_run comes back and its thread can
+// be joined.
+void agb_frame_stop(void);
+
 // Where the key register's contents come from, if not from a keyboard.
 //
 // A replayed run has to be deterministic, and reading a keyboard from the

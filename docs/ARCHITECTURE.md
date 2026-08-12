@@ -918,6 +918,20 @@ the link layer to wireless, and from then on the manager runs every frame.
 
 ## 7. The host abstraction
 
+**Closing the window has to work**, and it needs both halves of the port. The game's main loop never
+returns, so `agb_frame_stop` asks the frame driver to leave through the same non-local jump the frame
+limit uses; without it the join behind the window sat on a thread that was still running the game,
+which is the hang a desktop offers to force-quit out of. The wait on that join is bounded for the same
+reason — a game thread wedged somewhere that never reaches a frame boundary must not keep the window
+alive either.
+
+The window also has to *have* a close button. On Wayland the compositor draws no decorations and SDL
+needs libdecor to draw its own; this port is 32-bit ([ADR 0012](adr/0012-fixed-load-address.md)), so a
+64-bit libdecor on the system does not help it and the window comes up borderless. When this build
+cannot load libdecor and an X server is there, the host asks SDL for X11, whose window manager
+decorates. Installing a 32-bit libdecor removes the need for that, and the log line says which was
+used.
+
 `host.h` is the whole porting surface. A new platform implements it and nothing else:
 
 | Group | Responsibility |

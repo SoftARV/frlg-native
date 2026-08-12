@@ -1,5 +1,8 @@
 #include <SDL3/SDL.h>
 
+#include <dlfcn.h>
+#include <stdlib.h>
+
 #include <stdio.h>
 
 #include "host.h"
@@ -34,8 +37,42 @@ static const struct
 
 #define KEY_MAP_COUNT ((int)(sizeof(key_map) / sizeof(key_map[0])))
 
+// A window with no way to close it is no use for testing, and that is what
+// Wayland gives a build that cannot load libdecor: the compositor draws no
+// decorations of its own, SDL draws none either, and the result is borderless
+// with no title bar and no close button. This port is 32-bit (ADR 0012), so a
+// 64-bit libdecor on the system does not help it.
+//
+// Asking for X11 instead is the fix that needs nothing installed: an X server is
+// already there under Wayland, and its window manager decorates. Only when this
+// build genuinely cannot load libdecor, and only when nothing has asked for a
+// particular driver.
+static void prefer_a_window_that_can_be_closed(void)
+{
+    void *decor;
+
+    if (getenv("WAYLAND_DISPLAY") == NULL || getenv("SDL_VIDEO_DRIVER") != NULL)
+        return;
+
+    decor = dlopen("libdecor-0.so.0", RTLD_LAZY | RTLD_LOCAL);
+    if (decor != NULL)
+    {
+        dlclose(decor);
+        return;
+    }
+
+    if (getenv("DISPLAY") == NULL)
+        return;
+
+    host_log("no libdecor for this build: asking for X11 so the window has a "
+             "title bar");
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "x11");
+}
+
 bool host_video_open(const char *title, int width, int height, int scale)
 {
+    prefer_a_window_that_can_be_closed();
+
     if (!SDL_Init(SDL_INIT_VIDEO))
     {
         host_log(SDL_GetError());
@@ -47,6 +84,14 @@ bool host_video_open(const char *title, int width, int height, int scale)
     {
         host_log(SDL_GetError());
         return false;
+    }
+
+    {
+        const char *driver = SDL_GetCurrentVideoDriver();
+        char line[96];
+
+        snprintf(line, sizeof(line), "video driver: %s", driver ? driver : "?");
+        host_log(line);
     }
 
     frame = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_XRGB8888,
