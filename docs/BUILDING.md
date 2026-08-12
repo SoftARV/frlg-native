@@ -3,7 +3,7 @@
 ## Get the source
 
 ```sh
-git clone --recurse-submodules <repo>
+git clone --recurse-submodules https://github.com/SoftARV/frlg-native.git
 cd frlg-native
 ```
 

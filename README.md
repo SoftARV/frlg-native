@@ -39,7 +39,7 @@ sudo pacman -S --needed gcc lib32-glibc cmake ninja lib32-sdl3 lib32-libpulse \
 ```
 
 ```sh
-git clone --recurse-submodules git@personal:SoftARV/frlg-native.git
+git clone --recurse-submodules https://github.com/SoftARV/frlg-native.git
 cd frlg-native
 
 # the reference ROM: the port links against its symbols, so this comes first
