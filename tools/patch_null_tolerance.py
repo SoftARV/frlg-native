@@ -90,6 +90,27 @@ EDITS = {
             r"\g<keep>    for (i = 0; src != ((void *)0) && i < 64; i++)",
         ),
     ],
+    # IsBattleTransitionDone frees the transition's data and destroys its task,
+    # but leaves the transition's own V-blank callback installed. The next
+    # V-blank dereferences the pointer it just cleared -- once, before the battle
+    # sets its own callback. On hardware that reads BIOS ROM and writes a frame of
+    # garbage into WININ, WINOUT and WIN0V, behind a screen that is already black;
+    # here it is a segfault at the start of every battle.
+    #
+    # Freeing without clearing leaves the read on freed heap: mapped, garbage, and
+    # read at most a frame or two. Nothing tests the pointer for null -- it is
+    # assigned exactly twice, at its definition and at its allocation.
+    "battle_transition.c": [
+        (
+            "the battle transition's read through its freed state",
+            re.compile(
+                r"\{ Free\(sTransitionData\); sTransitionData =\s*"
+                r"(?:#[^\n]*\n\s*)*\(\(void \*\)0\)\s*"
+                r"(?:#[^\n]*\n\s*)*; \}"
+            ),
+            "{ Free(sTransitionData); }",
+        ),
+    ],
     "naming_screen.c": [
         (
             "the naming screen's read through its freed state",

@@ -201,7 +201,7 @@ target is absent, so a submodule bump is reported rather than silently changing 
 | --- | --- | --- |
 | `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `main.c`, `script.c` |
 | `patch_layout_assumptions.py` | assumes upstream's linker script | `load_save.c` |
-| `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c`, `overworld.c` |
+| `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c`, `overworld.c`, `battle_transition.c` |
 
 The third is worth understanding, because more of it will turn up. **The GBA has no MMU**: every
 address in its map is readable, address zero included — that region is BIOS ROM — so a read through a
@@ -224,10 +224,17 @@ all with a save present**. Pointing the three pointers at their own objects make
 where it belongs; offset zero is one of the offsets `SetSaveBlocksPointers` itself picks, so it is a
 state the game already handles.
 
-Three instances in six phases, every one found by playing rather than by reading, and each only
+Four instances in six phases, every one found by playing rather than by reading, and each only
 reachable once the phase before it worked: the second needed a save to exist, the third needed one to
-be loaded. The third is the plainest — a map with no object events has a legitimately null pointer, and
-the loop that copies their scripts ignores the count and reads sixty-four entries regardless. A file may need more than one of these scripts, so they accumulate
+be loaded, the fourth needed the game to reach a battle. Two shapes recur. A pointer freed while
+something still reads it — the naming screen's cursor, and the battle transition's V-blank callback,
+which survives `IsBattleTransitionDone` freeing the data it reads. And a pointer legitimately null —
+the save blocks before the title screen sets them, and a map with no object events, whose script copy
+ignores the count and reads sixty-four entries regardless.
+
+The freed-pointer shape is repaired the same way each time: free without clearing, so the read lands on
+freed heap rather than on address zero. Mapped, garbage, and read at most a frame or two — which is
+what the hardware does with it too. A file may need more than one of these scripts, so they accumulate
 rather than choosing between themselves — `load_save.c` takes both a layout repair and a null one.
 | `m4a.c` | `swi 0x2A` | the mixer ([§6.7](#67-audio)) — a build seam, not an override |
 | `multiboot.c` | ARM busy-wait | GameCube link, out of scope |
