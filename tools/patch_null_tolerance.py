@@ -132,6 +132,21 @@ EDITS = {
     # lands on freed heap -- mapped, garbage, read once or twice -- rather than on
     # address zero. That covers every dereference in the file's callbacks rather
     # than the one that happened to be reached.
+    # The storage system, same shape one level up: CB2_PokeStorage is the *main*
+    # callback rather than the V-blank one, and it runs once more after the PC
+    # closes and frees its state. Nothing tests the pointer for null except the
+    # checks right after the two allocations that set it.
+    "pokemon_storage_system_tasks.c": [
+        (
+            "the storage system's read through its freed state",
+            re.compile(
+                r"\{ Free\(gStorage\); gStorage =\s*"
+                r"(?:#[^\n]*\n\s*)*\(\(void \*\)0\)\s*"
+                r"(?:#[^\n]*\n\s*)*; \}"
+            ),
+            "{ Free(gStorage); }",
+        ),
+    ],
     "pokemon_summary_screen.c": [
         (
             "the summary screen's read through its freed state",

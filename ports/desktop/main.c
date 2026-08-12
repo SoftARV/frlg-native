@@ -191,12 +191,30 @@ static uint16_t trace_keys = HOST_KEYS_RELEASED;
 static FILE *trace_out;
 static uint16_t trace_last_written = HOST_KEYS_RELEASED;
 
+// TEMPORARY PROBE: FRLG_SHOT_RANGE=FIRST:LAST:STEP:DIR
+static unsigned shot_first, shot_last, shot_step = 1;
+static const char *shot_dir;
+
+static void shot_range(uint32_t frame)
+{
+    char path[512];
+
+    if (!shot_dir || frame < shot_first || frame > shot_last)
+        return;
+    if (shot_step > 1 && (frame - shot_first) % shot_step != 0)
+        return;
+    copy_frame();
+    snprintf(path, sizeof(path), "%s/f%u.ppm", shot_dir, frame);
+    write_ppm(path);
+}
+
 // Called by the frame driver, on the game thread, once a frame.
 static uint16_t replay_keys(uint32_t frame)
 {
     while (trace_pos < trace_count && trace[trace_pos].frame <= frame)
         trace_keys = trace[trace_pos++].keys;
 
+    shot_range(frame);
     return trace_keys;
 }
 
@@ -345,6 +363,13 @@ int main(int argc, char **argv)
     // and the run slips one frame behind a less loaded one. FRLG_LOCKSTEP drives
     // frames from the game's own idle point instead. Not for playing -- there is
     // nothing left pacing the game to real time.
+    {
+        const char *r = getenv("FRLG_SHOT_RANGE");
+        static char dir[256];
+
+        if (r != NULL && sscanf(r, "%u:%u:%u:%255s", &shot_first, &shot_last, &shot_step, dir) == 4)
+            shot_dir = dir;
+    }
     {
         const char *lockstep = getenv("FRLG_LOCKSTEP");
 
