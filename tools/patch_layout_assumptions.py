@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Remove upstream's reliance on where the linker put two variables.
+"""Remove upstream's reliance on where the linker put its save blocks.
+
+Two sites in `load_save.c`, both writing past the end of an object because the
+cartridge's linker script guarantees what follows it.
 
 `ClearSav1` and `ClearSav2` each clear one object by asking for the size of
 *two*:
@@ -19,9 +22,26 @@ two symbols out adjacently and worked by luck. See
 docs/spikes/0006-release-build-silence.md.
 
 Each call becomes two, one per object, which clears exactly the same bytes
-without assuming anything about where they are. Both are matched exactly and
-both must be found, so a submodule bump is reported rather than silently
-reintroducing the corruption.
+without assuming anything about where they are.
+
+The second site is `SetSaveBlocksPointers`, which shifts all three save blocks by
+a random offset of up to `SAVEBLOCK_MOVE_RANGE` bytes:
+
+    offset = (Random()) & ((SAVEBLOCK_MOVE_RANGE - 1) & ~3);
+    gSaveBlock2Ptr = (void *)(&gSaveBlock2) + offset;
+
+and then writes whole structs through those pointers. The cartridge's linker
+script leaves that much headroom after each block; nothing here does, so the tail
+of every save block lands in whichever global the host linker put next. The
+offset is forced to zero -- which is one of the values upstream itself picks --
+while leaving the `Random()` call in place, because removing it would shift every
+later draw and change what the game does.
+
+That one cost an evening twice over: the same music players, zeroed the same way,
+by a different line in the same file. See docs/spikes/0006-release-build-silence.md.
+
+Every edit is matched exactly and must be found, so a submodule bump is reported
+rather than silently reintroducing the corruption.
 """
 
 import argparse
@@ -44,6 +64,13 @@ REPLACEMENTS = [
         "{ vu16 tmp = (vu16)(0);"
         " CpuSet((void *)&tmp, &gSaveBlock2, 0x01000000 | ((sizeof(struct SaveBlock2))/2 & 0x1FFFFF));"
         " CpuSet((void *)&tmp, gSaveBlock2_DMA, 0x01000000 | ((sizeof(gSaveBlock2_DMA))/2 & 0x1FFFFF)); }",
+    ),
+    (
+        "save block shuffle",
+        "offset = (Random()) & ((128 - 1) & ~3);",
+        # The call stays: it draws from the same RNG every later roll comes from,
+        # and dropping it would shift the whole sequence.
+        "offset = (Random()) & 0;",
     ),
     (
         "ClearSav1",

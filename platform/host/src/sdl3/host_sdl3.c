@@ -1,6 +1,13 @@
 #include <SDL3/SDL.h>
 
+#include <stdio.h>
+
 #include "host.h"
+
+// Drift between the game's frame pacing and the sound card's clock has to show
+// up somewhere; these are where it does.
+static unsigned audio_submits, audio_starved, audio_dropped;
+static int audio_queue_peak;
 
 static SDL_Window *window;
 static SDL_Renderer *renderer;
@@ -171,6 +178,17 @@ bool host_audio_open(int sample_rate)
 
 void host_audio_close(void)
 {
+    if (audio_submits != 0)
+    {
+        char line[160];
+
+        snprintf(line, sizeof(line),
+                 "audio: %u frames submitted, queue peaked at %d bytes, "
+                 "%u starved, %u dropped",
+                 audio_submits, audio_queue_peak, audio_starved, audio_dropped);
+        host_log(line);
+    }
+
     if (audio != NULL)
     {
         SDL_DestroyAudioStream(audio);
@@ -197,10 +215,28 @@ void host_audio_submit(const int8_t *right, const int8_t *left, int samples)
         frame[i * 2 + 1] = right[i];
     }
 
-    // Falling behind is better than blocking the game thread: if the device has
-    // stopped consuming, the queue is dropped rather than allowed to grow.
-    if (SDL_GetAudioStreamQueued(audio) > (int)(sizeof(frame) * 8))
-        SDL_ClearAudioStream(audio);
+    // Nothing ties the game's frame pacing to the sound card's clock, so the two
+    // drift: the queue either grows until it is dropped or empties and the device
+    // plays silence. Both are audible, and neither leaves a trace in the mixer's
+    // own output -- hence counting them here, where the difference shows.
+    {
+        int queued = SDL_GetAudioStreamQueued(audio);
+
+        audio_submits++;
+        if (queued > audio_queue_peak)
+            audio_queue_peak = queued;
+        // Ignore the first few frames, where an empty queue is just the start.
+        if (queued == 0 && audio_submits > 8)
+            audio_starved++;
+
+        // Falling behind is better than blocking the game thread: if the device
+        // has stopped consuming, the queue is dropped rather than allowed to grow.
+        if (queued > (int)(sizeof(frame) * 8))
+        {
+            SDL_ClearAudioStream(audio);
+            audio_dropped++;
+        }
+    }
 
     SDL_PutAudioStreamData(audio, frame, samples * 2);
 }

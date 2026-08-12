@@ -157,3 +157,54 @@ the mixer produced regardless — and it fails on the optimised build today, whi
 The general lesson is the one worth keeping: **a subsystem with no observable output has no tests, no
 matter how many tests it has.** The mixer had 119 passing unit tests and four passing golden frames
 while producing pure silence in the build we would ship.
+
+
+## It happened again, in the same file, to the same victim
+
+**Six phases later, a recorded play-through went quiet at the first map warp** — music frozen, then
+gone, sound effects still playing. The release build only; debug and headless were fine, which is the
+signature this spike is named for.
+
+The mechanism is the one above and the site is new. `SetSaveBlocksPointers` shifts all three save
+blocks by a random offset before writing whole structs through the shifted pointers:
+
+```c
+offset = (Random()) & ((SAVEBLOCK_MOVE_RANGE - 1) & ~3);
+gSaveBlock2Ptr = (void *)(&gSaveBlock2) + offset;
+*sav1_LocalVar  = (void *)(&gSaveBlock1) + offset;
+gPokemonStoragePtr = (void *)(&gPokemonStorage) + offset;
+```
+
+The cartridge's linker script leaves 128 bytes of headroom after each block, so the shifted write stays
+inside what upstream reserved. Nothing here does, and the tail of the write landed in `gMPlayInfo_SE3`
+— the third music player in the chain.
+
+That detail is what made it look like a mixer bug. `MPlayMain` checks its player's `ident` **before**
+walking to the next player in the chain, so one clobbered player stops every player behind it from
+being serviced. The BGM player, ten tracks, was simply never ticked again: its notes held their last
+envelope and decayed to nothing while the sound effects — earlier in the chain — carried on. Frozen,
+then silent, exactly as described.
+
+## How it was found
+
+Not by reading. The offline replay was healthy, and the divergence only showed when the same trace was
+run through two builds and their PCM compared: identical to sample 1,795,584 and different after.
+From there it was mechanical — bisect to frame 5837, dump the players each frame to find the clobbered
+one, then a hardware watchpoint on its `trackCount`, which caught a libc `memset` with a return address
+in `MoveSaveBlocks_ResetHeap`.
+
+**Comparing two builds of the same port is a diagnostic in its own right.** Neither build is the
+reference, but a difference between them is proof of a layout assumption or of undefined behaviour, and
+it points at the byte where it starts. UBSan, run first, found only upstream's endemic shift overflows
+and nothing here.
+
+## What to do about the class
+
+Two sites in one file, both this shape, and a third — `LoadSaveblockObjEventScripts` — in the no-MMU
+class next door. There is no reason to think `load_save.c` is the last of them. Anything upstream
+writes past the end of an object because `ld_script.ld` says what follows it will fail here, silently,
+in a way that depends on link order and therefore on the build.
+
+A layout-assumption audit would be worth its cost: walk upstream's linker script for objects placed
+adjacently on purpose, and check each against what the host linker does. That is a finite list, and it
+is shorter than the list of symptoms it can produce.
