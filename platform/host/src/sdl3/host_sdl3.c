@@ -199,9 +199,10 @@ void host_audio_close(void)
 
 void host_audio_submit(const int8_t *right, const int8_t *left, int samples)
 {
-    // One frame is 8 samples at the slowest rate and a few hundred at the
-    // fastest, so interleaving on the stack costs nothing and avoids a lock.
-    int8_t frame[2048];
+    // One frame is a few dozen samples at the slowest rate and a couple of
+    // thousand at the fastest, once the mixer's oversampling is counted, so
+    // interleaving on the stack costs nothing and avoids a lock.
+    int8_t frame[8192];
 
     if (audio == NULL || samples <= 0)
         return;
@@ -230,8 +231,11 @@ void host_audio_submit(const int8_t *right, const int8_t *left, int samples)
             audio_starved++;
 
         // Falling behind is better than blocking the game thread: if the device
-        // has stopped consuming, the queue is dropped rather than allowed to grow.
-        if (queued > (int)(sizeof(frame) * 8))
+        // has stopped consuming, the queue is dropped rather than allowed to
+        // grow. The bound is a length of time rather than a multiple of the
+        // buffer, which changes with the rate: a fifth of a second at the
+        // oversampled rate, stereo, one byte a sample.
+        if (queued > 20000)
         {
             SDL_ClearAudioStream(audio);
             audio_dropped++;

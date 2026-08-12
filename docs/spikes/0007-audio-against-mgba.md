@@ -214,3 +214,60 @@ measurements worth keeping:
 
 So nothing structural is missing, and what is left is timbre — which is where the aliasing above
 belongs.
+
+
+## The port was throwing away three quarters of the sound
+
+**Found by chasing why short effects sounded "tiny".** They were not quiet; they were *gone*, along with
+most of the game's brightness, and the reason is the rate the port handed audio over at.
+
+13379 Hz is the rate the game runs its **FIFOs** at, not the rate the machine puts out. A GBA's four
+hardware channels are analogue, and its FIFOs hold each sample for a whole period — so a real machine
+emits square harmonics and the stair-step of that hold, both far above 6.7 kHz. Handing over a
+13379 Hz stream is a perfect low-pass at exactly that line.
+
+Measured against the reference at 48 kHz over the intro:
+
+| | share of energy |
+| --- | --- |
+| below 6.69 kHz — what a 13379 Hz stream can carry | **25.1%** |
+| above it — what the port was discarding | **74.9%** |
+
+That also explains the shape of the complaints. A sweep effect climbs out of the band, so after the
+noise and square band-limiting landed it correctly *vanished* rather than folding back as audible junk:
+the aliasing had been standing in for the sound.
+
+## The fix, and what it measures
+
+The sampled side is now **held** across four output samples, which is what the FIFO does with it, and
+the hardware channels are rendered at the output rate instead of the mixer's. Output is 53516 Hz.
+
+Both at 53516 Hz, over the same window:
+
+| band | ours | reference |
+| --- | --- | --- |
+| 60–400 Hz | 10.5% | 11.2% |
+| 400–1500 Hz | 10.6% | 10.6% |
+| 1500–4000 Hz | 3.8% | 3.9% |
+| 4000–8000 Hz | 1.8% | 2.4% |
+| 8000–16000 Hz | 60.6% | 58.5% |
+| 16000–26000 Hz | 12.7% | 13.3% |
+
+Every band within a couple of points, where two of them had been empty. **This spike's earlier numbers
+were all measured inside the quarter of the spectrum that survived**, which is why they looked close to
+the reference while the port sounded wrong: comparing 13379 Hz against 13379 Hz hid the loss on both
+sides of the comparison. Any future audio comparison should be captured at the oversampled rate.
+
+## What the balance measurements said on the way
+
+The complaint pointed at the PSG being too quiet against the sampled side. It was not, and this is the
+method that settled it — the reference *can* be muted on one side reliably, which the earlier attempt at
+per-channel isolation could not manage:
+
+`SOUNDCNT_H`'s direct-sound routing bits are written only by `m4aSoundInit` and by
+`SetPokemonCryStereo`, so forcing them off every frame in `mgba-audio` does not leak, unlike the PSG's
+own enable bits in `SOUNDCNT_L` which the sequencer rewrites constantly. With the reference's sampled
+side muted:
+
+- the hardware channels are **50%** of the reference's own mix, and **53%** of ours — a balance within
+  7%, so nothing to fix there.

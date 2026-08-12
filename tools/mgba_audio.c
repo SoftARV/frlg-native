@@ -90,6 +90,23 @@ int main(int argc, char** argv)
     {
         int available;
 
+        // FRLG_AUDIO_MUTE=direct silences the two direct-sound FIFOs by clearing
+        // their routing bits in SOUNDCNT_H, every frame. Unlike the PSG's enable
+        // bits in SOUNDCNT_L, which the sequencer rewrites as channels come and
+        // go, SOUNDCNT_H is written only at init and when the sound option
+        // changes -- so this one does not leak, and the reference's hardware
+        // channels can be compared against the port's on their own.
+        {
+            const char* mute = getenv("FRLG_AUDIO_MUTE");
+
+            if (mute && mute[0] == 'd')
+            {
+                uint16_t cnt_h = core->busRead16(core, 0x04000082);
+
+                core->busWrite16(core, 0x04000082, (uint16_t)(cnt_h & ~0x3300));
+            }
+        }
+
         core->runFrame(core);
 
         // Both channels advance together, so either one's count will do.

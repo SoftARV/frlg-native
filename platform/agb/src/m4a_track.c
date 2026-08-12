@@ -1008,6 +1008,10 @@ done:
 // the PPU, which composes into a buffer the port presents.
 static agb_audio_sink audio_sink;
 
+// The two sides of the output, at the oversampled rate. The mixer never produces
+// more than PCM_DMA_BUF_SIZE samples a frame, so this is the worst case.
+static s8 agb_audio_out[PCM_DMA_BUF_SIZE * AGB_AUDIO_OVERSAMPLE * 2];
+
 void agb_m4a_set_audio_sink(agb_audio_sink sink)
 {
     audio_sink = sink;
@@ -1041,14 +1045,37 @@ void SoundMain(void)
     // channels are added, which carry their own ratio.
     agb_m4a_apply_output_mix(frame, frame + PCM_DMA_BUF_SIZE, info->pcmSamplesPerVBlank);
 
-    // The four hardware channels are driven by register writes rather than
-    // mixed, so they are added here, after the software channels and before
-    // anything is handed over.
-    agb_psg_mix(frame, frame + PCM_DMA_BUF_SIZE, info->pcmSamplesPerVBlank,
-                info->pcmFreq);
+    // The sampled side is finished at the rate the game chose -- 13379 Hz -- but
+    // that is the rate its *FIFOs* run at, not the rate the machine puts out.
+    // The hardware channels are analogue, and the FIFOs hold each sample for a
+    // whole period, so a real GBA emits square harmonics and the stair-step of
+    // that hold, both far above 6.7 kHz. Handing over 13379 Hz throws all of it
+    // away: three quarters of the reference's energy sits above that line.
+    //
+    // So the sampled side is held across each output sample, which is exactly
+    // what the FIFO does with it, and the hardware channels are rendered at the
+    // output rate instead. See docs/spikes/0007-audio-against-mgba.md.
+    {
+        int samples = info->pcmSamplesPerVBlank;
+        int out_samples = samples * AGB_AUDIO_OVERSAMPLE;
+        s8 *right = agb_audio_out;
+        s8 *left = agb_audio_out + sizeof(agb_audio_out) / 2;
 
-    if (audio_sink != NULL)
-        audio_sink(frame, frame + PCM_DMA_BUF_SIZE, info->pcmSamplesPerVBlank, info->pcmFreq);
+        for (int i = 0; i < samples; i++)
+        {
+            for (int n = 0; n < AGB_AUDIO_OVERSAMPLE; n++)
+            {
+                right[i * AGB_AUDIO_OVERSAMPLE + n] = frame[i];
+                left[i * AGB_AUDIO_OVERSAMPLE + n] = frame[PCM_DMA_BUF_SIZE + i];
+            }
+        }
+
+        agb_psg_mix(right, left, out_samples, info->pcmFreq * AGB_AUDIO_OVERSAMPLE);
+
+        if (audio_sink != NULL)
+            audio_sink(right, left, out_samples,
+                       info->pcmFreq * AGB_AUDIO_OVERSAMPLE);
+    }
 
     // The original releases the lock at the end of the routine it tail-calls and
     // never returns from. Ours returns, so the pair sits together.

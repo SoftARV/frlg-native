@@ -10,9 +10,19 @@
 
 #include <stdint.h>
 
+// How many output samples each of the mixer's samples becomes. The sampled side
+// is held across them, the way the hardware's FIFO holds one; the hardware
+// channels are rendered at the higher rate, where their harmonics and sweeps
+// still exist. Four puts the output at 53516 Hz.
+//
+// 13379 Hz is the rate the game runs its FIFOs at, not the rate the machine puts
+// out: three quarters of the reference's energy sits above what that rate can
+// carry, and handing it over unchanged is a perfect low-pass at 6.7 kHz.
+#define AGB_AUDIO_OVERSAMPLE 4
+
 // One frame's worth of 8-bit signed stereo, the two sides held separately the
-// way the mixer keeps them. `rate` is the mixer's output rate, which the game
-// can change while running through m4aSoundMode.
+// way the mixer keeps them. `rate` is the rate the samples are handed over at --
+// the mixer's own rate times the oversampling above.
 typedef void (*agb_audio_sink)(const int8_t *right, const int8_t *left, int samples, int rate);
 
 void agb_m4a_set_audio_sink(agb_audio_sink sink);
