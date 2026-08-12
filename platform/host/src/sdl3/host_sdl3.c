@@ -168,7 +168,11 @@ bool host_pump_events(void)
         {
             bool down = ev.type == SDL_EVENT_KEY_DOWN;
 
-            if (down && ev.key.scancode == SDL_SCANCODE_ESCAPE)
+            // Ctrl+Q rather than Escape: a key that quits is a key a player
+            // will hit by accident, and losing a recording to a stray press has
+            // happened.
+            if (down && ev.key.scancode == SDL_SCANCODE_Q
+                && (ev.key.mod & SDL_KMOD_CTRL) != 0)
                 quit_requested = true;
 
             for (int i = 0; i < KEY_MAP_COUNT; i++)

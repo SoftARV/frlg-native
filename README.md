@@ -69,7 +69,8 @@ FRLG_INPUT_RECORD=/tmp/session.trace \
 - The two numbers are a frame limit and a display rate. `120000` is about thirty-three minutes.
 
 Arrow keys move, **X** is A and **Z** is B, **Enter** is Start and **Backspace** is Select, **A** and
-**S** are L and R. **Esc** or the window's close button quits.
+**S** are L and R. **Ctrl+Q** or the window's close button quits — deliberately not a bare key, since
+one stray press ends a recording.
 
 **Before each session, copy your save**: a trace only replays against the save the run *started*
 with, and playing changes it.
