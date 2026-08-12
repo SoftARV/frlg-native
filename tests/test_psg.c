@@ -348,6 +348,53 @@ static void test_noise_above_nyquist_averages_down(void)
           fast, slow);
 }
 
+// The sweep unit rewrites the frequency register, and that write-back is what
+// makes a swept note bend at all: this channel's period is re-read from the
+// register every frame, so a sweep that kept its result to itself would be undone
+// sixty times a second. The ledge hop is exactly this -- sweep time 2, downwards,
+// shift 6 -- and without it the effect came out as a flat tone.
+static void test_a_sweep_bends_the_note(void)
+{
+    int first, later;
+
+    reset("a swept note bends across frames");
+    put(REG_OFFSET_SOUND1CNT_L, 0x002E);          // time 2, downwards, shift 6
+    put(REG_OFFSET_SOUND1CNT_H, 0xF080);
+    put(REG_OFFSET_SOUND1CNT_X, 0x8000 | 1700);
+
+    agb_psg_mix(right, left, FRAME, RATE);
+    first = get(REG_OFFSET_SOUND1CNT_X) & 0x07FF;
+    for (int i = 0; i < 8; i++)
+        agb_psg_mix(right, left, FRAME, RATE);
+    later = get(REG_OFFSET_SOUND1CNT_X) & 0x07FF;
+
+    CHECK(later < first, "a downward sweep did not lower the frequency register: "
+          "%d then %d", first, later);
+    CHECK(first - later > 30, "the sweep moved too little to hear: %d then %d",
+          first, later);
+}
+
+// Nothing should move when the sweep is switched off, however the rest of the
+// channel is set: a time of zero is what disables it.
+static void test_no_sweep_leaves_the_note_alone(void)
+{
+    int first, later;
+
+    reset("without a sweep the note holds its pitch");
+    put(REG_OFFSET_SOUND1CNT_L, 0x0006);          // shift set, but time zero
+    put(REG_OFFSET_SOUND1CNT_H, 0xF080);
+    put(REG_OFFSET_SOUND1CNT_X, 0x8000 | 1700);
+
+    agb_psg_mix(right, left, FRAME, RATE);
+    first = get(REG_OFFSET_SOUND1CNT_X) & 0x07FF;
+    for (int i = 0; i < 8; i++)
+        agb_psg_mix(right, left, FRAME, RATE);
+    later = get(REG_OFFSET_SOUND1CNT_X) & 0x07FF;
+
+    CHECK(first == later, "a disabled sweep moved the frequency: %d then %d",
+          first, later);
+}
+
 int main(void)
 {
     test_silent_until_triggered();
@@ -364,6 +411,8 @@ int main(void)
     test_a_square_below_nyquist_keeps_its_swing();
     test_a_square_above_nyquist_does_not_alias();
     test_noise_above_nyquist_averages_down();
+    test_a_sweep_bends_the_note();
+    test_no_sweep_leaves_the_note_alone();
 
     return test_report("psg");
 }

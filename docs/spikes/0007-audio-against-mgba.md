@@ -271,3 +271,48 @@ side muted:
 
 - the hardware channels are **50%** of the reference's own mix, and **53%** of ours — a balance within
   7%, so nothing to fix there.
+
+
+## The ledge hop: a sweep that never swept
+
+The one effect still reported wrong after the output rate was fixed, and the fault was in the sweep
+unit rather than anywhere the rate mattered.
+
+Reading the song out of the ROM says what the sound is made of. `gSongTable[10]` is one track:
+
+```
+BC 00     KEYSH 0
+BB 3C     TEMPO
+BD 55     VOICE 85
+BE 64     VOL 100
+C0 3A     PAN
+D1 33 34  a note, key 51
+82        wait
+BD 56     VOICE 86
+D5 43 5C  a note, key 67
+81 83 83  waits
+B1        FINE
+```
+
+and voice 85 in its voicegroup is `09 3C 00 2E ...` — type `09` is FIX | CGB square 1, and the
+pan/sweep byte `2E` is a **sweep**: time 2, downwards, shift 6. The ledge hop is a square that bends
+down, which is why it was the sound that still sounded wrong when the flat ones came right.
+
+The bug: `square_update` runs once per frame and re-reads the channel's period from the frequency
+register, unconditionally. The sweep unit was advancing its own copy — and having it overwritten sixty
+times a second. **The note never bent.**
+
+On hardware the sweep writes its result *back* into the frequency register, which is exactly what makes
+it survive; the register is the state. Writing it back makes the per-frame reload correct rather than
+destructive. Measured on a note set up like the ledge hop's:
+
+| frame | 0 | 2 | 4 | 6 | 8 |
+| --- | --- | --- | --- | --- | --- |
+| tone | 350 Hz | 308 | 277 | 251 | 231 |
+
+Before the fix it read 350 Hz on every one of them.
+
+**What this says about the other reports.** Three effects came right when the output rate stopped
+throwing away everything above 6.7 kHz; this one needed a second, unrelated fix, and the two would have
+been impossible to separate by ear. Reading the effect's data out of the ROM — what instrument, what
+sweep, what notes — is what turned "sounds wrong" into a mechanism, and it costs a few minutes.

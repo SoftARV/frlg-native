@@ -259,6 +259,15 @@ static void sweep_tick(struct square *ch)
     {
         ch->period = 0;
     }
+
+    // The sweep unit writes its result back into the frequency register, and
+    // that is not a detail: this channel's period is re-read from the register
+    // every frame, so a sweep that kept its result to itself would be undone
+    // sixty times a second and the note would never bend. It is what the ledge
+    // hop is made of -- a square with sweep time 2, downwards, shift 6 -- and
+    // without the write-back it came out as a flat tone.
+    reg_write(REG_OFFSET_SOUND1CNT_X,
+              (uint16_t)((reg(REG_OFFSET_SOUND1CNT_X) & ~0x07FF) | ch->period));
 }
 
 static void sequencer_tick(void)
