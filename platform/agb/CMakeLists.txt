@@ -8,6 +8,7 @@ add_library(agb STATIC
     src/irq.c
     src/ppu.c
     src/psg.c
+    src/rfu.c
     src/cart.c
     src/flash.c
     src/m4a_clear.c

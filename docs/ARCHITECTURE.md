@@ -866,6 +866,13 @@ than a nicety, and why desync fuzzing is part of the test plan.
 Until the transport lands, the layer reports "no peer connected" — a state the game already handles
 gracefully.
 
+The adapter's library is not built, and its entry points are stubs that name themselves and return
+zero. One is not: `rfu_initializeAPI` hands out five pointers that the link manager reads through on
+the next frame, so `platform/agb/src/rfu.c` carves the caller's buffer the way librfu carves it and
+leaves it zeroed, with the link status reporting neither parent nor child. Reaching this needs no link
+hardware and no menu — **walking into a Pokémon Center** starts the union-room listener, which switches
+the link layer to wireless, and from then on the manager runs every frame.
+
 ## 7. The host abstraction
 
 `host.h` is the whole porting surface. A new platform implements it and nothing else:
