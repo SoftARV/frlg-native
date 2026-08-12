@@ -201,7 +201,7 @@ target is absent, so a submodule bump is reported rather than silently changing 
 | --- | --- | --- |
 | `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `main.c`, `script.c` |
 | `patch_layout_assumptions.py` | assumes upstream's linker script | `load_save.c` |
-| `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c`, `overworld.c`, `battle_transition.c`, `sprite.c`, `trainer_card.c`, `pokemon_summary_screen.c`, `pokemon_storage_system_tasks.c` |
+| `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c`, `overworld.c`, `battle_transition.c`, `sprite.c`, `trainer_card.c`, `pokemon_summary_screen.c`, `pokemon_storage_system_tasks.c`, `region_map.c` |
 
 The third is worth understanding, because more of it will turn up. **The GBA has no MMU**: every
 address in its map is readable, address zero included — that region is BIOS ROM — so a read through a
@@ -239,7 +239,20 @@ applies is decided by whether anything tests the pointer for null:
 - **Nothing does** — free without clearing, and the read lands on freed heap instead of address zero.
   Mapped, garbage, read once or twice, and it covers every dereference in that screen at once.
 - **Something does** — guard the dereferences themselves, leaving the rest of the callback running,
-  because the work before them is what the *next* screen depends on. A pointer freed while
+  because the work before them is what the *next* screen depends on.
+
+There is a **cost to the first choice that was missed when it was first made**. `Free(NULL)` is a no-op
+in upstream's allocator — `FreeInternal` opens with `if (p)` — so clearing the pointer is also what
+makes a second teardown harmless. Leaving it in place trades a null dereference for a double free,
+which merges a block into its neighbours twice and corrupts the free list silently. Where a free site
+can run twice, or is itself written `if (ptr) free`, the pointer must be cleared and the readers
+guarded instead. The town map is the case that made this visible: `FreeMapCursor` is reached from two
+places.
+
+Audited for the three already repaired this way: the naming screen frees from a terminal state, the
+summary screen destroys its task before freeing, and the storage system frees from a one-shot teardown.
+The battle transition is the one with residual risk — `IsBattleTransitionDone` is polled every frame
+and frees on the frame it answers yes. A pointer freed while
 something still reads it — the naming screen's cursor, and the battle transition's V-blank callback,
 which survives `IsBattleTransitionDone` freeing the data it reads. And a pointer legitimately null —
 the save blocks before the title screen sets them, and a map with no object events, whose script copy

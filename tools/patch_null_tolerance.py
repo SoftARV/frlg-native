@@ -136,6 +136,59 @@ EDITS = {
     # callback rather than the V-blank one, and it runs once more after the PC
     # closes and frees its state. Nothing tests the pointer for null except the
     # checks right after the two allocations that set it.
+    # The town map's cursor, read by the main callback after the map closes:
+    # CB2_OpenRegionMap -> UpdateMapsecNameBox -> the two functions that ask what
+    # the cursor is over, both of which start by reading its coordinates.
+    #
+    # Guarded rather than left dangling, and for a reason worth remembering:
+    # FreeMapCursor is reached from two places and frees only `if (ptr)`, so a
+    # pointer left in place would be freed twice, and upstream's allocator merges
+    # a block into its neighbours on every free. Clearing it is what makes the
+    # second call a no-op.
+    #
+    # Returning "no map section" is what the hardware arrives at anyway: the
+    # coordinates come back as whatever the BIOS region holds, and the bounds
+    # check two lines down rejects them.
+    #
+    # The same screen also writes through a fly icon that has no sprite -- not
+    # every entry in the table gets one -- while the map opens. That write goes
+    # to the BIOS region on hardware and is ignored.
+    "region_map.c": [
+        (
+            "the map section under a freed cursor",
+            re.compile(
+                r"(?P<keep>static u16 GetMapsecUnderCursor\(void\)\n\{\n    u8 mapsec;\n)"
+            ),
+            r"\g<keep>    if (sMapCursor == ((void *)0))\n        return MAPSEC_NONE;\n",
+        ),
+        (
+            "an icon sprite that was never created",
+            re.compile(
+                r"(?m)^(?P<indent>[ \t]*)(?P<obj>[^\n;]+?)(?P<acc>->|\.)"
+                r"sprite->invisible = invisible;"
+            ),
+            r"\g<indent>{ if (\g<obj>\g<acc>sprite != ((void *)0)) "
+            r"\g<obj>\g<acc>sprite->invisible = invisible; }",
+            7,
+        ),
+        (
+            # SetMapCursorInvisibility spells its parameter `invisibile`, so it
+            # needs its own line rather than the shape above.
+            "the map cursor's sprite, spelled upstream's way",
+            re.compile(
+                r"(?m)^(?P<indent>[ \t]*)(?P<obj>[^\n;]+?)->sprite->invisible = invisibile;"
+            ),
+            r"\g<indent>{ if (\g<obj>->sprite != ((void *)0)) "
+            r"\g<obj>->sprite->invisible = invisibile; }",
+        ),
+        (
+            "the dungeon section under a freed cursor",
+            re.compile(
+                r"(?P<keep>static u16 GetDungeonMapsecUnderCursor\(void\)\n\{\n    u8 mapsec;\n)"
+            ),
+            r"\g<keep>    if (sMapCursor == ((void *)0))\n        return MAPSEC_NONE;\n",
+        ),
+    ],
     "pokemon_storage_system_tasks.c": [
         (
             "the storage system's read through its freed state",
@@ -222,15 +275,19 @@ def main():
 
     text = open(args.file).read()
 
-    for what, pattern, new in edits:
+    for edit in edits:
+        # A fourth element says how many occurrences to expect, for a shape that
+        # repeats within one file rather than a single line that does not.
+        what, pattern, new = edit[0], edit[1], edit[2]
+        expected = edit[3] if len(edit) > 3 else 1
         found = len(pattern.findall(text))
-        if found != 1:
+        if found != expected:
             sys.exit(
-                f"patch_null_tolerance: expected exactly one occurrence of {what} "
+                f"patch_null_tolerance: expected {expected} occurrence(s) of {what} "
                 f"in {args.file}, found {found}. Upstream has changed it; see "
                 "docs/ARCHITECTURE.md 4.3."
             )
-        text = pattern.sub(new, text, count=1)
+        text = pattern.sub(new, text, count=expected)
 
     open(args.file, "w").write(text)
 

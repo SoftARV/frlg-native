@@ -13,6 +13,10 @@
 #include <stdint.h>
 
 #include "agb/audio.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "agb/frame.h"
 #include "agb/m4a.h"
 #include "agb/memmap.h"
 #include "agb/psg.h"
@@ -912,6 +916,38 @@ void MPlayMain(struct MusicPlayerInfo *player)
 {
     struct SoundInfo *info;
     u32 tempo;
+
+    {
+        static int lo = -2, hi = -2;
+        if (lo == -2)
+        {
+            const char *r = getenv("FRLG_PROBE_TRACKS");
+            lo = hi = -1;
+            if (r) sscanf(r, "%d:%d", &lo, &hi);
+        }
+        if (lo >= 0 && (int)agb_frame_count() >= lo && (int)agb_frame_count() <= hi
+            && player->trackCount > 4)
+        {
+            printf("trk %u player=%p n=%u:", agb_frame_count(), (void *)player,
+                   player->trackCount);
+            for (int t = 0; t < player->trackCount; t++)
+            {
+                struct MusicPlayerTrack *tr = &player->tracks[t];
+                printf(" %d:%s%02X", t, tr->chan ? "" : "-", tr->chan ? tr->chan->type : 0);
+            }
+            printf("\n");
+            for (int t = 0; t < player->trackCount; t++)
+            {
+                struct MusicPlayerTrack *tr = &player->tracks[t];
+                if ((t == 1 || t == 5) && player->trackCount == 10)
+                    printf("    track %d flags=%02X wait=%u key=%u vel=%u prio=%u "
+                           "tone.type=%02X tone.key=%u wav=%p cmdPtr=%p\n",
+                           t, tr->flags, tr->wait, tr->key, tr->velocity, tr->priority,
+                           tr->tone.type, tr->tone.key, (void *)tr->tone.wav,
+                           (void *)tr->cmdPtr);
+            }
+        }
+    }
 
     // The ident is both a signature and a lock: a player caught mid-update is one
     // this call must leave alone.

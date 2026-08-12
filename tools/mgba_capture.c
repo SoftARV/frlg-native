@@ -203,6 +203,19 @@ int main(int argc, char** argv)
                 return 1;
             printf("  captured frame %u\n", frame);
 
+            // The sequencer's own limits, read out of the reference: maxChans is
+            // how many software mixing channels it will hand out, and a song with
+            // more tracks than that loses instruments.
+            if (getenv("FRLG_DUMP_SOUND"))
+            {
+                uint32_t si = core->busRead32(core, 0x03007FF0);
+
+                printf("    frame %u SoundInfo %08X: reverb=%u maxChans=%u masterVol=%u freq=%u\n",
+                       frame, si, core->busRead8(core, si + 5),
+                       core->busRead8(core, si + 6), core->busRead8(core, si + 7),
+                       core->busRead8(core, si + 8));
+            }
+
             // FRLG_DUMP_REGS asks what the reference had in its display
             // registers at the same moment. Comparing those rather than pixels
             // is what settles which layer a missing picture belongs to.
