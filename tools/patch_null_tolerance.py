@@ -111,6 +111,34 @@ EDITS = {
     # ignores writes. The tag that comes back frees nothing, and DestroySprite's
     # write goes nowhere. Refusing a null sprite is the same nothing, done on
     # purpose.
+    # The trainer card's V-blank callback outlives the card: CloseTrainerCard
+    # frees the data and the callback runs on until the next screen installs its
+    # own. Opening the card once and closing it is enough.
+    #
+    # Only the two dereferences are guarded, not the callback: the three calls
+    # before them -- OAM, the sprite copy queue, the palette buffer -- run on
+    # hardware in those frames too, and the next screen is relying on them. What
+    # the hardware does with the rest is write a counter into the BIOS region,
+    # where writes are ignored, and read a flag back as whatever was prefetched.
+    #
+    # The pointer cannot be left dangling the way the naming screen's is:
+    # GetCardType tests it for null and answers differently.
+    "trainer_card.c": [
+        (
+            "the time colon's blink through freed state",
+            re.compile(
+                r"(?P<keep>static void BlinkTimeColon\(void\)\n\{\n)"
+                r"    if \(\+\+sTrainerCardDataPtr->timeColonBlinkTimer > 60\)"
+            ),
+            r"\g<keep>    if (sTrainerCardDataPtr == ((void *)0))\n        return;\n\n"
+            r"    if (++sTrainerCardDataPtr->timeColonBlinkTimer > 60)",
+        ),
+        (
+            "the scanline copy's flag read through freed state",
+            re.compile(r"    if \(sTrainerCardDataPtr->allowDMACopy\)"),
+            "    if (sTrainerCardDataPtr != ((void *)0) && sTrainerCardDataPtr->allowDMACopy)",
+        ),
+    ],
     "sprite.c": [
         (
             "the destroy-and-free wrapper's null sprite",
