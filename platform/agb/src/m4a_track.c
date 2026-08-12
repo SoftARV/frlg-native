@@ -1000,6 +1000,11 @@ void SoundMain(void)
     frame = agb_m4a_frame_buffer(info);
     agb_m4a_mix_frame(info, frame, info->pcmSamplesPerVBlank);
 
+    // The two mixed buffers are separate sources until the output stage decides
+    // what each contributes to each side -- so that happens before the hardware
+    // channels are added, which carry their own ratio.
+    agb_m4a_apply_output_mix(frame, frame + PCM_DMA_BUF_SIZE, info->pcmSamplesPerVBlank);
+
     // The four hardware channels are driven by register writes rather than
     // mixed, so they are added here, after the software channels and before
     // anything is handed over.

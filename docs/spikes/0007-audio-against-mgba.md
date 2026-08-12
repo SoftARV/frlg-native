@@ -99,3 +99,23 @@ thing to chase.
 about 13 kHz and its DAC produces exactly this kind of content; mGBA's `blip_buf` resampling
 deliberately removes it. Ours may be the more faithful of the two. Settling that needs a comparison
 against hardware, not against another emulator.
+
+
+## A level error the band comparison could not have caught
+
+**Found by ear, in play, long after this spike was parked.** The port ignored `SOUNDCNT_H`'s
+direct-sound volume bits, so the sampled music played at twice its intended level against the PSG
+channels once the game applied the sound option.
+
+This spike could not have found it. Every measurement here is of the **intro**, which is the one part
+of the game that runs before `SetPokemonCryStereo` is called — until then `m4aSoundInit`'s
+`SOUND_ALL_MIX_FULL` is in force and the port's behaviour was correct. The comparison was sound; its
+sample was unrepresentative.
+
+The register reads `3302` in the port and `3302` in the reference at the same frame, so no listening
+test was needed once the question was asked properly: both FIFOs on both sides at half volume, PSG at
+full, which is a mono downmix at unity gain rather than the hard-panned pair the port was handing over.
+
+**What this says about the remaining ~14% gap** is that it should be re-measured somewhere the game
+actually spends its time. `mgba-audio` cannot replay an input trace, so the oracle stops where the
+intro does — that is the thing to fix before trusting another number from it.

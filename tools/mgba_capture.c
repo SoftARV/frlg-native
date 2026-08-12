@@ -214,6 +214,7 @@ int main(int argc, char** argv)
                     {"BG2PB", 0x022},   {"BG2PC", 0x024},   {"BG2PD", 0x026},
                     {"BG2X_LO", 0x028}, {"BG2X_HI", 0x02A}, {"BG2Y_LO", 0x02C},
                     {"BG2Y_HI", 0x02E}, {"BLDCNT", 0x050},
+                    {"SOUNDCNT_L", 0x080}, {"SOUNDCNT_H", 0x082},
                 };
                 const uint16_t* io = ((struct GBA*)core->board)->memory.io;
                 unsigned r;

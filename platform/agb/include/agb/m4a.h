@@ -55,6 +55,11 @@ struct SoundInfo *agb_sound_info(void);
 // comment on the definition for why.
 void agb_m4a_mix_frame(struct SoundInfo *info, s8 *frame, int samples);
 
+// The output stage the two mixed buffers pass through: SOUNDCNT_H says at what
+// volume each of the direct-sound FIFOs reaches each side, and the game changes
+// it when the sound option is applied. In place, both buffers.
+void agb_m4a_apply_output_mix(s8 *a, s8 *b, int samples);
+
 // The reversed path, taken when the tone type has TONEDATA_TYPE_REV: the wave
 // is walked from its end towards its start, resampling as the forward pitched
 // path does. Covers the fixed-frequency variant too, as a step of exactly one

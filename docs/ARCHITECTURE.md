@@ -608,6 +608,16 @@ changing what compiles:
   sweep and reads 0 whenever it resumes — the wait can never end. Nothing is lost: the host reads the
   mixer's PCM buffer directly rather than through timer 0.
 
+The two buffers the mixer fills are **not a finished stereo pair**. Each feeds one of the two
+direct-sound FIFOs, and `SOUNDCNT_H` says at what volume each reaches each side —
+`agb_m4a_apply_output_mix` applies that before the PSG channels are added, since those carry their own
+ratio. It matters because the game changes the register: `m4aSoundInit` leaves both FIFOs at full
+volume and hard panned, and applying the sound option calls `SetPokemonCryStereo`, whose mono branch
+puts both on both sides at **half** volume. Ignoring it left the music at twice its intended level
+against the PSG channels — most of the interface's sounds — from the first menu onwards, while the
+intro, which plays before the option is applied, sounded right. Reported by ear, then confirmed by
+reading `SOUNDCNT_H` out of the reference at the same frame: `3302` in both.
+
 The link also needs two of upstream's linker-script absolutes, `gNumMusicPlayers = 4` and
 `gMaxLines = 0`. Keeping 1781 lines of sequencer as upstream C means it keeps receiving decomp fixes.
 

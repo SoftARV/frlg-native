@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "agb/m4a.h"
+#include "agb/memmap.h"
 
 // Attack, decay and release are per-frame multipliers in 8.8; the envelope is
 // a byte, so each step truncates.
@@ -685,6 +686,59 @@ int agb_deferred_named(const char *name);
 //
 // The frame's buffers are prepared first, then each channel steps its envelope
 // and is mixed by whichever path its tone type asks for.
+// What the two direct-sound FIFOs become at the output stage.
+//
+// The mixer produces a pair of buffers, and on hardware they are separate
+// sources: the first feeds FIFO A, the second FIFO B, and SOUNDCNT_H says at
+// what volume each reaches each side. The port used to hand them over as a
+// finished stereo pair, which is right only while both are at full volume and
+// panned hard -- the state m4aSoundInit leaves behind.
+//
+// The game does not stay there. Applying the sound option calls
+// SetPokemonCryStereo, and its mono branch puts both FIFOs on both sides at
+// *half* volume -- a mono downmix at unity gain. Ignoring those bits left the
+// music at twice its intended level against the PSG channels, which keep their
+// own ratio and are what most of the interface's sounds are made of. That is
+// audible as the music drowning the effects, and it starts the moment the
+// options are applied rather than in the intro.
+#define SOUND_A_MIX_FULL 0x0004
+#define SOUND_B_MIX_FULL 0x0008
+#define SOUND_A_RIGHT 0x0100
+#define SOUND_A_LEFT 0x0200
+#define SOUND_B_RIGHT 0x1000
+#define SOUND_B_LEFT 0x2000
+
+static s8 clamp8(int v)
+{
+    if (v > 127)
+        return 127;
+    if (v < -128)
+        return -128;
+    return (s8)v;
+}
+
+void agb_m4a_apply_output_mix(s8 *a, s8 *b, int samples)
+{
+    uint16_t mixing = *(const volatile uint16_t *)(agb_mem.io + REG_OFFSET_SOUNDCNT_H);
+    // Half is the value with the bit clear, so this is a shift rather than a
+    // multiply: full keeps the sample, half drops one bit.
+    int a_shift = (mixing & SOUND_A_MIX_FULL) ? 0 : 1;
+    int b_shift = (mixing & SOUND_B_MIX_FULL) ? 0 : 1;
+    int a_right = (mixing & SOUND_A_RIGHT) != 0;
+    int a_left = (mixing & SOUND_A_LEFT) != 0;
+    int b_right = (mixing & SOUND_B_RIGHT) != 0;
+    int b_left = (mixing & SOUND_B_LEFT) != 0;
+
+    for (int i = 0; i < samples; i++)
+    {
+        int from_a = a[i] >> a_shift;
+        int from_b = b[i] >> b_shift;
+
+        a[i] = clamp8((a_right ? from_a : 0) + (b_right ? from_b : 0));
+        b[i] = clamp8((a_left ? from_a : 0) + (b_left ? from_b : 0));
+    }
+}
+
 void agb_m4a_mix_frame(struct SoundInfo *info, s8 *frame, int samples)
 {
     struct SoundChannel *chan = info->chans;

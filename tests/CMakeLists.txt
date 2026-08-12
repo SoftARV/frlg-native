@@ -37,7 +37,8 @@ frlg_add_test(test_ppu_scanline_irq)
 # The PSG test names the hardware registers, which live in the vendor headers.
 target_compile_options(test_psg PRIVATE -iquote "${FRLG_VENDOR_DIR}/include")
 
-foreach(m4a_test test_m4a_envelope test_m4a_mix test_m4a_frame test_m4a_track)
+foreach(m4a_test test_m4a_envelope test_m4a_mix test_m4a_frame test_m4a_track
+                  test_m4a_output_mix)
     frlg_add_test("${m4a_test}")
     target_compile_options("${m4a_test}" PRIVATE -iquote "${FRLG_VENDOR_DIR}/include")
 endforeach()
