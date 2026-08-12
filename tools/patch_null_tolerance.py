@@ -100,6 +100,27 @@ EDITS = {
     # Freeing without clearing leaves the read on freed heap: mapped, garbage, and
     # read at most a frame or two. Nothing tests the pointer for null -- it is
     # assigned exactly twice, at its definition and at its allocation.
+    # A screen that caches a sprite and re-creates it destroys the old one first,
+    # and on the first visit there is no old one. The summary screen's marking
+    # sprite is the instance that turned up -- PokeSum_CreateMonMarkingsSprite
+    # destroys unconditionally, then null-checks what it creates -- but the shape
+    # belongs to the wrapper rather than to that screen, and 22 places call it.
+    #
+    # On hardware every step of it is a read or write through address zero plus a
+    # small offset: BIOS ROM, which reads as whatever the BIOS last prefetched and
+    # ignores writes. The tag that comes back frees nothing, and DestroySprite's
+    # write goes nowhere. Refusing a null sprite is the same nothing, done on
+    # purpose.
+    "sprite.c": [
+        (
+            "the destroy-and-free wrapper's null sprite",
+            re.compile(
+                r"(?P<keep>void DestroySpriteAndFreeResources\(struct Sprite \*sprite\)\n\{\n)"
+                r"    FreeSpriteTiles\(sprite\);"
+            ),
+            r"\g<keep>    if (sprite == ((void *)0))\n        return;\n\n    FreeSpriteTiles(sprite);",
+        ),
+    ],
     "battle_transition.c": [
         (
             "the battle transition's read through its freed state",
