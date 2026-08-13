@@ -444,6 +444,14 @@ to remember to keep; the fingerprint is the actual answer to "did I write this".
 Import costs 26 ms, so the cache buys almost no time. What it buys is not needing the player's ROM
 file to still exist, still be where it was, and still be readable, months later.
 
+**A launcher asks the game about itself.** One binary is one title, and it is the only thing that
+knows which ROM its manifest describes or whether that ROM has been imported — so the launcher does
+not carry a second copy of any of it. `--describe` prints `title`, `sha1`, `cache` and `imported`;
+`--import <rom>` imports without playing and prints `ok=yes` or `ok=no` with an `error=` a person can
+read. Both answer before a window, a device or a session is opened, because they are questions about
+the install rather than a run of the game. `key=value` lines, which a shell and a `GSubprocess` read
+equally well and which need no parser on either side.
+
 ### 5.4 Data the host cannot build
 
 `data/*.s` — event scripts, battle scripts, map data — **is never assembled, on any platform.**

@@ -374,6 +374,59 @@ static const char *cache_path(char *buf, size_t len)
 // kept, so the player's ROM is needed once and never again. It is not a copy of
 // their ROM -- every pointer in it has been rewritten to this build's own
 // addresses, so it will not run anywhere else (ADR 0006).
+// The launcher asks the game about itself rather than being told twice: one
+// binary is one title, and it is the only thing that knows which ROM its
+// manifest describes or whether that ROM has been imported yet. Plain
+// key=value, which a shell and a Vala GSubprocess read equally well.
+static int command_describe(void)
+{
+    char cache[512];
+    const char *cached = cache_path(cache, sizeof(cache));
+
+    printf("title=%s\n", FRLG_ROM_TITLE);
+    printf("sha1=%s\n", FRLG_ROM_SHA1);
+    printf("cache=%s\n", cached != NULL ? cached : "");
+    printf("imported=%s\n",
+           (cached != NULL && agb_cart_cache_load(cached, FRLG_ROM_SHA1) == 0) ? "yes" : "no");
+    return 0;
+}
+
+// Import without playing, so a launcher can do it with a progress spinner up
+// and know whether it worked before it offers to start anything.
+static int command_import(const char *path)
+{
+    char cache[512];
+    char saw[AGB_SHA1_TEXT];
+    const char *cached = cache_path(cache, sizeof(cache));
+    int err = agb_cart_import(path, FRLG_ROM_SHA1, saw);
+
+    if (err != AGB_CART_OK)
+    {
+        const char *name = err == AGB_CART_WRONG_GAME ? name_of_rom(saw) : NULL;
+
+        printf("ok=no\n");
+        if (err == AGB_CART_WRONG_SIZE)
+            printf("error=that file is not the right size for a Game Boy Advance ROM\n");
+        else if (err == AGB_CART_UNREADABLE)
+            printf("error=that file could not be read\n");
+        else if (name != NULL)
+            printf("error=that file is %s; this needs %s\n", name, FRLG_ROM_TITLE);
+        else
+            printf("error=that file is not %s\n", FRLG_ROM_TITLE);
+        printf("sha1=%s\n", saw);
+        return 3;
+    }
+
+    if (cached == NULL || agb_cart_cache_save(cached, FRLG_ROM_SHA1) != 0)
+    {
+        printf("ok=no\nerror=the imported game could not be saved\n");
+        return 4;
+    }
+
+    printf("ok=yes\ntitle=%s\ncache=%s\n", FRLG_ROM_TITLE, cached);
+    return 0;
+}
+
 static void load_cart(void)
 {
     const char *path = getenv("FRLG_ROM");
@@ -428,8 +481,23 @@ int main(int argc, char **argv)
     uint32_t last_frame = 0;
     unsigned stalled_ms = 0;
 
-    frame_limit = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 0;
     setvbuf(stdout, NULL, _IOLBF, 0);
+
+    // Answered before anything opens a window, a device or a session: these are
+    // questions about the install, not a run of the game.
+    if (argc > 1 && strcmp(argv[1], "--describe") == 0)
+        return command_describe();
+    if (argc > 1 && strcmp(argv[1], "--import") == 0)
+    {
+        if (argc < 3)
+        {
+            fprintf(stderr, "usage: %s --import <rom>\n", argv[0]);
+            return 2;
+        }
+        return command_import(argv[2]);
+    }
+
+    frame_limit = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 0;
 
     // Block the frame timer before anything else starts a thread. ITIMER_REAL
     // is delivered to any thread that has not blocked it, and threads inherit
