@@ -316,3 +316,49 @@ Before the fix it read 350 Hz on every one of them.
 throwing away everything above 6.7 kHz; this one needed a second, unrelated fix, and the two would have
 been impossible to separate by ear. Reading the effect's data out of the ROM — what instrument, what
 sweep, what notes — is what turned "sounds wrong" into a mechanism, and it costs a few minutes.
+
+## Effects under the music: one constant, not one sound
+
+Reported by ear as the flee effect being there but needing the volume turned up, and the music then
+being far too loud — with the guess that the fix was to bring the music down.
+
+Measuring which of the two was wrong needed a comparison that no scale factor between the two tools
+could explain, because there is one: our full mix reads 1.21× the reference's over the same content,
+and it is not obvious how much of that is ours. **A ratio taken inside one stream cancels it.** The
+port and the reference were both booted from the same flash image into the same map, and the start
+menu's cursor was walked eight times — `SE_SELECT` over the map's music, the same effect against the
+same track in both:
+
+| | music | effect above it |
+| --- | --- | --- |
+| mGBA | 1076 | **+9.9 dB** |
+| ours | 1403 | **+5.8 dB** |
+
+So the 4 dB is real. Which half was wrong then needed the two sides separated, on both engines —
+`FRLG_AUDIO_MUTE`, since `SOUNDCNT_L`'s enable bits leak. Over one 7.5-second window of the same map:
+
+| | full | PSG | direct | PSG/direct |
+| --- | --- | --- | --- | --- |
+| ours | 1290 | 371 | 1234 | −10.44 dB |
+| mGBA | 1124 | 551 | 980 | −5.00 dB |
+
+**The PSG side, not the music: 5.44 dB low, broadband** — every band from 300 Hz up sat 2–4 dB under,
+which is a gain and not a filter.
+
+Reading the two mixers settles what the number should be. mGBA's `GBAudioSamplePSG` shifts the sum of
+the four channels left by 3 and multiplies by `1 + volume` (up to 8); `GBAAudioSample` then shifts it
+right by `4 - ratio`, so at full settings the sum arrives ×16 — while a direct-sound sample arrives
+`(sample << 2)`, ×4. Ours arrived at ×2 against ×1: **exactly half, at all three ratio settings.**
+Predicted −5.96 dB against a measured −5.44.
+
+Dividing by `16 * VOICE_SCALE` instead of `32 * VOICE_SCALE` closes it: the balance error goes to
++0.58 dB and an effect stands 8.7 dB over the music against the reference's 9.3.
+
+**Why this is the whole of it.** 24 of the game's effects are noise bursts and 33 are squares, with or
+without a sweep — the flee, the exclamation bubble, the ledge hop, every menu blip. They were all
+under the music by the same 5.4 dB, for the same reason, and no per-sound work would have found it:
+each one measured against its own song looked plausible.
+
+**The trap:** absolute levels between the two tools are not comparable, and the temptation is to
+calibrate the difference away with a constant taken from a mix that music dominates — which is the
+very thing under test. Take ratios inside one stream, or split the mix with the same lever on both.
