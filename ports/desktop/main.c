@@ -491,7 +491,6 @@ int main(int argc, char **argv)
     if (trace_out != NULL)
         fclose(trace_out);
     host_audio_close();
-    host_video_close();
 
     printf("frlg-native: ran %u frames\n", frames_ran);
     if (agb_frame_watchdog_ticks() != 0)
@@ -523,8 +522,17 @@ int main(int argc, char **argv)
         {
             fprintf(stderr, "\nWhat happened was saved here:\n  %s\n", dir);
         }
+
+        // The window is what the player was looking at, so that is where they
+        // are told -- which is why it is still open here. Inert when there is
+        // no display: a headless run must never wait for an answer.
+        host_report_crash(crash_summary(), zip, FRLG_ISSUE_URL);
+
+        host_video_close();
         return 3;
     }
+
+    host_video_close();
 
     // Last, so the closing summary is in the log the session keeps.
     host_session_close();

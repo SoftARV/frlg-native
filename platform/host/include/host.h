@@ -45,4 +45,15 @@ void host_audio_submit(const int8_t *right, const int8_t *left, int samples);
 
 void host_log(const char *msg);
 
+// Tell the player the game stopped, and offer the few things they can usefully
+// do about it. `detail` is the one-line summary, `path` the report to hand over.
+// Returns what they chose, so the port can act on it; HOST_REPORT_QUIT when
+// there is no display to ask on, since a headless run must never block.
+#define HOST_REPORT_QUIT 0
+#define HOST_REPORT_FOLDER 1
+#define HOST_REPORT_COPY 2
+#define HOST_REPORT_ISSUES 3
+
+int host_report_crash(const char *detail, const char *path, const char *issues_url);
+
 #endif // GUARD_HOST_H

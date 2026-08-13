@@ -57,3 +57,13 @@ void host_audio_submit(const int8_t *right, const int8_t *left, int samples)
     (void)left;
     (void)samples;
 }
+
+// Nothing to ask on, and a headless run must never wait for an answer -- a CI
+// job that stops on a dialog looks exactly like one that hung.
+int host_report_crash(const char *detail, const char *path, const char *issues_url)
+{
+    (void)detail;
+    (void)path;
+    (void)issues_url;
+    return HOST_REPORT_QUIT;
+}

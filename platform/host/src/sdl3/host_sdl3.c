@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include <stdio.h>
+#include <string.h>
 
 #include "host.h"
 
@@ -312,4 +313,71 @@ void host_audio_submit(const int8_t *right, const int8_t *left, int samples)
     }
 
     SDL_PutAudioStreamData(audio, frame, samples * 2);
+}
+
+// The player is looking at the window, not at a terminal they may never have
+// opened. A native message box rather than something drawn in the window: the
+// renderer's state after a fault is not something to rely on, and this needs no
+// font, no layout and no new dependency to be legible on every platform SDL
+// covers.
+//
+// The buttons are the only three useful things a person can do with a report --
+// find it, name it, or go where it belongs. Deliberately no "send": that would
+// make this a service rather than a file (ADR 0016).
+int host_report_crash(const char *detail, const char *path, const char *issues_url)
+{
+    SDL_MessageBoxButtonData buttons[] = {
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, HOST_REPORT_FOLDER, "Show the report"},
+        {0, HOST_REPORT_COPY, "Copy its location"},
+        {0, HOST_REPORT_ISSUES, "Report it"},
+        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, HOST_REPORT_QUIT, "Close"},
+    };
+    SDL_MessageBoxData box;
+    char body[1024];
+    int chosen = HOST_REPORT_QUIT;
+
+    snprintf(body, sizeof(body),
+             "The game hit a bug and stopped. This is the port's fault, not "
+             "anything you did, and nothing is lost but this session.\n\n"
+             "%s\n\n"
+             "A report was saved:\n%s\n\n"
+             "It holds what you pressed, your save as it was when this run began, "
+             "everything the game printed, and where it stopped. Attaching it to "
+             "an issue is enough to reproduce and fix this.",
+             detail != NULL ? detail : "", path != NULL ? path : "(none)");
+
+    SDL_zero(box);
+    box.flags = SDL_MESSAGEBOX_ERROR;
+    box.window = window;
+    box.title = "frlg-native stopped";
+    box.message = body;
+    box.numbuttons = path != NULL ? 4 : 1;
+    // With no report to point at, the only honest button is the one that closes.
+    box.buttons = path != NULL ? buttons : &buttons[3];
+
+    if (!SDL_ShowMessageBox(&box, &chosen))
+        return HOST_REPORT_QUIT;
+
+    if (chosen == HOST_REPORT_COPY && path != NULL)
+    {
+        SDL_SetClipboardText(path);
+    }
+    else if (chosen == HOST_REPORT_FOLDER && path != NULL)
+    {
+        char url[1024];
+        char *cut;
+
+        // The folder, not the file: a file manager opened on a directory is
+        // where somebody can drag the zip from.
+        snprintf(url, sizeof(url), "file://%s", path);
+        cut = strrchr(url, '/');
+        if (cut != NULL)
+            *cut = '\0';
+        SDL_OpenURL(url);
+    }
+    else if (chosen == HOST_REPORT_ISSUES && issues_url != NULL)
+    {
+        SDL_OpenURL(issues_url);
+    }
+    return chosen;
 }
