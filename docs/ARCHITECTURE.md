@@ -331,6 +331,13 @@ relocation entries, and the native symbol table the patch pass needs.
 
 It contains no ROM bytes, no graphics, no dialogue, no audio samples.
 
+The generators read that build's **layout** from its ELF rather than assuming one: executable
+sections are code, allocated non-executable sections hold data, and `tools/elfsections.py` is where
+both rules live so the two generators cannot disagree about them. Hardcoding either — where `.text`
+ends, or which `.rel*` sections to read — encodes the modern layout, and the matching build differs
+in both: `lib_text` sits above `script_data`, and the music has its own `song_data` with its own
+relocation section ([spike 0001, finding 4](spikes/0001-relocation-table.md)).
+
 **The manifest must be generated from the byte-matching build**, which needs `agbcc`. Addresses
 from the `MODERN=1` build describe a different layout — `ld_script.ld` pins object placement in 512
 explicit entries to reproduce retail, while `ld_script_modern.ld` is wildcards, and a modern-GCC

@@ -30,20 +30,6 @@ if(NOT EXISTS "${sym}")
     message(FATAL_ERROR "Missing ${sym}. Run: ${rom_make}")
 endif()
 
-# Where .text ends decides whether a symbol is code (stub) or ROM data (bind to
-# the cart). It is layout-specific, so it is read from the ELF rather than
-# hardcoded -- see docs/spikes/0001-relocation-table.md.
-execute_process(
-    COMMAND arm-none-eabi-readelf -SW "${rom_elf}"
-    OUTPUT_VARIABLE readelf_out ERROR_QUIET)
-string(REGEX MATCH "script_data[ \t]+PROGBITS[ \t]+([0-9a-f]+)" _m "${readelf_out}")
-if(CMAKE_MATCH_1)
-    set(text_end "0x${CMAKE_MATCH_1}")
-else()
-    message(FATAL_ERROR "could not read script_data base from the ROM ELF")
-endif()
-message(STATUS "frlg-native: .text ends at ${text_end}")
-
 # The ROM's data holds the addresses the original build gave its own code and
 # RAM, so each is rewritten once when the image is loaded. The table naming them
 # is generated from the same build the bindings come from -- it has to be, since
@@ -102,7 +88,7 @@ add_custom_command(
     COMMAND "${CMAKE_COMMAND}" -E env python3
             "${CMAKE_SOURCE_DIR}/tools/gen_symbol_bindings.py"
             "${sym}" "${CMAKE_CURRENT_BINARY_DIR}/missing.txt"
-            -o "${bindings}" --text-end "${text_end}" --driver --report
+            -o "${bindings}" --elf "${rom_elf}" --driver --report
             --stub-source "${CMAKE_CURRENT_BINARY_DIR}/agb_stubs.c"
             --soft-list "${CMAKE_CURRENT_BINARY_DIR}/deferred.txt"
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"

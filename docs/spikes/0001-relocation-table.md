@@ -92,3 +92,43 @@ it. It has been built and installed, and the matching build verified.
   plus a native symbol table, and must come from the matching build.
 - `ROADMAP.md`: the "agbcc is not on the critical path" assessment was wrong and is corrected.
 - Nothing here blocks Phases 1–6, which use the developer data path.
+
+## Finding 4: the generators have to read that build's layout too
+
+Added 14 Aug 2026, when the matching manifest was first built and run.
+
+Finding 2 says the manifest must come from the matching build. What it does not say is that the
+tools generating it carried the *modern* layout as an assumption, in two places, and neither failed
+loudly.
+
+**Where code ends is not a number.** Both generators classified an address as code by testing it
+against a single `.text` end. The matching build puts the library routines in their own `lib_text`
+section which sits **above** `script_data`, so every symbol in it was filed as ROM data and bound
+into the cart image. The game called one before the first frame -- `rfu_setTimerInterrupt`, from
+`InitRFU` -- and jumped into its own data:
+
+```
+agb_cart+0x1e07d0  [0x8c88830]
+InitRFU+0x2f
+AgbMain+0x67
+```
+
+`0x081e07d0` is inside `lib_text` (`081dbd34`–`081e9f10`). 57 symbols were misfiled this way.
+
+**Which sections hold pointers is not a list either.** `gen_relocations.py` named the relocation
+sections it would read: `.rel.data`, `.rel.rodata`, `.relscript_data`. The matching build keeps the
+music in `song_data`, with its own `.relsong_data`, and `lib_rodata` with `.rellib_rodata` — neither
+of which that list mentions. Every pointer the sequencer follows stayed a cartridge address, and the
+result was a game that **rendered perfectly and made almost no sound**: 90 non-silent frames against
+2,178. It is the quietest possible failure, and nothing crashed.
+
+Both are now read from the ELF's own section flags, in `tools/elfsections.py`, shared so the two
+generators cannot disagree: executable sections are code, allocated non-executable ones hold data.
+Relocations went from 49,552 to **54,128** once the music was included.
+
+**What this says about the phase.** The port has read modern-built ROM data for six phases, and it
+was right every time — against a layout no player has. Both defects were invisible until the
+matching manifest was actually run, one loud and one silent, and only the loud one would have been
+found by booting the game. **The check that mattered was replaying a trace and comparing the audio
+stream byte for byte** against the dev build; 48,380,416 bytes, identical, is what says the data is
+being read correctly rather than merely plausibly.

@@ -38,23 +38,12 @@ import struct
 import subprocess
 import sys
 
-ROM_BASE = 0x08000000
-DATA_SECTIONS = {".rel.data", ".rel.rodata", ".relscript_data"}
+import elfsections
 
+ROM_BASE = 0x08000000
 # Symbol names that are really section names: a relocation against one of these
 # carries an offset rather than naming what it points at.
 SECTION_SYMBOLS = {".text", ".data", ".rodata", "script_data", "ewram", "iwram"}
-
-
-def read_sections(elf, readelf):
-    """Section name -> (address, size), for classifying targets."""
-    out = subprocess.run([readelf, "-SW", elf], capture_output=True, text=True, check=True).stdout
-    sections = {}
-    for line in out.splitlines():
-        m = re.match(r"\s*\[\s*\d+\]\s+(\S+)\s+\S+\s+([0-9a-f]{8})\s+[0-9a-f]+\s+([0-9a-f]+)", line)
-        if m:
-            sections[m.group(1)] = (int(m.group(2), 16), int(m.group(3), 16))
-    return sections
 
 
 def read_global_symbols(elf, readelf):
@@ -68,7 +57,7 @@ def read_global_symbols(elf, readelf):
     return names
 
 
-def read_relocations(elf, readelf):
+def read_relocations(elf, readelf, data_sections):
     out = subprocess.run([readelf, "-rW", elf], capture_output=True, text=True, check=True).stdout
     section = None
     for line in out.splitlines():
@@ -76,7 +65,7 @@ def read_relocations(elf, readelf):
         if m:
             section = m.group(1)
             continue
-        if section not in DATA_SECTIONS:
+        if section not in data_sections:
             continue
         f = line.split()
         if len(f) < 4 or not re.fullmatch(r"[0-9a-f]{8}", f[0]):
@@ -94,17 +83,22 @@ def main():
     args = ap.parse_args()
 
     rom = open(args.rom, "rb").read()
-    sections = read_sections(args.elf, args.readelf)
+    sections = elfsections.read_sections(args.elf, args.readelf)
     if ".text" not in sections:
         sys.exit("gen_relocations: no .text section; is this the linked ELF?")
-    text_start, text_size = sections[".text"]
-    text_end = text_start + text_size
+    text = elfsections.code_ranges(sections)
+    data_sections = elfsections.data_relocation_sections(sections)
+    if not data_sections:
+        sys.exit("gen_relocations: no data relocation sections; was --emit-relocs used?")
     rom_end = ROM_BASE + len(rom)
+
+    def is_code(addr):
+        return elfsections.is_code(text, addr)
 
     ram_ranges = []
     for name in ("ewram", "iwram"):
         if name in sections:
-            base, size = sections[name]
+            base, size, _ = sections[name]
             ram_ranges.append((base, base + size))
 
     global_names = read_global_symbols(args.elf, args.readelf)
@@ -115,7 +109,7 @@ def main():
     symbol_records = []   # (offset, symbol, addend)
     interior = local = wrong_width = 0
 
-    for offset, kind, symval, name in read_relocations(args.elf, args.readelf):
+    for offset, kind, symval, name in read_relocations(args.elf, args.readelf, data_sections):
         site = offset - ROM_BASE
         if not (0 <= site <= len(rom) - 4):
             sys.exit(f"gen_relocations: relocation at {offset:#x} falls outside the ROM")
@@ -136,7 +130,7 @@ def main():
                 local += 1
                 continue
             symbol_records.append((site, name, word - symval))
-        elif text_start <= (word & ~1) < text_end:
+        elif is_code(word & ~1):
             if name in SECTION_SYMBOLS:
                 interior += 1
                 continue
@@ -145,7 +139,7 @@ def main():
                 continue
             # Thumb function pointers carry bit 0; native addresses do not.
             symbol_records.append((site, name, 0))
-        elif text_end <= word < rom_end:
+        elif ROM_BASE <= word < rom_end:
             # ROM data. If the target has a name, use ours of that name rather
             # than the copy in the cart -- and it comes to the same thing for
             # data only the ROM has, because those symbols are bound into the

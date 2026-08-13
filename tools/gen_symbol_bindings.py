@@ -12,6 +12,8 @@ which expands @files itself and does not understand --defsym.
 import argparse
 import sys
 
+import elfsections
+
 CART_BASE = 0x08000000
 EWRAM_BASE = 0x02000000
 IWRAM_BASE = 0x03000000
@@ -45,7 +47,9 @@ def main():
     ap.add_argument("symfile")
     ap.add_argument("wanted", help="newline-separated symbols to bind")
     ap.add_argument("-o", "--output", required=True)
-    ap.add_argument("--text-end", required=True, help="end of .text, hex")
+    ap.add_argument("--elf", required=True,
+                    help="the ROM build's linked ELF, which says where code lives")
+    ap.add_argument("--readelf", default="arm-none-eabi-readelf")
     ap.add_argument("--driver", action="store_true")
     ap.add_argument("--stub-source",
                     help="write one named stub per unimplemented routine here")
@@ -60,7 +64,10 @@ def main():
     ap.add_argument("--report", action="store_true")
     args = ap.parse_args()
 
-    text_end = int(args.text_end, 16)
+    # Not a single threshold: see tools/elfsections.py for the layout that broke.
+    text = elfsections.code_ranges(elfsections.read_sections(args.elf, args.readelf))
+    if not text:
+        sys.exit("gen_symbol_bindings: no executable sections; is this the linked ELF?")
     syms = read_syms(args.symfile)
     with open(args.wanted) as fh:
         wanted = [w.strip() for w in fh if w.strip()]
@@ -79,13 +86,13 @@ def main():
         elif IWRAM_BASE <= addr < IWRAM_BASE + IWRAM_SIZE:
             target = f"agb_mem+0x{IWRAM_OFF + addr - IWRAM_BASE:X}"
             tally["iwram"] += 1
-        elif CART_BASE <= addr < text_end:
+        elif elfsections.is_code(text, addr):
             # A named stub per routine, so a diagnostic says which one was hit
             # rather than pointing every gap at one shared address.
             stubs.append(name)
             tally["stub"] += 1
             continue
-        elif addr >= text_end:
+        elif addr >= CART_BASE:
             target = f"agb_cart+0x{addr - CART_BASE:X}"
             tally["cart"] += 1
         else:
