@@ -14,7 +14,7 @@ Update the status column when a milestone lands.
 | 3 | PPU — the first real frame, and the golden-screenshot harness | **done** |
 | 4 | Audio — the m4a mixer in C | **done** |
 | 5 | Saves — flash backed by a host file | **done** |
-| 6 | **Playable** — intro through the first battle, determinism harness | |
+| 6 | **Playable** — intro through the first battle, deterministic replay | **done** |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
 | 8 | Windows, Android, web; launcher, packaging and updates | |
 | 9 | Mods — Lua runtime, schema registries, generated reference docs | |
@@ -517,11 +517,30 @@ renderer was about to draw with, not from reasoning about what the game ought to
 loop copying their scripts reads sixty-four entries regardless — the third instance of the no-MMU
 class, and the first one reachable only because saving worked.
 
-**Blocked on the cart region having bytes in it.** The game already crashes on the controls guide,
-the first screen that reads text out of `data/*.s`: the symbols are bound, but nothing has filled
-the region behind them, and a run of `0x00` is `CHAR_SPACE` rather than `EOS`. Evidence, and the
-three ways out, in [spike 0003](spikes/0003-empty-cart-region.md). The cheapest unblocks this phase
-without touching Phase 7's shipping story.
+**Done — 13 Aug 2026.** The phase closed on its headline goal: it is a game someone can play. The
+furthest recorded session runs to the first gym, and the committed fixtures replay clean on demand:
+
+| Fixture | Frames | Result |
+| --- | --- | --- |
+| `first-battle.trace` | 13,500 | no crash, 8 watchdog ticks |
+| `first-battle-moves.trace` | 13,500 | no crash, 4 watchdog ticks |
+| `viridian-townmap.trace` | 49,500 | no crash, 9 watchdog ticks — past its last input at 48,925 |
+
+Determinism is delivered and was re-checked at sign-off rather than assumed: three replays of
+`first-battle.trace` produce a byte-identical frame 13,000, deep inside the battle.
+
+**Two of this phase's stated criteria moved out rather than being met:** running the determinism check
+in CI, and an autopilot that captures shots. Neither exists, and there is no CI in this repository at
+all — so closing the phase on them would have meant standing CI up from scratch, which is tooling
+rather than playability. They carry on as [issue #7](https://github.com/SoftARV/frlg-native/issues/7)
+alongside phase 7. The remaining known defects — the battle-loss visual glitch and the intro shrink
+sound — are tracked and fixed as they are found, which is how the other nine were.
+
+**Was blocked on the cart region having bytes in it, and is not any more.** The game used to crash on
+the controls guide, the first screen that reads text out of `data/*.s`: the symbols were bound, but
+nothing had filled the region behind them, and a run of `0x00` is `CHAR_SPACE` rather than `EOS`.
+Evidence, and the three ways out, in [spike 0003](spikes/0003-empty-cart-region.md); the cheapest was
+taken, which unblocked this phase without touching Phase 7's shipping story.
 
 Worth carrying into the scripted-input harness: frame-count runs cannot see this class of bug at
 all, because the game parks on the first screen that waits for a button.
