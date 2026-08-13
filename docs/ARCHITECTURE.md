@@ -875,6 +875,30 @@ on `stderr`, and half a log reads as though half the run is missing. Each keeps 
 thread so the terminal still behaves, and `stderr` is made unbuffered so a crash cannot strand the
 last few lines — the ones that matter — in a buffer nothing will flush.
 
+**A fault becomes a report rather than an exit.** `crash.c` catches `SIGSEGV`, `SIGBUS`, `SIGILL`,
+`SIGFPE` and `SIGABRT` on the game thread, and the whole design is one rule: a signal handler may call
+almost nothing, so it does almost nothing. Inside it, only what cannot be deferred — the fault
+address, the frame number, and a backtrace of the stack about to be unwound — written with raw `write`
+to a descriptor opened at startup, formatted by hand because `snprintf` is not async-signal-safe.
+
+Then it leaves through `agb_frame_abort`, which is `siglongjmp` to the same exit point the frame limit
+and the stop request use, as code 4. `agb_frame_run` returns normally, on a stack nothing damaged, and
+everything unsafe — the zip, the message, the exit code — happens there. Nothing resumes: the jump
+ends the run rather than surviving it. Three details make it work on real faults rather than tidy ones:
+a `sigaltstack`, so a stack overflow still has room to report; a warm-up `backtrace` call at startup,
+because glibc loads its unwinder on first use; and a re-entry flag, so a fault *while reporting* exits
+instead of looping.
+
+The report says what happened in a sentence, not a hex number. A fault address below `0x4000` is the
+GBA's BIOS region, which is the no-MMU class this port keeps finding — nine for nine so far — so the
+report says the game read through a pointer that was never set, and that hardware would have tolerated
+it. `FRLG_CRASH_TEST=segv|bus|abort` faults on purpose at `FRLG_CRASH_FRAME`, because a recovery path
+nobody can trigger is a recovery path nobody has tested.
+
+`host_session_bundle` packs the session into `report.zip` — stored entries, a hand-written central
+directory, no compression and no dependency, since Android and web would have to carry it too. One
+file, because a folder arrives as three attachments and the missing one is always the save.
+
 **The oracle takes input.** `mgba-capture` replays the port's own trace format, shifted by the +38
 frame boot offset, so a frame that can only be reached by playing can still be compared against the
 reference. That is what made [spike 0008](spikes/0008-missing-trainer-pics.md) investigable at all.

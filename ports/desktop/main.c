@@ -33,6 +33,11 @@
 #include "host.h"
 #include "host_session.h"
 
+#include "crash.h"
+
+// Where a report goes. The template asks for exactly what the bundle holds.
+#define FRLG_ISSUE_URL "https://github.com/SoftARV/frlg-native/issues/new?template=crash-or-glitch.yml"
+
 #define SCREEN_W 240
 #define SCREEN_H 160
 #define REG_OFF_KEYINPUT 0x130
@@ -44,10 +49,15 @@ static uint32_t frames_ran;
 static uint32_t frame_limit;
 static uint32_t framebuffer[SCREEN_W * SCREEN_H];
 
+// SIGUSR1 asks a running game where it is, which is how a hang is inspected
+// without stopping it. Faults are caught in crash.c, which has to do rather
+// more than print.
 static void dump_backtrace(int sig)
 {
     const char msg[] = "\nfrlg-native: game thread backtrace\n";
     ssize_t ignored = write(2, msg, sizeof(msg) - 1);
+
+    (void)sig;
     (void)ignored;
 
 #if defined(__GLIBC__)
@@ -55,8 +65,6 @@ static void dump_backtrace(int sig)
     int n = backtrace(frames, 24);
     backtrace_symbols_fd(frames, n, 2);
 #endif
-    if (sig != SIGUSR1)
-        _exit(3);
 }
 
 static void *game_thread(void *arg)
@@ -73,8 +81,7 @@ static void *game_thread(void *arg)
     pthread_sigmask(SIG_UNBLOCK, &allow, NULL);
 
     signal(SIGUSR1, dump_backtrace);
-    signal(SIGSEGV, dump_backtrace);
-    signal(SIGBUS, dump_backtrace);
+    crash_install();
 
     frames_ran = agb_frame_run(AgbMain, frame_limit);
     game_done = 1;
@@ -221,12 +228,15 @@ static uint16_t replay_keys(uint32_t frame)
         trace_keys = trace[trace_pos++].keys;
 
     shot_range(frame);
+    crash_test_tick(frame);
     return trace_keys;
 }
 
 static uint16_t record_keys(uint32_t frame)
 {
     uint16_t keys = host_input_keys();
+
+    crash_test_tick(frame);
 
     if (keys != trace_last_written)
     {
@@ -489,6 +499,32 @@ int main(int argc, char **argv)
                agb_frame_watchdog_ticks());
     printf("frlg-native: audio %u frames, %u non-silent, peak %d\n",
            audio_frames, audio_loud_frames, audio_peak);
+
+    // The report is assembled after the log is closed, so the log inside it is
+    // complete -- including the lines the crash itself wrote.
+    if (crash_happened())
+    {
+        const char *dir = host_session_dir();
+        const char *zip;
+
+        printf("\nfrlg-native: the game stopped because of a bug -- %s\n",
+               crash_summary());
+        host_session_close();
+        zip = host_session_bundle();
+
+        if (zip != NULL)
+        {
+            fprintf(stderr, "\nEverything needed to reproduce it is in one file:\n  %s\n", zip);
+            fprintf(stderr, "\nIt holds what you pressed, your save as it was when this run\n"
+                            "began, everything printed, and where the game stopped.\n");
+            fprintf(stderr, "\nPlease attach it to an issue:\n  %s\n", FRLG_ISSUE_URL);
+        }
+        else if (dir != NULL)
+        {
+            fprintf(stderr, "\nWhat happened was saved here:\n  %s\n", dir);
+        }
+        return 3;
+    }
 
     // Last, so the closing summary is in the log the session keeps.
     host_session_close();

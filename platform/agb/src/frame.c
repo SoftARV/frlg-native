@@ -57,6 +57,21 @@ void agb_frame_stop(void)
     agb_stopping = 1;
 }
 
+// A fault in game code leaves the port with a live process and a dead game. The
+// handler that catches it can do almost nothing safely -- so it does almost
+// nothing, and leaves through the same non-local jump the frame limit and the
+// stop request use. What comes out the other side is an ordinary return from
+// agb_frame_run, on a stack that was never damaged, where a port can write a
+// report and tell somebody.
+//
+// Nothing resumes afterwards: the game's own state is whatever the fault left.
+// The jump is to end the run, not to survive it.
+void agb_frame_abort(void)
+{
+    if (agb_running)
+        siglongjmp(agb_exit_point, 4);
+}
+
 void agb_frame_set_lockstep(int on)
 {
     agb_lockstep = on;

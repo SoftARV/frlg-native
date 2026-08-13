@@ -36,6 +36,11 @@ void host_session_keep(const char *path, const char *name);
 // no session is recording.
 void host_session_capture_log(void);
 
+// Packs everything the session collected into one zip inside it, and returns
+// its path -- what a person attaches to an issue, instead of four files they
+// have to find and one they forget. NULL if there is nothing to pack.
+const char *host_session_bundle(void);
+
 void host_session_close(void);
 
 #endif // GUARD_HOST_SESSION_H

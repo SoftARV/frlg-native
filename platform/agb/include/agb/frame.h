@@ -16,6 +16,11 @@ uint32_t agb_frame_count(void);
 // be joined.
 void agb_frame_stop(void);
 
+// Leave the run because game code faulted. Called from a signal handler, so it
+// does one thing: the non-local jump back to agb_frame_run, which then returns
+// normally. Inert before the run starts, where there is nothing to jump to.
+void agb_frame_abort(void);
+
 // Where the key register's contents come from, if not from a keyboard.
 //
 // A replayed run has to be deterministic, and reading a keyboard from the

@@ -89,7 +89,7 @@ add_custom_target(frlg_bindings DEPENDS "${bindings}")
 set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/agb_stubs.c"
     PROPERTIES GENERATED TRUE)
 
-add_executable(frlg-native main.c "${CMAKE_CURRENT_BINARY_DIR}/agb_stubs.c")
+add_executable(frlg-native main.c crash.c "${CMAKE_CURRENT_BINARY_DIR}/agb_stubs.c")
 add_dependencies(frlg-native frlg_bindings)
 
 target_link_libraries(frlg-native PRIVATE
