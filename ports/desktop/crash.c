@@ -135,6 +135,9 @@ static void on_fault(int sig, siginfo_t *info, void *context)
     caught_address = (unsigned long)(uintptr_t)(info != NULL ? info->si_addr : NULL);
     caught_frame = agb_frame_count();
 
+    if (report_fd < 0 && report_path[0] != '\0')
+        report_fd = open(report_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
     if (report_fd >= 0)
     {
         emit("frlg-native crash report\n\nsignal:  ");
@@ -198,8 +201,11 @@ void crash_install(void)
     alt.ss_flags = 0;
     sigaltstack(&alt, NULL);
 
-    if (host_session_file("crash.txt", report_path, sizeof(report_path)) != NULL)
-        report_fd = open(report_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    // The path now, the file only if it is ever needed. Opening it here left an
+    // empty crash.txt in every session, which reads as a crash that did not
+    // happen -- and would have been packed into every report. `open` is on the
+    // list of calls a handler may make, so this loses nothing.
+    (void)host_session_file("crash.txt", report_path, sizeof(report_path));
 
     // glibc's backtrace loads its unwinder on first use, which is a thing to do
     // before the handler needs it rather than inside one.
