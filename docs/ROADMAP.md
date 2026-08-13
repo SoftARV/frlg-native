@@ -567,6 +567,19 @@ What stays here is the shipping half: a *retail* cartridge rather than the devel
 means regenerating the manifest, the bindings and the relocation table together from the
 byte-matching build, plus SHA-1 verification, caching and the first-boot flow.
 
+**The manifest now generates from the matching build, and the port runs on it.** `FRLG_GAME_DATA=dev`
+keeps the modern build six phases of work were done against; `=retail` points every generator at the
+byte-matching one. Getting there cost two defects, both of them the modern layout hardcoded as an
+assumption, and one of them silent — a game that rendered perfectly and made almost no sound
+([spike 0001, finding 4](spikes/0001-relocation-table.md)).
+
+Verified the way it has to be verified: frames pixel-identical between the two builds, 48,380,416
+bytes of audio identical byte for byte over a battle trace, and the 13½-minute play-through replaying
+to the same frame count with the same watchdog ticks.
+
+Still to come: SHA-1 verification against the supported revisions, the cache, and the first-boot flow
+— which belongs to the launcher, since that is what owns import and launch.
+
 Ends with a binary containing no game data. Until this lands, nothing can be distributed to anyone.
 
 ## Phase 8 — It travels
