@@ -849,7 +849,10 @@ reference. That is what made [spike 0008](spikes/0008-missing-trainer-pics.md) i
 **Sound has an oracle too.** `tools/mgba_audio.c` captures PCM from mGBA running the same ROM, and
 `FRLG_PCM=<path>` makes the port dump the same format — measured before the device is considered, so
 it needs no sound hardware. Between them a tune can be compared rather than described.
-[Spike 0007](spikes/0007-audio-against-mgba.md) is the first such comparison: the per-second level
+Both tools take `FRLG_INPUT` and `FRLG_SAV`, so the reference can be driven to the same place in the
+game as the port rather than only through the intro — the port's flash image is the 128K layout mGBA
+expects, and it must be handed over as a writable copy or the reference loses its save memory a few
+seconds in. [Spike 0007](spikes/0007-audio-against-mgba.md) is the first such comparison: the per-second level
 tracks mGBA's across the whole intro, which says the right notes are playing at the right times, and
 the one clear spectral difference turned out to come from the direct-sound path rather than from the
 PSG that was suspected.
@@ -872,6 +875,22 @@ swinging symmetrically about zero instead would leave one eighth duty sitting at
 the volume, and since the duty changes from note to note that offset moves — a thump under the tune,
 spending the headroom the melody needs. It measured as exactly that
 ([spike 0007](spikes/0007-audio-against-mgba.md)).
+
+How loud these are against the sampled channels is one constant, and it is load-bearing. A channel's
+DAC spans sixteen steps, so at full volume it swings ±7.5 about its mean; the reference reaches its
+mixer with that times sixteen at full settings, while a direct-sound sample arrives times four. In
+the buffer the two share, where one FIFO at full volume reaches 127, that puts one channel at 30 and
+all four together at 120 — and the two lower settings of `SOUNDCNT_H`'s mixing ratio halve it and
+halve it again. Carrying half that left every square, sweep and noise burst **5.4 dB under the
+music**, measured the same way in both engines, which is most of the game's sound effects buried
+under the track they play against. Reported by ear as effects that needed the volume turned up,
+then measured; `tests/test_psg.c` pins all three ratio settings.
+
+Weighing one side against the other needs the other out of the way, on both sides of the comparison:
+`FRLG_AUDIO_MUTE=direct` silences the two FIFOs and `=psg` the hardware channels, and `mgba-audio`
+takes the same word for the reference. Muting through `SOUNDCNT_L`'s enable bits instead leaks — the
+sequencer rewrites them as channels come and go, and a soloed square then changes when only the noise
+code does.
 
 Two deliberate departures. Sampling happens at the **software mixer's rate** rather than the
 hardware's, because the result is added to that mixer's buffer; point-sampling a square is not what

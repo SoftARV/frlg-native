@@ -288,6 +288,41 @@ static int energy(const int8_t *buf, int n)
     return (int)(sum / n);
 }
 
+// How loud the hardware channels are against the sampled ones is a single
+// constant, and getting it wrong is not audible as a wrong number -- it is
+// audible as sound effects that cannot be heard over the music, since almost
+// every effect in the game is a square or a noise burst and almost all of the
+// music is sampled.
+//
+// The scale: a channel's DAC spans sixteen steps, so at full volume it swings
+// +/-7.5 about its mean. mGBA reaches the mixer with that times sixteen at full
+// settings while a direct-sound sample arrives times four, which puts one
+// channel at 30 in a buffer where one FIFO at full volume reaches 127 -- and all
+// four together at 120, near enough the same. The two lower settings of the
+// mixing ratio halve it and halve it again.
+static void test_one_channel_against_full_scale(void)
+{
+    static const struct { uint16_t ratio; int expect; } steps[] = {
+        {0x0002, 30}, {0x0001, 15}, {0x0000, 7},
+    };
+
+    for (unsigned i = 0; i < sizeof(steps) / sizeof(steps[0]); i++)
+    {
+        int swing;
+
+        reset("a channel at full volume reaches its share of full scale");
+        put(REG_OFFSET_SOUNDCNT_H, steps[i].ratio);
+        put(REG_OFFSET_SOUND1CNT_H, 0xF080);          // volume 15, half duty
+        put(REG_OFFSET_SOUND1CNT_X, 0x8000 | TONE);
+        agb_psg_mix(right, left, FRAME, RATE);
+
+        swing = span(right, FRAME);
+        CHECK(swing >= 2 * steps[i].expect - 2 && swing <= 2 * steps[i].expect,
+              "ratio %04X: swing %d, wanted about %d", steps[i].ratio, swing,
+              2 * steps[i].expect);
+    }
+}
+
 static void test_a_square_below_nyquist_keeps_its_swing(void)
 {
     reset("a square below the mix rate is untouched");
@@ -408,6 +443,7 @@ int main(void)
     test_noise_channel();
     test_master_controls();
     test_adds_to_existing();
+    test_one_channel_against_full_scale();
     test_a_square_below_nyquist_keeps_its_swing();
     test_a_square_above_nyquist_does_not_alias();
     test_noise_above_nyquist_averages_down();
