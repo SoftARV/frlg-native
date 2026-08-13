@@ -10,6 +10,7 @@
 //
 // usage: mgba-audio ROM OUT.raw FRAMES [RATE]
 
+#include <fcntl.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -20,6 +21,7 @@
 #include <mgba/core/config.h>
 #include <mgba/core/blip_buf.h>
 #include <mgba/core/log.h>
+#include <mgba-util/vfs.h>
 
 static void quiet_log(struct mLogger* logger, int category, enum mLogLevel level,
                       const char* format, va_list args)
@@ -30,6 +32,53 @@ static void quiet_log(struct mLogger* logger, int category, enum mLogLevel level
 static struct mLogger silent = {.log = quiet_log};
 
 #define CHUNK 4096
+
+
+// FRLG_INPUT replays the port's own input trace here too, shifted by the boot
+// offset, so a sound that needs a button press can be compared and not only the
+// intro. The trace holds active-low masks, the way the key register reads; mGBA
+// wants the pressed bits, so they are inverted on the way in.
+#define TRACE_MAX 65536
+
+static struct
+{
+    unsigned frame;
+    unsigned keys;
+} trace[TRACE_MAX];
+
+static unsigned trace_count;
+
+static void load_trace(void)
+{
+    const char* path = getenv("FRLG_INPUT");
+    FILE* fh;
+    char line[128];
+
+    if (!path)
+        return;
+
+    fh = fopen(path, "r");
+    if (!fh)
+    {
+        fprintf(stderr, "mgba-audio: cannot read %s\n", path);
+        return;
+    }
+
+    while (trace_count < TRACE_MAX && fgets(line, sizeof(line), fh))
+    {
+        unsigned frame, keys;
+
+        if (line[0] == '#' || line[0] == '\n')
+            continue;
+        if (sscanf(line, "%u %x", &frame, &keys) != 2)
+            continue;
+        trace[trace_count].frame = frame;
+        trace[trace_count].keys = (~keys) & 0x3FF;
+        trace_count++;
+    }
+    fclose(fh);
+    fprintf(stderr, "mgba-audio: replaying %u input events\n", trace_count);
+}
 
 int main(int argc, char** argv)
 {
@@ -50,6 +99,7 @@ int main(int argc, char** argv)
     frames = (unsigned)strtoul(argv[3], NULL, 10);
     rate = argc > 4 ? (int)strtol(argv[4], NULL, 10) : 13379;
 
+    load_trace();
     mLogSetDefaultLogger(&silent);
 
     core = mCoreFind(argv[1]);
@@ -70,6 +120,18 @@ int main(int argc, char** argv)
     {
         fprintf(stderr, "mgba-audio: cannot load %s\n", argv[1]);
         return 1;
+    }
+    // FRLG_SAV loads the port's own flash image, which is the same 128K layout
+    // mGBA expects. Music in the overworld is otherwise forty minutes of trace
+    // away, and the reference cannot be trusted to stay in step that long.
+    {
+        const char* sav = getenv("FRLG_SAV");
+        struct VFile* vf = sav ? VFileOpen(sav, O_RDWR) : NULL;
+
+        if (sav && !vf)
+            fprintf(stderr, "mgba-audio: cannot read %s\n", sav);
+        if (vf)
+            core->loadSave(core, vf);
     }
     core->reset(core);
 
@@ -105,6 +167,19 @@ int main(int argc, char** argv)
 
                 core->busWrite16(core, 0x04000082, (uint16_t)(cnt_h & ~0x3300));
             }
+        }
+
+        {
+            static unsigned trace_pos = 0;
+            static unsigned keys = 0;
+            unsigned offset = 38;
+            const char* off = getenv("FRLG_INPUT_OFFSET");
+
+            if (off)
+                offset = (unsigned)strtoul(off, NULL, 10);
+            while (trace_pos < trace_count && trace[trace_pos].frame + offset <= frame)
+                keys = trace[trace_pos++].keys;
+            core->setKeys(core, keys);
         }
 
         core->runFrame(core);
