@@ -356,7 +356,10 @@ int host_report_crash(const char *detail, const char *path, const char *issues_u
     box.buttons = path != NULL ? buttons : &buttons[3];
 
     if (!SDL_ShowMessageBox(&box, &chosen))
+    {
+        fprintf(stderr, "frlg-native: cannot show the report dialog: %s\n", SDL_GetError());
         return HOST_REPORT_QUIT;
+    }
 
     if (chosen == HOST_REPORT_COPY && path != NULL)
     {
