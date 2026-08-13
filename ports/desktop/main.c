@@ -331,26 +331,93 @@ static void load_save(void)
 // (docs/adr/0006-rom-supplied-data.md). Until the phase 7 importer exists, the
 // path comes from the environment, falling back to the build the port is bound
 // against -- the two have to describe each other, so this is not a free choice.
+// Hashes the decompilation records for the revisions it can build. Names, not
+// game data -- they exist so a rejection can say what the player actually
+// handed over instead of only that it was wrong.
+static const struct
+{
+    const char *sha1;
+    const char *name;
+} known_roms[] = {
+    {"41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc", "Pokemon FireRed (rev 0)"},
+    {"dd5945db9b930750cb39d00c84da8571feebf417", "Pokemon FireRed (rev 1)"},
+    {"baa452d0b24629dd7782cfc07a8984085dde1311", "Pokemon FireRed (Switch)"},
+    {"574fa542ffebb14be69902d1d36f1ec0a4afd71e", "Pokemon LeafGreen (rev 0)"},
+    {"7862c67bdecbe21d1d69ce082ce34327e1c6ed5e", "Pokemon LeafGreen (rev 1)"},
+    {"62b9fc77549dbc67032eb6cbd0ea6ad3b825690f", "Pokemon LeafGreen (Switch)"},
+};
+
+static const char *name_of_rom(const char *sha1)
+{
+    for (unsigned i = 0; i < sizeof(known_roms) / sizeof(known_roms[0]); i++)
+        if (strcmp(known_roms[i].sha1, sha1) == 0)
+            return known_roms[i].name;
+    return NULL;
+}
+
+// Where this install keeps the imported game. Keyed by what the manifest
+// describes, because a build for another title or revision is another game and
+// must not read this one's image.
+static const char *cache_path(char *buf, size_t len)
+{
+    char root[512];
+
+    if (host_data_dir(root, sizeof(root)) != 0)
+        return NULL;
+    snprintf(buf, len, "%s/cache", root);
+    host_make_dir(buf);
+    snprintf(buf, len, "%s/cache/%.8s.cart", root, FRLG_ROM_SHA1);
+    return buf;
+}
+
+// Import is a first-boot step, not a per-launch one: the relocated image is
+// kept, so the player's ROM is needed once and never again. It is not a copy of
+// their ROM -- every pointer in it has been rewritten to this build's own
+// addresses, so it will not run anywhere else (ADR 0006).
 static void load_cart(void)
 {
     const char *path = getenv("FRLG_ROM");
+    char cache[512];
+    char saw[AGB_SHA1_TEXT];
+    const char *cached = cache_path(cache, sizeof(cache));
     int err;
+
+    if (cached != NULL && agb_cart_cache_load(cached, FRLG_ROM_SHA1) == 0)
+    {
+        printf("frlg-native: %s, from the imported copy\n", FRLG_ROM_TITLE);
+        return;
+    }
 
     if (path == NULL)
         path = FRLG_DEFAULT_ROM;
 
-    err = agb_cart_load(path);
-    if (err == 0)
+    err = agb_cart_import(path, FRLG_ROM_SHA1, saw);
+    if (err == AGB_CART_OK)
     {
-        printf("frlg-native: cart loaded from %s\n", path);
+        printf("frlg-native: imported %s from %s\n", FRLG_ROM_TITLE, path);
+        if (cached != NULL && agb_cart_cache_save(cached, FRLG_ROM_SHA1) == 0)
+            printf("frlg-native: kept as %s; the ROM is not needed again\n", cached);
         return;
     }
 
     // Not fatal: the game runs without it, badly. Everything read out of
     // data/*.s reads as zeros, which is its own kind of wrong -- see
     // docs/spikes/0003-empty-cart-region.md.
-    fprintf(stderr, "frlg-native: no cart image (%s): %s\n", path,
-            err == -2 ? "wrong size" : "cannot read");
+    if (err == AGB_CART_WRONG_GAME)
+    {
+        const char *name = name_of_rom(saw);
+
+        if (name != NULL)
+            fprintf(stderr, "frlg-native: that file is %s; this build needs %s\n",
+                    name, FRLG_ROM_TITLE);
+        else
+            fprintf(stderr, "frlg-native: %s is not a supported ROM (%s)\n", path, saw);
+    }
+    else
+    {
+        fprintf(stderr, "frlg-native: no cart image (%s): %s\n", path,
+                err == AGB_CART_WRONG_SIZE ? "wrong size" : "cannot read");
+    }
 }
 
 int main(int argc, char **argv)

@@ -108,10 +108,24 @@ target_link_libraries(frlg-native PRIVATE
     -Wl,--whole-archive game cartreloc -Wl,--no-whole-archive
     agb host pthread)
 # -rdynamic so the unimplemented-stub backtrace resolves names.
+# The manifest describes one exact image, so the port can say whether the file
+# it was handed is that image. Computed from the ROM the generators just read,
+# which is the only way the two cannot drift apart.
+file(SHA1 "${rom_gba}" rom_sha1)
+message(STATUS "frlg-native: manifest describes ${rom_sha1}")
+
+if(FRLG_GAME_DATA STREQUAL "retail")
+    set(rom_title "Pokemon FireRed (rev 0)")
+else()
+    set(rom_title "Pokemon FireRed (rev 0, development build)")
+endif()
+
 # Development default only: the shipping build takes the path from the player,
 # and ships no ROM at all (ADR 0006).
 target_compile_definitions(frlg-native PRIVATE
-    FRLG_DEFAULT_ROM="${rom_gba}")
+    FRLG_DEFAULT_ROM="${rom_gba}"
+    FRLG_ROM_SHA1="${rom_sha1}"
+    FRLG_ROM_TITLE="${rom_title}")
 
 # Two of the sequencer's tuning values are absolutes from upstream's linker
 # script rather than variables, declared `extern char []` and read as their own

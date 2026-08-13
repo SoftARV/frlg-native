@@ -416,6 +416,34 @@ This is the same seam the pointer-width strategy needs ([§12](#12-pointer-width
 two are one mechanism rather than two: native function addresses must fit the ROM's 4-byte slots,
 which is 32-bit-only, exactly as ADR 0003 independently concluded.
 
+### 5.3b Verifying, and keeping what was imported
+
+The manifest describes one exact image, so the port can say whether the file it was handed is that
+image. The expected hash is computed by CMake from the very ROM the generators read
+(`file(SHA1 ...)`), which is the only arrangement where the two cannot drift apart. It is checked
+**before** relocation, because relocation rewrites the image and the question is about the file the
+player supplied.
+
+A rejection says what it was given. Six hashes are compiled in — names and digests, no game data —
+so an unusable file gets *"that file is Pokemon LeafGreen (rev 0); this build needs Pokemon FireRed
+(rev 0)"* rather than a refusal. Anything else reports the hash it saw, and a file of the wrong length
+is refused before it is hashed at all.
+
+**The relocated image is then kept, and the ROM is not needed again.** It is not a copy of the ROM:
+every pointer in it has been rewritten to this build's own addresses, so it will not run in an
+emulator and is not a cartridge dump. It is a derived artifact private to this install, which is what
+ADR 0006 means by releasing the ROM.
+
+The cache is keyed by the manifest's hash — a build for another title or revision is another game and
+must not read this one's image — and its header carries a **layout fingerprint**: an FNV hash over
+every native address the relocation table resolved. Any relink can move those, and an image relocated
+against addresses that have moved is a set of pointers into nowhere, so the fingerprint is what makes
+a stale cache recognisable rather than merely wrong. A version number would be a promise somebody has
+to remember to keep; the fingerprint is the actual answer to "did I write this".
+
+Import costs 26 ms, so the cache buys almost no time. What it buys is not needing the player's ROM
+file to still exist, still be where it was, and still be readable, months later.
+
 ### 5.4 Data the host cannot build
 
 `data/*.s` — event scripts, battle scripts, map data — **is never assembled, on any platform.**

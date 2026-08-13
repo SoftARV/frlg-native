@@ -15,6 +15,7 @@ function(frlg_add_test name)
     set_tests_properties("${name}" PROPERTIES LABELS unit)
 endfunction()
 
+frlg_add_test(test_sha1)
 frlg_add_test(test_cart)
 frlg_add_test(test_flash)
 target_compile_options(test_flash PRIVATE -iquote "${FRLG_VENDOR_DIR}/include")

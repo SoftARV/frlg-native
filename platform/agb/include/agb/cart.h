@@ -4,7 +4,10 @@
 #ifndef AGB_CART_H
 #define AGB_CART_H
 
+#include <stddef.h>
 #include <stdint.h>
+
+#include "agb/sha1.h"
 
 // One pointer in the ROM whose target is a symbol rather than more ROM data:
 // a function to call, or a RAM variable to reach. `target` is filled in by our
@@ -26,6 +29,30 @@ extern const uint32_t agb_reloc_symbol_count;
 // Returns 0 on success, or a negative errno-style code: the file could not be
 // read, or it is not the size the region expects.
 int agb_cart_load(const char *path);
+
+// What happened when a ROM was offered, in enough detail to tell somebody.
+#define AGB_CART_OK 0
+#define AGB_CART_UNREADABLE -1
+#define AGB_CART_WRONG_SIZE -2
+#define AGB_CART_WRONG_GAME -3
+
+// Verify a ROM against the hash this build's manifest describes, then load and
+// relocate it. `wanted` is 40 hex characters. On a mismatch nothing is loaded
+// and `saw` receives the hash the file actually has, so the caller can say what
+// it was handed rather than only that it was wrong.
+int agb_cart_import(const char *path, const char *wanted, char saw[AGB_SHA1_TEXT]);
+
+// A fingerprint of where this binary put the things the cart image points at.
+// Every relink can move them, and an image relocated against the old addresses
+// is a set of pointers into nowhere -- so a cache written by another build has
+// to be recognised and thrown away rather than trusted.
+uint32_t agb_cart_layout_id(void);
+
+// The relocated image, kept so the ROM is not needed again. Returns 0 on
+// success; loading also fails when the file was written by a different build or
+// for a different ROM, which is not an error, just a cache that has expired.
+int agb_cart_cache_save(const char *path, const char *rom_sha1);
+int agb_cart_cache_load(const char *path, const char *rom_sha1);
 
 // The pass on its own, over an image already in the cart region. Separated so a
 // test can drive it without a file.

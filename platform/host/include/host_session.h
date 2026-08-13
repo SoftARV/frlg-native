@@ -16,6 +16,14 @@
 // ones. Returns 0 if a session is recording, non-zero if it is switched off or
 // the directory could not be made -- in which case everything below is inert
 // and the port carries on without a session, which is never fatal.
+// Where this application keeps the player's data -- the platform's own location
+// for it, created if it is not there. Sessions, and the imported game, live
+// under here. Returns non-zero if there is nowhere to put it.
+int host_data_dir(char *buf, size_t len);
+
+// One directory, no error if it already exists.
+int host_make_dir(const char *path);
+
 int host_session_open(void);
 
 // This run's directory, or NULL when no session is recording.

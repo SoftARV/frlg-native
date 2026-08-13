@@ -52,6 +52,11 @@ static int make_dir(const char *path)
     return -1;
 }
 
+int host_make_dir(const char *path)
+{
+    return make_dir(path);
+}
+
 static int make_dir_p(const char *path)
 {
     char work[PATH_LEN];
@@ -129,6 +134,13 @@ static void prune(const char *root)
     }
     for (int i = 0; i < count; i++)
         free(names[i]);
+}
+
+int host_data_dir(char *buf, size_t len)
+{
+    if (data_root(buf, len) != 0)
+        return -1;
+    return make_dir_p(buf);
 }
 
 int host_session_open(void)
