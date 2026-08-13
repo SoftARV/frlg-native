@@ -895,6 +895,14 @@ report says the game read through a pointer that was never set, and that hardwar
 it. `FRLG_CRASH_TEST=segv|bus|abort` faults on purpose at `FRLG_CRASH_FRAME`, because a recovery path
 nobody can trigger is a recovery path nobody has tested.
 
+The screen itself is a native message box rather than something drawn in the window: the renderer's
+state after a fault is not worth relying on, and this needs no font and no new dependency to be legible
+everywhere SDL runs. Three buttons — show the report, report it, close — and each of the first two
+hands off to a program that outlives this one, so the dialog answers once and goes. There is no copy
+button and no send button: copying a path is a promise the owning process has to stay alive to serve,
+which made the dialog linger to be dismissed twice, and sending would make this a service rather than
+a file ([ADR 0016](adr/0016-every-session-records-itself.md)).
+
 `host_session_bundle` packs the session into `report.zip` — stored entries, a hand-written central
 directory, no compression and no dependency, since Android and web would have to carry it too. One
 file, because a folder arrives as three attachments and the missing one is always the save.

@@ -51,8 +51,7 @@ void host_log(const char *msg);
 // there is no display to ask on, since a headless run must never block.
 #define HOST_REPORT_QUIT 0
 #define HOST_REPORT_FOLDER 1
-#define HOST_REPORT_COPY 2
-#define HOST_REPORT_ISSUES 3
+#define HOST_REPORT_ISSUES 2
 
 int host_report_crash(const char *detail, const char *path, const char *issues_url);
 

@@ -328,90 +328,57 @@ int host_report_crash(const char *detail, const char *path, const char *issues_u
 {
     SDL_MessageBoxButtonData buttons[] = {
         {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, HOST_REPORT_FOLDER, "Show the report"},
-        {0, HOST_REPORT_COPY, "Copy its location"},
         {0, HOST_REPORT_ISSUES, "Report it"},
         {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, HOST_REPORT_QUIT, "Close"},
     };
     SDL_MessageBoxData box;
     char body[1200];
     int chosen = HOST_REPORT_QUIT;
-    int copied = 0;
+
+    snprintf(body, sizeof(body),
+             "The game hit a bug and stopped. This is the port's fault, not "
+             "anything you did, and nothing is lost but this session.\n\n"
+             "%s\n\n"
+             "A report was saved:\n%s\n\n"
+             "It holds what you pressed, your save as it was when this run began, "
+             "everything the game printed, and where it stopped. Attaching it to "
+             "an issue is enough to reproduce and fix this.",
+             detail != NULL ? detail : "", path != NULL ? path : "(none)");
 
     SDL_zero(box);
     box.flags = SDL_MESSAGEBOX_ERROR;
     box.window = window;
     box.title = "frlg-native stopped";
     box.message = body;
-    box.numbuttons = path != NULL ? 4 : 1;
+    box.numbuttons = path != NULL ? 3 : 1;
     // With no report to point at, the only honest button is the one that closes.
-    box.buttons = path != NULL ? buttons : &buttons[3];
+    box.buttons = path != NULL ? buttons : &buttons[2];
 
-    // The dialog is a loop, and that is not only for convenience. A clipboard on
-    // X11 and on Wayland is not a place data is put -- it is a promise the
-    // owning process serves on request, so a process that sets it and exits has
-    // copied nothing at all. Staying open until the player closes it is what
-    // makes the paste work, and it lets them use more than one button.
-    for (;;)
+    if (!SDL_ShowMessageBox(&box, &chosen))
     {
-        snprintf(body, sizeof(body),
-                 "The game hit a bug and stopped. This is the port's fault, not "
-                 "anything you did, and nothing is lost but this session.\n\n"
-                 "%s\n\n"
-                 "A report was saved:\n%s\n\n"
-                 "It holds what you pressed, your save as it was when this run began, "
-                 "everything the game printed, and where it stopped. Attaching it to "
-                 "an issue is enough to reproduce and fix this.%s",
-                 detail != NULL ? detail : "", path != NULL ? path : "(none)",
-                 copied ? "\n\nThe location is on your clipboard. Keep this window "
-                          "open until you have pasted it." : "");
-
-        if (!SDL_ShowMessageBox(&box, &chosen))
-        {
-            fprintf(stderr, "frlg-native: cannot show the report dialog: %s\n", SDL_GetError());
-            return HOST_REPORT_QUIT;
-        }
-
-        // A dialog closed by its window button reports no choice at all.
-        if (chosen < 0)
-            return HOST_REPORT_QUIT;
-
-        if (chosen == HOST_REPORT_COPY && path != NULL)
-        {
-            SDL_SetClipboardText(path);
-
-            // Whoever asks for the text asks this process for it, and the ask
-            // arrives as an event. Without pumping, a clipboard manager that
-            // would have taken a copy never gets the chance.
-            for (int i = 0; i < 40; i++)
-            {
-                SDL_PumpEvents();
-                SDL_Delay(10);
-            }
-            copied = 1;
-            continue;
-        }
-
-        if (chosen == HOST_REPORT_FOLDER && path != NULL)
-        {
-            char url[1024];
-            char *cut;
-
-            // The folder, not the file: a file manager opened on a directory is
-            // where somebody can drag the zip from.
-            snprintf(url, sizeof(url), "file://%s", path);
-            cut = strrchr(url, '/');
-            if (cut != NULL)
-                *cut = '\0';
-            SDL_OpenURL(url);
-            continue;
-        }
-
-        if (chosen == HOST_REPORT_ISSUES && issues_url != NULL)
-        {
-            SDL_OpenURL(issues_url);
-            continue;
-        }
-
-        return chosen;
+        fprintf(stderr, "frlg-native: cannot show the report dialog: %s\n", SDL_GetError());
+        return HOST_REPORT_QUIT;
     }
+
+    // Both of these hand off to another program, which outlives this one -- so
+    // the dialog answers once and closes, rather than staying up to be dismissed
+    // a second time.
+    if (chosen == HOST_REPORT_FOLDER && path != NULL)
+    {
+        char url[1024];
+        char *cut;
+
+        // The folder, not the file: a file manager opened on a directory is
+        // where somebody can drag the zip from.
+        snprintf(url, sizeof(url), "file://%s", path);
+        cut = strrchr(url, '/');
+        if (cut != NULL)
+            *cut = '\0';
+        SDL_OpenURL(url);
+    }
+    else if (chosen == HOST_REPORT_ISSUES && issues_url != NULL)
+    {
+        SDL_OpenURL(issues_url);
+    }
+    return chosen;
 }
