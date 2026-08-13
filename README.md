@@ -66,43 +66,43 @@ sources, which is what step one does. See [Legal](#legal).
 mkdir -p ~/.local/share/frlg-native
 FRLG_LOCKSTEP=pace \
 FRLG_SAV=~/.local/share/frlg-native/play.sav \
-FRLG_INPUT_RECORD=/tmp/session.trace \
   ./build/linux-release/ports/desktop/frlg-native 120000 60
 ```
 
 - `FRLG_LOCKSTEP=pace` — the clock a recording needs: real time, but one frame per game step, so the
   trace replays exactly ([ADR 0013](docs/adr/0013-lockstep-capture-clock.md)).
 - `FRLG_SAV` — your save. Keep it somewhere that survives; the game writes it when you choose SAVE.
-- `FRLG_INPUT_RECORD` — every keypress, one line per frame on which it changed.
 - The two numbers are a frame limit and a display rate. `120000` is about thirty-three minutes.
+
+**You do not have to set up recording, and you do not have to remember anything.** Every run keeps its
+own session under `~/.local/share/frlg-native/sessions/`: what you pressed, a copy of your save as it
+was when the run *began*, and everything printed. The last five runs are kept.
+`FRLG_NO_RECORD=1` turns it off ([ADR 0016](docs/adr/0016-every-session-records-itself.md)).
 
 Arrow keys move, **X** is A and **Z** is B, **Enter** is Start and **Backspace** is Select, **A** and
 **S** are L and R. **Ctrl+Q** or the window's close button quits — deliberately not a bare key, since
 one stray press ends a recording.
 
-**Before each session, copy your save**: a trace only replays against the save the run *started*
-with, and playing changes it.
-
-```sh
-cp ~/.local/share/frlg-native/play.sav /tmp/before-session.sav
-```
-
 ### 3. Send back what broke
 
-When it crashes it prints a backtrace and exits 3. What makes a report actionable:
+When the game hits a bug it stops, tells you what happened, and writes **one file**:
 
-| | |
-| --- | --- |
-| the trace | `/tmp/session.trace` |
-| the save it started from | `/tmp/before-session.sav` |
-| the terminal output | the backtrace, and the last few lines before it |
-| what you were doing | "opened the town map", "the rival switched Pokémon" |
+```
+frlg-native: the game stopped because of a bug -- SIGSEGV at 0x00000014 on frame 12480
 
-With the trace and that save, any crash replays exactly — headless, in seconds, as many times as it
-takes to fix:
+Everything needed to reproduce it is in one file:
+  ~/.local/share/frlg-native/sessions/2026-08-13-2334/report.zip
+```
+
+Attach that zip to an issue and say what you were doing — "opened the town map", "the rival switched
+Pokémon". That is the whole job; the zip already holds the trace, the save the run started from, the
+full log and where it stopped.
+
+With those, any crash replays exactly — headless, in seconds, as many times as it takes to fix:
 
 ```sh
-FRLG_LOCKSTEP=1 FRLG_SAV=/tmp/before-session.sav FRLG_INPUT=/tmp/session.trace \
+unzip -d /tmp/report ~/.local/share/frlg-native/sessions/<the one that broke>/report.zip
+FRLG_LOCKSTEP=1 FRLG_SAV=/tmp/report/start.sav FRLG_INPUT=/tmp/report/input.trace \
   ./build/headless/ports/desktop/frlg-native 90000 0
 ```
 
