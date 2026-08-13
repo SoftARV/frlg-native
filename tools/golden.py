@@ -113,7 +113,9 @@ def capture(binary, frame, out_dir):
     # No window: a capture has no use for one, and opening a real one makes the
     # tier depend on the desktop being in a mood to create it. The audio check
     # has always run this way.
-    env = dict(os.environ, FRLG_SHOT=path, FRLG_LOCKSTEP="1")
+    # A capture is not a play session: recording one would leave a directory
+    # per golden frame in the player's own data.
+    env = dict(os.environ, FRLG_SHOT=path, FRLG_LOCKSTEP="1", FRLG_NO_RECORD="1")
     env.setdefault("SDL_VIDEODRIVER", "dummy")
     env.setdefault("SDL_AUDIODRIVER", "dummy")
     # Stall detection off: the harness has its own timeout and a false positive

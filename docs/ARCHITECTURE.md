@@ -859,6 +859,22 @@ needs no special case above it.
 Mixing is driven from the frame loop, not the audio callback, so audio stays in lockstep with game
 state.
 
+**Every run records itself.** `host_session_open` makes a directory under `$XDG_DATA_HOME/frlg-native/
+sessions/` named for the moment it started, and the run fills it: `input.trace` as the keys are read,
+`start.sav` copied *before* the game can touch it, and `session.log` holding both output streams. Five
+runs are kept and older ones pruned.
+
+It is on by default and `FRLG_NO_RECORD=1` turns it off, which is what the golden and audio harnesses
+set — a capture is not a play session. The reason it is a default rather than a flag is that the three
+files have to exist *before* anything goes wrong, and a tester cannot be asked to arrange that in
+advance ([ADR 0016](adr/0016-every-session-records-itself.md)). `FRLG_INPUT_RECORD` still names its
+own path and wins; a replay never records, since it would only copy the file it is reading.
+
+The log takes both streams, not just `stderr`: the port says what it loaded on `stdout` and complains
+on `stderr`, and half a log reads as though half the run is missing. Each keeps its own pipe and pump
+thread so the terminal still behaves, and `stderr` is made unbuffered so a crash cannot strand the
+last few lines — the ones that matter — in a buffer nothing will flush.
+
 **The oracle takes input.** `mgba-capture` replays the port's own trace format, shifted by the +38
 frame boot offset, so a frame that can only be reached by playing can still be compared against the
 reference. That is what made [spike 0008](spikes/0008-missing-trainer-pics.md) investigable at all.

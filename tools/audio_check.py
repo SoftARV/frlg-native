@@ -42,6 +42,8 @@ def main():
     # The mixer is measured by what it produced, not by when: lockstep makes the
     # run reproducible and drops it from real time to a few seconds.
     env.setdefault("FRLG_LOCKSTEP", "1")
+    # Same reason as the golden harness: a measurement is not a play session.
+    env.setdefault("FRLG_NO_RECORD", "1")
 
     run = subprocess.run([args.binary, str(args.frames), str(args.stall)],
                          capture_output=True, text=True, env=env, timeout=600)

@@ -31,6 +31,7 @@
 #include "agb/memmap.h"
 #include "agb/ppu.h"
 #include "host.h"
+#include "host_session.h"
 
 #define SCREEN_W 240
 #define SCREEN_H 160
@@ -235,12 +236,20 @@ static uint16_t record_keys(uint32_t frame)
     return keys;
 }
 
+static char session_trace[512];
+
 static void load_trace(void)
 {
     const char *replay = getenv("FRLG_INPUT");
     const char *record = getenv("FRLG_INPUT_RECORD");
     FILE *fh;
     char line[128];
+
+    // Replay wins: a run driven by a trace is reproducing something rather than
+    // producing something, and recording its own inputs back would only produce
+    // a copy of the file it is reading.
+    if (replay == NULL && record == NULL)
+        record = host_session_file("input.trace", session_trace, sizeof(session_trace));
 
     if (record != NULL)
     {
@@ -296,6 +305,12 @@ static void load_save(void)
     if (path == NULL)
         path = "frlg-native.sav";
 
+    // Before the game can touch it. A trace only replays against the state its
+    // run began with, and playing changes that state -- so the copy has to be
+    // taken now or it is not the right copy. This is the step a tester is asked
+    // to remember by hand today, and the one they forget.
+    host_session_keep(path, "start.sav");
+
     if (agb_flash_open(path))
         printf("frlg-native: save file %s\n", path);
     else
@@ -350,6 +365,13 @@ int main(int argc, char **argv)
 
     if (!host_video_open("frlg-native", SCREEN_W, SCREEN_H, 3))
         return 1;
+
+    // Before anything else can fail: a session that opens after the first
+    // complaint is a session missing the complaint.
+    host_session_open();
+    host_session_capture_log();
+    if (host_session_dir() != NULL)
+        printf("frlg-native: session %s\n", host_session_dir());
 
     load_cart();
     load_save();
@@ -467,5 +489,8 @@ int main(int argc, char **argv)
                agb_frame_watchdog_ticks());
     printf("frlg-native: audio %u frames, %u non-silent, peak %d\n",
            audio_frames, audio_loud_frames, audio_peak);
+
+    // Last, so the closing summary is in the log the session keeps.
+    host_session_close();
     return 0;
 }
