@@ -140,6 +140,7 @@ guard short-circuits the file and our definitions stand.
 | `SOUND_INFO_PTR`, `INTR_CHECK`, `INTR_VECTOR` | fixed IWRAM addresses become arena offsets |
 | `IWRAM_DATA`, `EWRAM_DATA`, `COMMON_DATA` | no-ops; the host linker places these freely |
 | `DmaSet`, `DmaStop` | call the DMA engine instead of writing registers |
+| `OPTIONS_SOUND_MONO` | a new save defaults to stereo, not mono |
 
 Everything derived from those — `EWRAM_END`, `BG_PLTT`, `OBJ_VRAM0`, `DmaCopy16`, `DmaFill32` —
 follows automatically, because macro bodies expand at the point of use rather than of definition.
@@ -157,6 +158,12 @@ Two include-path hazards, both of which produced silent wrong behaviour before b
   needs it, which silently changes which declarations a translation unit sees.
 - **The directory must not be named twice.** cpp de-duplicates the search path and keeps the later
   entry, so `-iquote include` combined with `-idirafter include` silently discards the `-iquote`.
+
+The sound default is the only row that changes the *game* rather than the machine under it, and it is
+deliberate: the hardware has always supported stereo, this port reproduces the reference's image to
+within 0.2 dB, and the option screen still offers mono. It is a macro rather than an override because
+`OPTIONS_SOUND_MONO` has exactly one use in the whole game — `SetDefaultOptions` in `new_game.c`. It
+reaches only new saves; the field lives in the save block, so an existing one keeps whatever it stored.
 
 The prelude is invisible at the call site, which is its risk: if pret changes one of the macros it
 overrides, we would diverge silently. `tools/check_drift.py` records the upstream hash of every

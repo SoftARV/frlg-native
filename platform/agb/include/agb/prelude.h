@@ -67,4 +67,14 @@
 #undef DmaStop
 #define DmaStop(dmaNum) agb_dma_stop(dmaNum)
 
+// A new save starts in mono, which is the one redefinition here that changes the
+// game rather than the machine under it. The hardware supports stereo, this port
+// reproduces it to within 0.2 dB of the reference's image, and a player who wants
+// mono still has the option screen. The name reads badly at the call site -- it
+// is the only use in the game, `SetDefaultOptions` in new_game.c -- and the row
+// in ARCHITECTURE 4.1 is what keeps it findable.
+#include "constants/global.h"
+#undef OPTIONS_SOUND_MONO
+#define OPTIONS_SOUND_MONO OPTIONS_SOUND_STEREO
+
 #endif // GUARD_AGB_PRELUDE_H
