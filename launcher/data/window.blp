@@ -1,0 +1,133 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $FrlgWindow : Adw.ApplicationWindow {
+  title: _("frlg-native");
+  default-width: 720;
+  default-height: 520;
+
+  Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar header {
+      [end]
+      MenuButton {
+        icon-name: "open-menu-symbolic";
+        tooltip-text: _("Main Menu");
+        menu-model: primary_menu;
+      }
+    }
+
+    content: Stack stack {
+      transition-type: crossfade;
+
+      // Nothing imported yet: the one thing to do is supply a ROM.
+      StackPage {
+        name: "import";
+        child: Adw.StatusPage import_page {
+          icon-name: "application-x-firmware-symbolic";
+          title: _("Import a game");
+          description: _("frlg-native ships no game data. Choose a ROM you legally own and it will be imported once.");
+
+          child: Box {
+            orientation: vertical;
+            halign: center;
+            spacing: 12;
+
+            Button import_button {
+              label: _("Choose a ROM…");
+              halign: center;
+              styles ["suggested-action", "pill"]
+            }
+
+            Label import_error {
+              visible: false;
+              wrap: true;
+              justify: center;
+              styles ["error"]
+            }
+          };
+        };
+      }
+
+      // Imported: the catalogue. One row per title today, which is what the
+      // list is for -- a second title is a second binary, not a second ROM.
+      StackPage {
+        name: "library";
+        child: ScrolledWindow {
+          child: Adw.Clamp {
+            maximum-size: 640;
+            margin-top: 24;
+            margin-bottom: 24;
+            margin-start: 12;
+            margin-end: 12;
+
+            child: Box {
+              orientation: vertical;
+              spacing: 18;
+
+              Adw.PreferencesGroup library_group {
+                title: _("Games");
+
+                Adw.ActionRow game_row {
+                  title: _("Pokémon FireRed");
+                  subtitle: _("Imported");
+
+                  [suffix]
+                  Button play_button {
+                    valign: center;
+                    label: _("Play");
+                    styles ["suggested-action", "pill"]
+                  }
+                }
+              }
+
+              Adw.PreferencesGroup {
+                title: _("Saves");
+                description: _("Each save keeps its own game options. A second one can run a different mod without touching this one.");
+
+                Adw.ActionRow {
+                  title: _("Vanilla");
+                  subtitle: _("The default save");
+
+                  [prefix]
+                  CheckButton save_default {
+                    valign: center;
+                    active: true;
+                  }
+                }
+              }
+            };
+          };
+        };
+      }
+
+      // While the game is up the launcher gets out of the way, but the window
+      // has to say something if it is brought back by hand.
+      StackPage {
+        name: "playing";
+        child: Adw.StatusPage {
+          icon-name: "media-playback-start-symbolic";
+          title: _("Playing");
+          description: _("This window comes back when the game exits.");
+        };
+      }
+    };
+  }
+}
+
+menu primary_menu {
+  section {
+    item {
+      label: _("_Settings");
+      action: "app.settings";
+    }
+    item {
+      label: _("Report a problem");
+      action: "app.issues";
+    }
+    item {
+      label: _("_About frlg-native");
+      action: "app.about";
+    }
+  }
+}

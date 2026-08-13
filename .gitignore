@@ -16,3 +16,6 @@ shots/
 # Golden images: frames of the player ROM, generated per machine (ADR 0010).
 tests/golden/images/
 __pycache__/
+
+# The launcher's own build tree (Meson, not CMake).
+launcher/build/
