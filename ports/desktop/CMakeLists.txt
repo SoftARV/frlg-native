@@ -1,14 +1,40 @@
-set(sym "${FRLG_VENDOR_DIR}/pokefirered_modern.sym")
+# Which ROM build the manifest describes, and it is not a free choice: the two
+# builds put the game's data in different places. A modern .text is larger, so
+# everything after it shifts -- script_data sits 66,524 bytes apart between them
+# -- and a manifest from the modern build names addresses no cartridge has.
+#
+#   dev     the MODERN=1 build, for development against our own ROM
+#   retail  the byte-matching build, which is what a player supplies
+#
+# See docs/spikes/0001-relocation-table.md, finding 2.
+set(FRLG_GAME_DATA "dev" CACHE STRING "ROM build the manifest describes: dev or retail")
+set_property(CACHE FRLG_GAME_DATA PROPERTY STRINGS dev retail)
+
+if(FRLG_GAME_DATA STREQUAL "retail")
+    set(rom_stem "pokefirered")
+    set(rom_objs "${FRLG_VENDOR_DIR}/build/firered/src")
+    set(rom_make "make -C ${FRLG_VENDOR_DIR} compare LDFLAGS='-Map ../../pokefirered.map --emit-relocs' && make -C ${FRLG_VENDOR_DIR} syms")
+elseif(FRLG_GAME_DATA STREQUAL "dev")
+    set(rom_stem "pokefirered_modern")
+    set(rom_objs "${FRLG_VENDOR_DIR}/build/firered_modern/src")
+    set(rom_make "make -C ${FRLG_VENDOR_DIR} modern && make -C ${FRLG_VENDOR_DIR} syms MODERN=1")
+else()
+    message(FATAL_ERROR "FRLG_GAME_DATA is '${FRLG_GAME_DATA}'; expected dev or retail")
+endif()
+message(STATUS "frlg-native: game data from the ${FRLG_GAME_DATA} build (${rom_stem})")
+
+set(rom_elf "${FRLG_VENDOR_DIR}/${rom_stem}.elf")
+set(rom_gba "${FRLG_VENDOR_DIR}/${rom_stem}.gba")
+set(sym "${FRLG_VENDOR_DIR}/${rom_stem}.sym")
 if(NOT EXISTS "${sym}")
-    message(FATAL_ERROR
-        "Missing ${sym}. Run: make -C ${FRLG_VENDOR_DIR} modern && make -C ${FRLG_VENDOR_DIR} syms MODERN=1")
+    message(FATAL_ERROR "Missing ${sym}. Run: ${rom_make}")
 endif()
 
 # Where .text ends decides whether a symbol is code (stub) or ROM data (bind to
 # the cart). It is layout-specific, so it is read from the ELF rather than
 # hardcoded -- see docs/spikes/0001-relocation-table.md.
 execute_process(
-    COMMAND arm-none-eabi-readelf -SW "${FRLG_VENDOR_DIR}/pokefirered_modern.elf"
+    COMMAND arm-none-eabi-readelf -SW "${rom_elf}"
     OUTPUT_VARIABLE readelf_out ERROR_QUIET)
 string(REGEX MATCH "script_data[ \t]+PROGBITS[ \t]+([0-9a-f]+)" _m "${readelf_out}")
 if(CMAKE_MATCH_1)
@@ -27,11 +53,11 @@ add_custom_command(
     OUTPUT "${relocs}"
     COMMAND "${CMAKE_COMMAND}" -E env python3
             "${CMAKE_SOURCE_DIR}/tools/gen_relocations.py"
-            "${FRLG_VENDOR_DIR}/pokefirered_modern.elf"
-            "${FRLG_VENDOR_DIR}/pokefirered_modern.gba"
+            "${rom_elf}"
+            "${rom_gba}"
             -o "${relocs}" --report
     DEPENDS "${CMAKE_SOURCE_DIR}/tools/gen_relocations.py"
-            "${FRLG_VENDOR_DIR}/pokefirered_modern.elf"
+            "${rom_elf}"
     COMMENT "generating the cart relocation table"
     VERBATIM)
 
@@ -60,7 +86,7 @@ file(WRITE "${trial_main}" "int main(void) { return 0; }\n")
 add_custom_command(
     OUTPUT "${bindings}" "${CMAKE_CURRENT_BINARY_DIR}/agb_stubs.c"
     COMMAND sh "${CMAKE_SOURCE_DIR}/tools/gen_deferred_syms.sh"
-            "${FRLG_VENDOR_DIR}/build/firered_modern/src"
+            "${rom_objs}"
             "${CMAKE_CURRENT_BINARY_DIR}/deferred.txt"
             m4a.o m4a_1.o
             agb_flash.o agb_flash_1m.o agb_flash_le.o agb_flash_mx.o
@@ -99,7 +125,7 @@ target_link_libraries(frlg-native PRIVATE
 # Development default only: the shipping build takes the path from the player,
 # and ships no ROM at all (ADR 0006).
 target_compile_definitions(frlg-native PRIVATE
-    FRLG_DEFAULT_ROM="${FRLG_VENDOR_DIR}/pokefirered_modern.gba")
+    FRLG_DEFAULT_ROM="${rom_gba}")
 
 # Two of the sequencer's tuning values are absolutes from upstream's linker
 # script rather than variables, declared `extern char []` and read as their own
