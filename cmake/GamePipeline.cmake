@@ -11,6 +11,18 @@ set(FRLG_AGB_INCLUDE "${CMAKE_SOURCE_DIR}/platform/agb/include")
 # path and would drop the -iquote entry.
 # -std must match the compile step: preprocessing at a newer standard bakes in
 # host headers the older standard then rejects (C23 nullptr_t under -std=gnu11).
+# The prelude is force-included into every one of these, and this stage expands
+# it away: what the compiler later sees is the already-expanded copy, so a change
+# to the prelude that does not re-run this stage has no effect at all and no
+# error to show for it. Naming it as a dependency is what makes an edit land.
+# Its own headers go in the same list; vendor's are pinned, and a bump is its own
+# commit.
+set(FRLG_PRELUDE_DEPS
+    "${FRLG_AGB_INCLUDE}/agb/prelude.h"
+    "${FRLG_AGB_INCLUDE}/agb/memmap.h"
+    "${FRLG_AGB_INCLUDE}/agb/dma.h"
+    "${FRLG_AGB_INCLUDE}/agb/frame.h")
+
 set(FRLG_GAME_CPPFLAGS
     -m32 -E -x c -std=gnu11
     -I "${FRLG_AGB_INCLUDE}"
@@ -127,7 +139,8 @@ function(frlg_preprocess_game rel out_var)
         COMMAND sh -c "'${FRLG_PREPROC}' '${i}' charmap.txt > '${c}'"
         ${post}
         WORKING_DIRECTORY "${FRLG_VENDOR_DIR}"
-        DEPENDS "${FRLG_VENDOR_DIR}/${rel}" "${FRLG_PREPROC}" ${extra_deps}
+        DEPENDS "${FRLG_VENDOR_DIR}/${rel}" "${FRLG_PREPROC}" ${FRLG_PRELUDE_DEPS}
+                ${extra_deps}
         COMMENT "preproc ${rel}"
         VERBATIM)
 
