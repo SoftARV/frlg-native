@@ -42,11 +42,14 @@ The cost that remains in an override is a **maintenance** cost, not a fidelity o
 stops receiving upstream fixes. That is still a real reason to prefer a macro seam, and 4.2's
 preference stands on those grounds alone.
 
-The golden tier will eventually fail on purpose. A test that asserts "matches mGBA frame for frame"
-is asserting the absence of exactly the changes this project intends to make. Each enhancement that
-alters output has to say what it expects to break, and the affected goldens are regenerated with the
-reason recorded — the same discipline `ADR 0010` already sets for generated goldens. An enhancement
-that quietly moves a golden without saying so is indistinguishable from a bug.
+The golden tier is scaffolding and comes down. It was built in phase 3 to answer a porting question —
+does the game render and run correctly on the first iterations — and it answered it. A tier that
+asserts "matches mGBA frame for frame" is asserting the absence of exactly the changes this project
+intends to make, so as enhancements land it narrows and eventually retires. Regenerating or dropping
+affected goldens is routine, not a cost to be weighed against the change that caused it.
+
+What keeps earning its place is the oracle underneath, used the other way round: not to hold output
+still, but to say what moved, so a change we chose stays distinguishable from one we did not.
 
 Deviations are recorded where the project already records things: an ADR when the decision closes off
 alternatives, a row in the prelude or override table when it is a build seam, `ARCHITECTURE.md` when
