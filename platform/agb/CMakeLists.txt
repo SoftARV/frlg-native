@@ -1,6 +1,7 @@
 include(${CMAKE_SOURCE_DIR}/cmake/GamePipeline.cmake)
 
 add_library(agb STATIC
+    src/audio.c
     src/memmap.c
     src/dma.c
     src/bios.c

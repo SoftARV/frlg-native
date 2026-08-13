@@ -23,6 +23,16 @@
 // One frame's worth of 8-bit signed stereo, the two sides held separately the
 // way the mixer keeps them. `rate` is the rate the samples are handed over at --
 // the mixer's own rate times the oversampling above.
+// Which half of the mixer to silence. Comparing the sampled side against the
+// hardware channels needs one of them out of the way, and comparing against the
+// reference needs the same cut on both: mgba-audio takes FRLG_AUDIO_MUTE with
+// the same two words. Not a game setting -- the sound options the game itself
+// offers do something else entirely.
+#define AGB_AUDIO_DIRECT 1
+#define AGB_AUDIO_PSG 2
+
+int agb_audio_muted(int side);
+
 typedef void (*agb_audio_sink)(const int8_t *right, const int8_t *left, int samples, int rate);
 
 void agb_m4a_set_audio_sink(agb_audio_sink sink);

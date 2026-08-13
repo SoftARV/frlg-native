@@ -12,8 +12,10 @@
 // resampling of a square wave by point sampling, which is not what the hardware
 // does; it is what the host would have to do anyway, one stage earlier.
 
+#include <stdlib.h>
 #include <string.h>
 
+#include "agb/audio.h"
 #include "agb/memmap.h"
 #include "agb/psg.h"
 
@@ -493,6 +495,9 @@ void agb_psg_mix(int8_t *right, int8_t *left, int samples, int rate)
     if (rate <= 0 || !(reg(REG_OFFSET_SOUNDCNT_X) & 0x0080))
         return;
 
+    if (agb_audio_muted(AGB_AUDIO_PSG))
+        return;
+
     square_update(&square1, REG_OFFSET_SOUND1CNT_H, REG_OFFSET_SOUND1CNT_X, 1);
     square_update(&square2, REG_OFFSET_SOUND2CNT_L, REG_OFFSET_SOUND2CNT_H, 0);
     wave_update();
@@ -529,8 +534,16 @@ void agb_psg_mix(int8_t *right, int8_t *left, int samples, int rate)
 
         // Per-side master volume is one of eight steps, and the ratio above
         // scales the whole side against the software mixer's output.
-        sum_right = sum_right * (volume_right + 1) * ratio / (32 * VOICE_SCALE);
-        sum_left = sum_left * (volume_left + 1) * ratio / (32 * VOICE_SCALE);
+        //
+        // The divisor is what sets the hardware channels against the sampled
+        // ones, and it is not free: at full settings the four channels together
+        // reach the same amplitude as one FIFO at full volume, which in this
+        // buffer's units is 120 against 127. Halving that -- which is what a
+        // divisor of 32 did -- leaves every square, sweep and noise effect a
+        // little over 5 dB under the music, which is audible as effects that
+        // cannot be heard over the track they play against.
+        sum_right = sum_right * (volume_right + 1) * ratio / (16 * VOICE_SCALE);
+        sum_left = sum_left * (volume_left + 1) * ratio / (16 * VOICE_SCALE);
 
         right[i] = add_clamped(right[i], sum_right);
         left[i] = add_clamped(left[i], sum_left);

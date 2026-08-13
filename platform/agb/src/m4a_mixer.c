@@ -7,8 +7,10 @@
 // numbering.
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "agb/audio.h"
 #include "agb/m4a.h"
 #include "agb/memmap.h"
 
@@ -720,6 +722,13 @@ static s8 clamp8(int v)
 void agb_m4a_apply_output_mix(s8 *a, s8 *b, int samples)
 {
     uint16_t mixing = *(const volatile uint16_t *)(agb_mem.io + REG_OFFSET_SOUNDCNT_H);
+
+    // FRLG_AUDIO_MUTE=direct clears the two FIFOs' routing, which is the lever
+    // mgba-audio has on the reference. Weighing the sampled side against the
+    // hardware channels needs the same cut on both sides of the comparison.
+    if (agb_audio_muted(AGB_AUDIO_DIRECT))
+        mixing &= (uint16_t)~(SOUND_A_RIGHT | SOUND_A_LEFT | SOUND_B_RIGHT | SOUND_B_LEFT);
+
     // Half is the value with the bit clear, so this is a shift rather than a
     // multiply: full keeps the sample, half drops one bit.
     int a_shift = (mixing & SOUND_A_MIX_FULL) ? 0 : 1;
