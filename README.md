@@ -11,6 +11,14 @@ The game source itself is consumed unmodified as a pinned submodule.
 Because the original code runs, battle formulas, trainer AI, encounter rates, frame timing and the
 original games' own quirks are correct by construction rather than by effort.
 
+That is the floor, not the ceiling. The host is not a Game Boy Advance, and the limits the original
+was built inside — a 240×160 screen, a 13 kHz sound mixer, 256 KB of work RAM — are not the game's
+requirements. Most of the game will stay as it is, and a lot of it will not: **this is an enhanced
+port, not a preservation project.** The first such change has landed already, a new save now
+defaulting to stereo sound. What keeps that honest is the reference emulator the test suite runs
+against, which says exactly what differs from the original so we can tell a change we chose from a
+bug we did not.
+
 ## Status: experimental
 
 **It plays, and it breaks.** The intro, the overworld, saving, the Pokémon Center, the PC, the

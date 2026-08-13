@@ -53,6 +53,12 @@ A reimplementation earns each of those and then maintains a register of where it
 We have no such register and never will. This is the single largest advantage of the approach and
 it should shape where effort goes: not into parity, into everything above it.
 
+**Everything above it is the point.** The host is not a Game Boy Advance, and the 240×160 screen, the
+13,379 Hz mixer and the 16.78 MHz ARM7 are what the original was affordable within rather than
+anything the game requires. Most of it stays as it is; a lot of it will not. Deliberate divergence
+from the cartridge is the purpose, not a debt against it, and only *accidental* divergence is a bug —
+[ADR 0015](adr/0015-enhancement-over-preservation.md).
+
 **What we ship.** Code and a generated manifest. No game data — that comes from the player's own
 ROM ([§5](#5-game-data)).
 
@@ -159,11 +165,12 @@ Two include-path hazards, both of which produced silent wrong behaviour before b
 - **The directory must not be named twice.** cpp de-duplicates the search path and keeps the later
   entry, so `-iquote include` combined with `-idirafter include` silently discards the `-iquote`.
 
-The sound default is the only row that changes the *game* rather than the machine under it, and it is
-deliberate: the hardware has always supported stereo, this port reproduces the reference's image to
-within 0.2 dB, and the option screen still offers mono. It is a macro rather than an override because
-`OPTIONS_SOUND_MONO` has exactly one use in the whole game — `SetDefaultOptions` in `new_game.c`. It
-reaches only new saves; the field lives in the save block, so an existing one keeps whatever it stored.
+The sound default is the first row that changes the *game* rather than the machine under it, and it
+will not be the last — see [ADR 0015](adr/0015-enhancement-over-preservation.md). Stereo costs a
+native host nothing, the port reproduces the reference's image to within 0.2 dB, and the option screen
+still offers mono. A macro rather than an override because `OPTIONS_SOUND_MONO` has exactly one use in
+the whole game — `SetDefaultOptions` in `new_game.c`. It reaches only new saves; the field lives in
+the save block, so an existing one keeps whatever it stored.
 
 The prelude is invisible at the call site, which is its risk: if pret changes one of the macros it
 overrides, we would diverge silently. `tools/check_drift.py` records the upstream hash of every
@@ -182,8 +189,11 @@ Every override is listed here, with its reason and the upstream file it forked f
 | --- | --- | --- |
 | _(none yet)_ | | |
 
-Overrides are a cost, not a convenience: each one stops receiving upstream fixes. Prefer a shadow
-macro; reach for an override only when there is no macro seam.
+Overrides carry a **maintenance** cost, not a fidelity one: a forked file stops receiving upstream
+fixes. Prefer a shadow macro; reach for an override only when there is no macro seam. That an override
+makes the port differ from the cartridge is not itself an objection — deliberate divergence is what
+this project is for ([ADR 0015](adr/0015-enhancement-over-preservation.md)); it just has to be
+recorded, which is what the table above is.
 
 ### 4.3 Files not built
 
