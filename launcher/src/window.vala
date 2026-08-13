@@ -10,12 +10,18 @@ public class Window : Adw.ApplicationWindow {
     [GtkChild] private unowned Adw.StatusPage import_page;
 
     private Game? game = null;
+    private SimpleAction? forget_action = null;
 
     public Window (Gtk.Application app) {
         Object (application: app);
     }
 
     construct {
+        forget_action = new SimpleAction ("forget", null);
+        forget_action.activate.connect (this.on_forget);
+        forget_action.set_enabled (false);
+        this.add_action (forget_action);
+
         import_button.clicked.connect (this.on_import_clicked);
         play_button.clicked.connect (this.on_play_clicked);
 
@@ -39,6 +45,7 @@ public class Window : Adw.ApplicationWindow {
         yield game.describe ();
         game_row.title = game.title;
         stack.visible_child_name = game.imported ? "library" : "import";
+        forget_action.set_enabled (game.imported);
     }
 
     private void on_import_clicked () {
@@ -80,6 +87,30 @@ public class Window : Adw.ApplicationWindow {
             import_error.visible = true;
             return;
         }
+        yield this.refresh ();
+    }
+
+    // Destructive and easy to hit by accident from a menu, so it asks -- and
+    // says what it does not touch, which is the part worth being sure about.
+    private void on_forget () {
+        var dialog = new Adw.AlertDialog (
+            _("Remove the imported game?"),
+            _("The game will have to be imported from a ROM again. Your saves and your ROM file are not touched."));
+        dialog.add_response ("cancel", _("Cancel"));
+        dialog.add_response ("remove", _("Remove"));
+        dialog.set_response_appearance ("remove", Adw.ResponseAppearance.DESTRUCTIVE);
+        dialog.set_default_response ("cancel");
+        dialog.set_close_response ("cancel");
+
+        dialog.response.connect ((response) => {
+            if (response == "remove")
+                this.do_forget.begin ();
+        });
+        dialog.present (this);
+    }
+
+    private async void do_forget () {
+        yield game.forget ();
         yield this.refresh ();
     }
 

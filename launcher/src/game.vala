@@ -105,6 +105,21 @@ public class Game : Object {
         }
     }
 
+    // Throws away the imported copy. The player's ROM and saves are untouched;
+    // this only makes the next launch import again, which is otherwise a path
+    // you get to walk once.
+    public async bool forget () {
+        try {
+            int status;
+            yield run ({ binary, "--forget" }, out status);
+            yield describe ();
+            return status == 0;
+        } catch (Error e) {
+            warning ("could not remove the imported game: %s", e.message);
+            return false;
+        }
+    }
+
     // Runs the game and returns when it exits. The caller is expected to be out
     // of the way in the meantime.
     public async void play (string? save_path) throws Error {

@@ -118,6 +118,13 @@ template $FrlgWindow : Adw.ApplicationWindow {
 menu primary_menu {
   section {
     item {
+      label: _("Remove imported game…");
+      action: "win.forget";
+    }
+  }
+
+  section {
+    item {
       label: _("_Settings");
       action: "app.settings";
     }

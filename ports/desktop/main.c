@@ -427,6 +427,29 @@ static int command_import(const char *path)
     return 0;
 }
 
+// The other half of --import, and mostly a testing tool: importing is a
+// first-boot path, and a first boot is otherwise something you get one of.
+// Removing what was imported does not touch the player's ROM or their saves.
+static int command_forget(void)
+{
+    char cache[512];
+    const char *cached = cache_path(cache, sizeof(cache));
+
+    if (cached == NULL)
+    {
+        printf("ok=no\nerror=there is nowhere to keep an imported game\n");
+        return 4;
+    }
+
+    // Removing something that is not there is the outcome asked for, so it is
+    // success rather than an error to report.
+    if (remove(cached) == 0)
+        printf("ok=yes\nremoved=%s\n", cached);
+    else
+        printf("ok=yes\nremoved=\n");
+    return 0;
+}
+
 static void load_cart(void)
 {
     const char *path = getenv("FRLG_ROM");
@@ -487,6 +510,8 @@ int main(int argc, char **argv)
     // questions about the install, not a run of the game.
     if (argc > 1 && strcmp(argv[1], "--describe") == 0)
         return command_describe();
+    if (argc > 1 && strcmp(argv[1], "--forget") == 0)
+        return command_forget();
     if (argc > 1 && strcmp(argv[1], "--import") == 0)
     {
         if (argc < 3)
