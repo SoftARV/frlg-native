@@ -577,8 +577,15 @@ Verified the way it has to be verified: frames pixel-identical between the two b
 bytes of audio identical byte for byte over a battle trace, and the 13½-minute play-through replaying
 to the same frame count with the same watchdog ticks.
 
-Still to come: SHA-1 verification against the supported revisions, the cache, and the first-boot flow
-— which belongs to the launcher, since that is what owns import and launch.
+**Verification and the cache are done.** The expected hash comes from the ROM the generators read, so
+the two cannot drift; it is checked before relocation; a rejection names what it was given rather than
+refusing it; and the relocated image is kept, keyed by the manifest's hash and fingerprinted against
+the native addresses it was relocated for, so a cache from another build is recognised instead of
+trusted. Import costs 26 ms — the cache is not there for speed, it is there so the player's ROM does
+not have to still exist months later.
+
+Still to come: the first-boot flow, which belongs to the launcher, since that is what owns import and
+launch. The seam it needs is a way to import without playing.
 
 Ends with a binary containing no game data. Until this lands, nothing can be distributed to anyone.
 
