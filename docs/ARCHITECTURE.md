@@ -242,9 +242,12 @@ all with a save present**. Pointing the three pointers at their own objects make
 where it belongs; offset zero is one of the offsets `SetSaveBlocksPointers` itself picks, so it is a
 state the game already handles.
 
-Ten instances in six phases, every one found by playing rather than by reading, and each only
+Eleven instances in seven phases, every one found by playing rather than by reading, and each only
 reachable once the phase before it worked: a save to exist, a save to load, a battle to reach, a
-Pokémon worth looking at, a trainer card worth opening, a box to move a Pokémon into.
+Pokémon worth looking at, a trainer card worth opening, a box to move a Pokémon into, a Teachy TV
+lesson to watch. The eleventh is `teachy_tv.c`, and it is the plainest instance yet: the screen frees
+its state and clears the pointer, and the grass-animation sprites it created keep running from
+`AnimateSprites` in the same frame, reading 0x4006 bytes into a struct that is gone.
 
 **The tenth is a write, and not a freed-pointer one.** `SetMovingMonPriority` sets the held Pokémon's
 sprite priority, and `DoCursorNewPosUpdate` calls it whenever the cursor moves onto the buttons, the

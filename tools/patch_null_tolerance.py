@@ -230,6 +230,27 @@ EDITS = {
             r"\g<keep>    if (sMapCursor == ((void *)0))\n        return MAPSEC_NONE;\n",
         ),
     ],
+    # Teachy TV frees its state and clears the pointer, but the grass animation
+    # sprites it created are still in gSprites and their callback runs from
+    # AnimateSprites in the same frame. It reads sResources->grassAnimDisabled,
+    # which is 0x4006 bytes into a struct that is no longer there. On hardware
+    # that lands in BIOS ROM, reads garbage, and the sprite is destroyed a frame
+    # later anyway.
+    #
+    # Freed without clearing, as with the storage system: nothing tests this
+    # pointer for null -- all 36 uses dereference it -- so the read lands on
+    # freed heap instead, which is mapped.
+    "teachy_tv.c": [
+        (
+            "Teachy TV's grass sprites reading their freed state",
+            re.compile(
+                r"Free\(sResources\);\s*sResources =\s*"
+                r"(?:#[^\n]*\n\s*)*\(\(void \*\)0\)\s*"
+                r"(?:#[^\n]*\n\s*)*;"
+            ),
+            "Free(sResources);",
+        ),
+    ],
     # DoCursorNewPosUpdate sets the held mon's sprite priority whenever the
     # cursor moves onto the buttons, the party or a box -- but only
     # UpdateCursorPos checks sIsMonBeingMoved first. With nothing held,
