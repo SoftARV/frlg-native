@@ -32,9 +32,16 @@ SB2, SB1_START, SB1_END = 0, 1, 4
 
 # widened members carry an alignment attribute before the semicolon
 MEMBER = re.compile(
-    r"^\s*(?:const\s+)?(?:(struct|union)\s+(\w+)|[\w\s]+?)\s+(\**)(\w+)(\[(\d+)\])?"
+    r"^\s*(?:const\s+)?(?:(struct|union)\s+(\w+)|[\w\s]+?)\s+(\**)(\w+)((?:\[\d+\])*)"
     r"\s*(?:__attribute__\(\(.*?\)\)\s*)?;"
     r"\s*/\*\s*(\d+)\s+(\d+)\s*\*/")
+
+# Bitfields print their position as `byte: bit` rather than a plain offset, so
+# they do not match the pattern above. Skipping them silently drops real data --
+# SaveBlock2 keeps the player's options in six of them. Each is copied as its
+# whole storage unit; overlapping copies of the same bytes are harmless.
+BITFIELD = re.compile(
+    r"^\s*[\w\s]+?\s+(\w+):\d+;\s*/\*\s*(\d+):\s*\d+\s+(\d+)\s*\*/")
 
 
 def members(binary, tname):
@@ -50,12 +57,38 @@ def members(binary, tname):
         if depth == 1:
             m = MEMBER.match(line)
             if m:
-                kind, tn, ptr, name, _, count, off, size = m.groups()
+                kind, tn, ptr, name, dims, off, size = m.groups()
                 if not ptr:
-                    found[name] = (kind, tn, int(off), int(size),
-                                   int(count) if count else 1)
+                    # dims may be multi-dimensional: registeredTexts[10][21] is
+                    # 210 bytes of real save data and was silently skipped when
+                    # only a single dimension was matched.
+                    count = 1
+                    for d in re.findall(r"\[(\d+)\]", dims or ""):
+                        count *= int(d)
+                    found[name] = (kind, tn, int(off), int(size), count)
+            else:
+                b = BITFIELD.match(line)
+                if b:
+                    name, off, size = b.groups()
+                    found[name] = (None, None, int(off), int(size), 1)
         depth += opens - closes
     return found
+
+
+def only_padding_changed(old_bin, new_bin, tname):
+    """True when a type gained trailing padding and nothing moved inside it.
+
+    Widening appends padding; every member keeps its offset. Such a type is
+    copied whole rather than member by member, which is both simpler and safer:
+    walking members means parsing them, and bitfields do not print like other
+    members. Missing the 21 bitfields at the front of QuestLogObjectEvent lost
+    `active` and `invisible` for every object in the quest log, which showed up
+    as missing sprites in the recap the game plays when a save is loaded.
+    """
+    mo, mn = members(old_bin, tname), members(new_bin, tname)
+    if set(mo) != set(mn):
+        return False
+    return all(mo[k][2] == mn[k][2] and mo[k][3] == mn[k][3] for k in mo)
 
 
 def plan(old_bin, new_bin, tname, obase, nbase, ops, depth=0):
@@ -72,9 +105,13 @@ def plan(old_bin, new_bin, tname, obase, nbase, ops, depth=0):
         if not tn:
             sys.exit(f"migrate_save: {tname}.{name} changed size but is not a struct")
         oelem, nelem = osize // ocount, nsize // ncount
+        whole = only_padding_changed(old_bin, new_bin, tn)
         for i in range(ocount):
-            plan(old_bin, new_bin, tn, obase + ooff + i * oelem,
-                 nbase + noff + i * nelem, ops, depth + 1)
+            if whole:
+                ops.append((obase + ooff + i * oelem, nbase + noff + i * nelem, oelem))
+            else:
+                plan(old_bin, new_bin, tn, obase + ooff + i * oelem,
+                     nbase + noff + i * nelem, ops, depth + 1)
 
 
 def checksum(data, size):

@@ -90,7 +90,20 @@ endif()
 # symbol table and the decompilation's sources -- because a hand-written one goes
 # stale the moment the pin moves, and a symbol that quietly started being
 # compiled in again would say nothing.
-include("${CMAKE_CURRENT_LIST_DIR}/game_data_symbols.cmake")
+# Two lists exist. The default is the one every configuration has been verified
+# against; FRLG_GAME_DATA_STATICS selects the full one, which also extracts the
+# file-scope statics and leaves essentially no game data in the binary.
+#
+# This is an option rather than a file somebody swaps in, because swapping it in
+# is exactly how a build directory called "zero-play" quietly became a
+# globals-only build: the list is restored, the directory is rebuilt, and its
+# name still claims otherwise.
+option(FRLG_GAME_DATA_STATICS "Extract file-scope statics from the ROM as well" OFF)
+if(FRLG_GAME_DATA_STATICS)
+    include("${CMAKE_CURRENT_LIST_DIR}/game_data_symbols_statics.cmake")
+else()
+    include("${CMAKE_CURRENT_LIST_DIR}/game_data_symbols.cmake")
+endif()
 
 set(FRLG_GAME_EXCLUDED
     multiboot.c       # ARM busy-wait; GameCube link, out of scope
