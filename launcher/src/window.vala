@@ -16,6 +16,7 @@ public class Window : Adw.ApplicationWindow {
     private Game? game = null;
     private SimpleAction? forget_action = null;
     private Profiles profiles = new Profiles ();
+    private Settings settings = new Settings ();
     private Gtk.CheckButton? radio_group = null;
     private Gtk.Widget[] save_rows = {};
 
@@ -281,6 +282,50 @@ public class Window : Adw.ApplicationWindow {
                 toasts.add_toast (new Adw.Toast (_("Save deleted")));
             }
         });
+        dialog.present (this);
+    }
+
+    // Two groups, and the split is not cosmetic: one is about this computer and
+    // applies before any save is loaded, the other is stored inside the save it
+    // belongs to. The second is not built yet, and says so rather than showing
+    // switches that would not stick.
+    public void show_settings () {
+        var page = new Adw.PreferencesPage ();
+
+        var mine = new Adw.PreferencesGroup () {
+            title = _("This computer"),
+            description = _("Applies to every game and every save."),
+        };
+
+        var recording = new Adw.SwitchRow () {
+            title = _("Record every session"),
+            subtitle = _("Keeps what you pressed, the save you started from and the log, so a crash can be replayed. Five runs are kept."),
+            active = settings.get_bool ("record-sessions", true),
+        };
+        recording.notify["active"].connect (() => {
+            settings.set_bool ("record-sessions", recording.active);
+        });
+        mine.add (recording);
+
+        var scale = new Adw.SpinRow.with_range (1, 8, 1) {
+            title = _("Window size"),
+            subtitle = _("How many screen pixels to a Game Boy Advance pixel."),
+            value = settings.get_int ("scale", 6),
+        };
+        scale.notify["value"].connect (() => {
+            settings.set_int ("scale", (int) scale.value);
+        });
+        mine.add (scale);
+        page.add (mine);
+
+        var theirs = new Adw.PreferencesGroup () {
+            title = _("The selected save"),
+            description = _("Sound, text speed and the rest are kept inside each save, so they belong to the game rather than to this computer. Not wired up yet."),
+        };
+        page.add (theirs);
+
+        var dialog = new Adw.PreferencesDialog ();
+        dialog.add (page);
         dialog.present (this);
     }
 

@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "host_session.h"
+#include "host_settings.h"
 
 // How many runs are kept. Enough that a tester who plays a few times still has
 // the one that broke, small enough that a save copy each is not a disk problem.
@@ -152,8 +153,11 @@ int host_session_open(void)
 
     // The opt-out. Recording is the default while the port is in active
     // development, because a crash nobody can replay costs more than the disk
-    // does; a launcher will offer this as a setting once there is a launcher.
+    // does (ADR 0016). FRLG_NO_RECORD is what the harnesses set and it wins;
+    // the setting is what a person chose in the launcher.
     if (off != NULL && off[0] != '\0' && off[0] != '0')
+        return -1;
+    if (off == NULL && !host_setting_bool("record-sessions", 1))
         return -1;
 
     if (data_root(root, sizeof(root)) != 0)

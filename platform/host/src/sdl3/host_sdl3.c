@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "host.h"
+#include "host_settings.h"
 
 // Drift between the game's frame pacing and the sound card's clock has to show
 // up somewhere; these are where it does.
@@ -90,8 +91,12 @@ bool host_video_open(const char *title, int width, int height, int scale)
         float content = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
         char line[96];
 
+        // Same order as everywhere else: the environment is what a run was
+        // told, the setting is what a person chose, the display is the guess.
         if (want != NULL)
             scale = atoi(want) > 0 ? atoi(want) : scale;
+        else if (host_setting_int("scale", 0) > 0)
+            scale = host_setting_int("scale", scale);
         else if (content >= 1.5f)
             scale = (int)(scale * content + 0.5f);
 

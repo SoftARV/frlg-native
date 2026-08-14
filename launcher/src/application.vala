@@ -44,16 +44,10 @@ public class Application : Adw.Application {
         launcher.launch.begin (this.active_window, null, null);
     }
 
-    // A placeholder on purpose: what belongs here is still being decided, and
-    // an empty dialog is a more honest state than invented switches. The port's
-    // own settings and the save's game options are two different things and
-    // will arrive as two groups.
     private void on_settings () {
-        var dialog = new Adw.AlertDialog (
-            _("Settings"),
-            _("Not built yet. This is where the port's own settings — recording, scale, audio — and the selected save's game options will live."));
-        dialog.add_response ("close", _("Close"));
-        dialog.present (this.active_window);
+        var window = this.active_window as Frlg.Window;
+        if (window != null)
+            window.show_settings ();
     }
 }
 

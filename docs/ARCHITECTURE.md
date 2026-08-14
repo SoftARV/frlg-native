@@ -444,6 +444,17 @@ to remember to keep; the fingerprint is the actual answer to "did I write this".
 Import costs 26 ms, so the cache buys almost no time. What it buys is not needing the player's ROM
 file to still exist, still be where it was, and still be readable, months later.
 
+**Settings are two different things.** What the launcher writes to
+`$XDG_CONFIG_HOME/frlg-native/settings.ini` are the port's own — recording, window size — which the
+game has no concept of and which apply before any save is loaded. The seven the *game* keeps are
+bitfields inside its save, so they belong to a save profile rather than to the install, and they are
+reached through the game rather than by the launcher parsing that format.
+
+Every setting has an `FRLG_` variable that came first, and **the environment still wins**. A setting
+that could override one would make a recorded run depend on what somebody had clicked, which is the
+thing the lockstep clock exists to prevent — the golden and audio harnesses set `FRLG_NO_RECORD`, and
+they must keep meaning it.
+
 **A launcher asks the game about itself.** One binary is one title, and it is the only thing that
 knows which ROM its manifest describes or whether that ROM has been imported — so the launcher does
 not carry a second copy of any of it. `--describe` prints `title`, `sha1`, `cache` and `imported`;
