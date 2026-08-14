@@ -584,8 +584,19 @@ the native addresses it was relocated for, so a cache from another build is reco
 trusted. Import costs 26 ms — the cache is not there for speed, it is there so the player's ROM does
 not have to still exist months later.
 
-Still to come: the first-boot flow, which belongs to the launcher, since that is what owns import and
-launch. The seam it needs is a way to import without playing.
+The first-boot flow belongs to the launcher, which owns import and launch and has the seams it needs:
+`--describe`, `--import`, `--forget`, `--options` and `--set-option`.
+
+**What is not done is the thing the phase is named for.** The binary still compiles in the game data
+it is supposed to read from the player's ROM. Symbol binding only ever reached symbols the linker
+reported *unresolved*, which is the data from `data/*.s`; everything the decompilation defines in C —
+species, moves, learnsets, and the graphics incbinned from C — resolves locally and is compiled in.
+46 of 194 high-entropy ROM chunks are present in the binary, in `.rodata`.
+
+That is ADR 0006's *developer* data path, the one it says is never distributed, and nothing announced
+that we were still on it. [Issue #11](https://github.com/SoftARV/frlg-native/issues/11) carries it,
+including why "it links" cannot be the test: a symbol bound to the cart region *and* defined locally
+does not fail the link, the definition just wins.
 
 Ends with a binary containing no game data. Until this lands, nothing can be distributed to anyone.
 
