@@ -183,6 +183,81 @@ def unbindable_sites(elf, rom_path, readelf="arm-none-eabi-readelf"):
     return out
 
 
+def unsafe_closure(elf, rom_path, extent, unbindable, readelf="arm-none-eabi-readelf"):
+    """Symbols that must not be bound, following pointers as far as they go.
+
+    Refusing a symbol because *it* holds an unresolvable pointer is not enough.
+    A table that holds only data pointers is refused by nothing, and binding it
+    hands the game the cart's copy of whatever it points at -- which may be a
+    table that was refused, and whose function pointers are therefore still
+    cartridge addresses.
+
+    That is the crash at frame 2964: a bound table pointed at the cart's copy of
+    sSpeedNormalStepFuncs, which pointed at the ROM's Step1. Each link was
+    individually defensible.
+
+    So unsafety travels backwards along pointers: seed it with the symbols that
+    directly contain an unresolvable site, then mark everything that can reach
+    one.
+    """
+    import bisect
+    import struct
+
+    starts = sorted(extent.items(), key=lambda kv: kv[1][0])
+    addresses = [v[0] for _, v in starts]
+
+    def owner(address):
+        i = bisect.bisect_right(addresses, address) - 1
+        if i < 0:
+            return None
+        name, (start, size) = starts[i]
+        return name if start <= address < start + size else None
+
+    sections = elfsections.read_sections(elf, readelf)
+    data_sections = elfsections.data_relocation_sections(sections)
+    rom = open(rom_path, "rb").read()
+
+    # Who points at whom, and who directly holds something unresolvable.
+    points_at, unsafe = {}, set()
+    section, listing = None, subprocess.run([readelf, "-rW", elf],
+                                            capture_output=True, text=True).stdout
+    for line in listing.splitlines():
+        match = re.match(r"Relocation section '(\S+)'", line)
+        if match:
+            section = match.group(1)
+            continue
+        if section not in data_sections:
+            continue
+        parts = line.split()
+        if len(parts) < 4 or not re.fullmatch(r"[0-9a-f]{8}", parts[0]):
+            continue
+
+        site = int(parts[0], 16)
+        if not (0x08000000 <= site < 0x08000000 + len(rom) - 4):
+            continue
+        holder = owner(site)
+        if holder is None:
+            continue
+        if site in unbindable:
+            unsafe.add(holder)
+            continue
+
+        word = struct.unpack_from("<I", rom, site - 0x08000000)[0]
+        target = owner(word) if 0x08000000 <= word < 0x09000000 else None
+        if target is not None and target != holder:
+            points_at.setdefault(target, set()).add(holder)
+
+    # Anything that can reach an unsafe symbol is unsafe.
+    queue = list(unsafe)
+    while queue:
+        current = queue.pop()
+        for holder in points_at.get(current, ()):
+            if holder not in unsafe:
+                unsafe.add(holder)
+                queue.append(holder)
+    return unsafe
+
+
 def defined_outside_cart(binary):
     """Symbols the port defines itself rather than reading from the cart image.
 
@@ -263,6 +338,9 @@ def main():
 
     unbindable = unbindable_sites(args.elf, args.rom) if args.rom else set()
 
+    unsafe_symbols = (unsafe_closure(args.elf, args.rom, extent, unbindable)
+                      if args.rom else set())
+
     by_unit, unresolved, unsafe = {}, [], []
     for symbol in sorted(rom):
         if symbol in skip or symbol not in defines:
@@ -276,9 +354,9 @@ def main():
         if Path(unit).name in skip_files:
             continue
 
-        # A symbol holding a pointer nothing can resolve stays compiled in.
-        start, size = extent.get(symbol, (0, 0))
-        if size and any(start <= site < start + size for site in unbindable):
+        # A symbol that holds a pointer nothing can resolve -- or that can reach
+        # one by following pointers -- stays compiled in.
+        if symbol in unsafe_symbols:
             unsafe.append(symbol)
             continue
         # An array with no bound of its own needs the ROM's byte count to build
@@ -300,12 +378,11 @@ def main():
         if unit is None or Path(unit).name in skip_files:
             continue
 
-        # The same guard the globals get, and it was missing here. A static
-        # table of function pointers -- sWeatherFuncs is one -- points at the
-        # ROM's addresses once it points at the cart, and the game jumps through
-        # one the first time the weather changes.
-        start, size = extent.get(symbol, (0, 0))
-        if size and any(start <= site < start + size for site in unbindable):
+        # The same guard the globals get. A static table of function pointers --
+        # sWeatherFuncs is one -- points at the ROM's addresses once it points at
+        # the cart, and the game jumps through one the first time the weather
+        # changes.
+        if symbol in unsafe_symbols:
             unsafe.append(symbol)
             continue
 
