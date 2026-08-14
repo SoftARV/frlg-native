@@ -27,7 +27,10 @@ def cut_definition(text, symbol):
     # is the shape that catches a tidier pattern out.
     pattern = re.compile(
         r"^([^\S\n]*)((?:[A-Za-z_][A-Za-z0-9_]*\s+|\*+\s*)+)"
-        + re.escape(symbol) + r"\s*((?:\[[^\]]*\])+)\s*=\s*\{",
+        # Dimensions optional: plenty of these are a single struct rather than
+        # an array, and `extern const struct SpriteTemplate gFoo;` is the right
+        # declaration for one.
+        + re.escape(symbol) + r"\s*((?:\[[^\]]*\])*)\s*=\s*\{",
         re.MULTILINE)
 
     match = pattern.search(text)

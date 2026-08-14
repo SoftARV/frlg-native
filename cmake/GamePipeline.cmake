@@ -83,16 +83,14 @@ endif()
 
 # Data defined in a file that also holds code, which is most of it. The whole
 # file cannot be dropped, so the definition is cut out of the preprocessed copy
-# and the declaration the decompilation already puts in a header is what the
-# rest of the file compiles against. The symbol is then unresolved and binds
-# into the cart region like any other.
+# and replaced with a declaration; the symbol is then unresolved and binds into
+# the cart region like any other.
 #
-# gTypeEffectiveness is absent on purpose: two places take ARRAY_COUNT of it,
-# and an array with no bound has no size.
-set(FRLG_GAME_DATA_SYMBOLS
-    "item.c=gItems"
-    "pokemon.c=gSpeciesInfo,gBattleMoves,gLevelUpLearnsets,gEvolutionTable"
-    "wild_encounter.c=gWildMonHeaders")
+# The list is generated -- tools/gen_data_symbols.py, from the ROM build's own
+# symbol table and the decompilation's sources -- because a hand-written one goes
+# stale the moment the pin moves, and a symbol that quietly started being
+# compiled in again would say nothing.
+include("${CMAKE_CURRENT_LIST_DIR}/game_data_symbols.cmake")
 
 set(FRLG_GAME_EXCLUDED
     multiboot.c       # ARM busy-wait; GameCube link, out of scope
