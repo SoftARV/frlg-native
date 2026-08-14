@@ -41,6 +41,12 @@ def type_sizes(binary):
 
 
 def extracted_symbols(path):
+    """Every symbol the cart supplies: the per-symbol list, plus whole files.
+
+    Files in FRLG_GAME_DATA_ONLY are cut wholesale and never appear in the
+    symbol list, so reading only that list misses everything they define --
+    which is how the trainer party structs reached a battle unaudited.
+    """
     names = set()
     for line in open(path):
         m = re.search(r'"([^"=]+)=([^"]*)"', line)
@@ -48,6 +54,19 @@ def extracted_symbols(path):
             for s in m.group(2).split(","):
                 if s:
                     names.add(s.split("@")[0].split("#")[0])
+
+    pipeline = open(f"{ROOT}/cmake/GamePipeline.cmake").read()
+    block = re.search(r"set\(FRLG_GAME_DATA_ONLY\n(.*?)\)\n", pipeline, re.S)
+    for base in (block.group(1).split() if block else []):
+        obj = f"{VENDOR}/build/firered/src/{base[:-2]}.o"
+        if not os.path.exists(obj):
+            continue
+        out = subprocess.run(["arm-none-eabi-nm", "--defined-only", obj],
+                             capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            p = line.split()
+            if len(p) == 3 and p[1] in "RrDdBb":
+                names.add(p[2])
     return names
 
 

@@ -54,7 +54,17 @@ TYPES = (
     ("struct", "ListMenuWindowRect", 8),
     ("struct", "CreditsOverworldCmd", 8),
     ("struct", "BattleTowerPokemonTemplate", 16),
+    ("struct", "TrainerMonNoItemDefaultMoves", 8),
+    ("struct", "TrainerMonNoItemCustomMoves", 16),
 )
+
+# The trainer party structs come from data.c, which is cut whole rather than by
+# symbol, so they are reached through FRLG_GAME_DATA_ONLY and not through the
+# symbol list. Confirmed the same way as the rest:
+#   sParty_YoungsterJosh   24 / 3 mons = 8   (ours 6)
+#   sParty_CamperLiam      32 / 2 mons = 16  (ours 14)
+# A wrong stride here hands a battle the wrong species at the wrong level --
+# reported from play as a level 0 Charizard on a Viridian Forest bug catcher.
 
 ALIGNED = "__attribute__((aligned(4)))"
 

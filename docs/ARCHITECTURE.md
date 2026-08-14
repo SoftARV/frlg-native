@@ -274,11 +274,18 @@ written, which makes `UpdateSpriteMatrixAnchorPos` divide by a zero scale. One m
 produced a hung battle, blank battlers, corrupt intro Pokémon and a `SIGFPE`, all at once.
 `struct MonCoords` is two bytes here and four there, which moves every battle sprite.
 
-**Eleven types are widened today.** Six are reachable from the list on `main`: `AffineAnimCmd`,
-`MonCoords`, `BattleMove`, `SpeciesInfo`, `Evolution` and `TrainerMoney`. Five more —
+**Thirteen types are widened today.** Eight are reachable from the list on `main`: `AffineAnimCmd`,
+`MonCoords`, `BattleMove`, `SpeciesInfo`, `Evolution`, `TrainerMoney` and the two trainer party
+structs, `TrainerMonNoItemDefaultMoves` and `TrainerMonNoItemCustomMoves`. Five more —
 `BattleWindowText`, `WinCoords`, `ListMenuWindowRect`, `CreditsOverworldCmd` and
 `BattleTowerPokemonTemplate` — are reachable only once the statics are extracted too. Each is
 verified against the ROM as above.
+
+The party structs are the reason the audit reads more than the symbol list. They live in `data.c`,
+which is cut *whole* rather than by symbol, so nothing named them anywhere the audit was looking; a
+wrong stride handed a Viridian Forest bug catcher a level 0 Charizard, found by playing. The audit
+now adds every symbol defined by a `FRLG_GAME_DATA_ONLY` file, which took its coverage from 6,453
+symbols to 14,339.
 
 `tools/audit_layout.py` reads every type's size from the binary's own debug information and reports
 which *extracted* symbols use one whose size is not a multiple of four. Reading sizes from a single
