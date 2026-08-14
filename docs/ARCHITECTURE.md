@@ -1163,6 +1163,24 @@ register rotation, this one is the mix into the DAC, which saturates.
 `platform/agb/src/flash.c` is 128 KiB of flash backed by a host file, byte-identical to the `.sav`
 format emulators produce, so saves move in and out of mGBA and off real hardware without conversion.
 
+**That was true of the file and false of what was in it, until [ADR 0019](adr/0019-saves-match-the-cartridge.md).**
+The sectors, footers, signature and checksums were always right; the *structures* written into them
+were not. Nine types inside the save blocks are narrower here than agbcc made them, so `SaveBlock1`
+was 15,528 bytes against the cartridge's 15,720 and `SaveBlock2` 3,872 against 3,876. Nothing about
+play was wrong — a save we wrote is a save we could read — but a save from a cartridge would have
+been misread, and ours would not have loaded anywhere else. The importer only ever worked on our own
+files, and nothing said so.
+
+Eight of those types are now widened to the cartridge's layout, and the two totals are asserted at
+compile time in every unit that defines them, so the format cannot drift quietly. `ExternalEventFlags`
+is left alone: upstream marks it `packed`, agbcc honours that, and it is 21 bytes in both.
+
+Saves written before that change are not merely stale — a misread field becomes a null pointer and
+the game faults within a few thousand frames. `tools/migrate_save.py` rewrites one into the new
+layout, deriving the field mapping from two binaries with `pahole` rather than from a table somebody
+maintains. It is verified by replaying a recorded trace against the migrated save and getting a frame
+byte-identical to the one the old build produced from the old save.
+
 **It replaces the chip, not the driver.** Upstream's `agb_flash*.c` talk to real flash through timed
 command sequences — write `0xAA` here, `0x55` there, poll until the chip stops toggling — and
 `ReadFlashId` runs code it has copied onto the stack, which no host target can do. They are not

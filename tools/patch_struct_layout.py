@@ -56,6 +56,25 @@ TYPES = (
     ("struct", "BattleTowerPokemonTemplate", 16),
     ("struct", "TrainerMonNoItemDefaultMoves", 8),
     ("struct", "TrainerMonNoItemCustomMoves", 16),
+
+    # Inside the save blocks. These do not come from the cart at all -- they are
+    # widened so that a save this port writes has the same layout as one a
+    # cartridge writes, which is what makes a real save importable and ours
+    # readable elsewhere. The check is not per-type here but the total: the save
+    # blocks must come out at exactly the sizes the reference build gives them,
+    # 15720 and 3876. See ADR 0019.
+    #
+    # ExternalEventFlags is deliberately absent: upstream already marks it
+    # __attribute__((packed)), which agbcc honours, so it is 21 bytes in both
+    # worlds and widening it would push everything after it out of place.
+    ("struct", "Time", 8),
+    ("struct", "Mail", 36),
+    ("struct", "DayCareMail", 56),
+    ("struct", "QuestLogObjectEvent", 20),
+    ("struct", "LinkBattleRecords", 88),
+    ("struct", "RamScriptData", 1000),
+    ("struct", "FameCheckerSaveData", 4),
+    ("struct", "WonderNewsMetadata", 4),
 )
 
 # The trainer party structs come from data.c, which is cut whole rather than by
@@ -68,11 +87,24 @@ TYPES = (
 
 ALIGNED = "__attribute__((aligned(4)))"
 
+# Not widened -- asserted. A save this port writes has to be a save a cartridge
+# could have written, and these two totals are what says so. Widening the wrong
+# set of members reaches neither number, which makes this a better check than any
+# per-type reasoning. See ADR 0019.
+TOTALS = (
+    ("struct", "SaveBlock1", 15720),
+    ("struct", "SaveBlock2", 3876),
+)
+
 
 def widen(text, kw, name, width, path):
     """Give one type the cartridge's width, and lock it there."""
     definition = re.compile(rf"{kw}\s+{name}\s*\{{(?P<body>[^{{}}]*?)\}}\s*;", re.S)
-    marker = f"sizeof({kw} {name})"
+    # A marker of our own, not a `sizeof` the game might legitimately write:
+    # game code does use sizeof on several of these, and treating that as "already
+    # widened" left some translation units narrow and others wide. Two definitions
+    # of SaveBlock1 in one binary is worse than the layout being wrong everywhere.
+    marker = f"/* frlg-widened {kw} {name} */"
 
     if f"{kw} {name}" not in text:
         return text, False
@@ -80,9 +112,10 @@ def widen(text, kw, name, width, path):
         return text, False   # already widened; the stage is idempotent
 
     patched, count = definition.subn(
-        lambda m: "%s %s {%s} %s;\n_Static_assert(%s == %d,\n"
+        lambda m: "%s %s {%s} %s;  %s\n_Static_assert(sizeof(%s %s) == %d,\n"
                   "    \"%s must match the cartridge's %d-byte layout\");"
-                  % (kw, name, m.group("body"), ALIGNED, marker, width, name, width),
+                  % (kw, name, m.group("body"), ALIGNED, marker, kw, name, width,
+                     name, width),
         text, count=1)
     if count == 0:
         sys.exit(f"patch_struct_layout: {path} names {kw} {name} but its definition "
@@ -102,6 +135,23 @@ def main():
     for kw, name, width in TYPES:
         text, did = widen(text, kw, name, width, path)
         changed = changed or did
+
+    # The save blocks keep their own definitions; only their totals are pinned.
+    for kw, name, total in TOTALS:
+        marker = f"/* frlg-total {kw} {name} */"
+        if f"{kw} {name}\n{{" not in text and f"{kw} {name} {{" not in text:
+            continue
+        if marker in text:
+            continue
+        definition = re.compile(rf"({kw}\s+{name}\s*\{{[^{{}}]*?(?:\{{[^{{}}]*\}}[^{{}}]*?)*\}}\s*;)",
+                                re.S)
+        patched, count = definition.subn(
+            lambda m: "%s  %s\n_Static_assert(sizeof(%s %s) == %d,\n"
+                      "    \"%s must match the layout a cartridge writes\");"
+                      % (m.group(1), marker, kw, name, total, name),
+            text, count=1)
+        if count:
+            text, changed = patched, True
 
     if changed:
         with open(path, "w", encoding="utf-8", errors="surrogateescape") as fh:
