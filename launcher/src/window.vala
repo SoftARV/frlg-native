@@ -89,6 +89,11 @@ public class Window : Adw.ApplicationWindow {
             row.activatable_widget = pick;
             saves_group.add (row);
             save_rows += row;
+
+            // Asked for rather than assumed: only the game can read its own
+            // save, so the row starts with what is known and fills in.
+            if (profile.has_save && game != null)
+                this.describe_save.begin (profile, row);
         }
     }
 
@@ -220,6 +225,12 @@ public class Window : Adw.ApplicationWindow {
         var dialog = new Adw.AlertDialog (_("That did not work"), message);
         dialog.add_response ("close", _("Close"));
         dialog.present (this);
+    }
+
+    private async void describe_save (Profile profile, Adw.ActionRow row) {
+        var summary = yield game.save_summary (profile.save_path);
+        if (summary != null)
+            row.subtitle = summary;
     }
 
     private void on_add_save () {

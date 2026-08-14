@@ -105,6 +105,32 @@ public class Game : Object {
         }
     }
 
+    // What a save says about itself, worded for a row subtitle. Null when there
+    // is nothing saved yet, which is a state rather than a failure.
+    public async string? save_summary (string save_path) {
+        try {
+            int status;
+            var output = yield run ({ binary, "--save-info", save_path }, out status);
+            var fields = parse (output ?? "");
+            if (fields.get ("ok") != "yes")
+                return null;
+
+            var hours = int.parse (fields.get ("hours") ?? "0");
+            var minutes = int.parse (fields.get ("minutes") ?? "0");
+            var badges = int.parse (fields.get ("badges") ?? "0");
+
+            var played = hours > 0
+                ? _("%d h %d min").printf (hours, minutes)
+                : _("%d min").printf (minutes);
+            var earned = badges == 0 ? _("no badges")
+                       : ngettext ("%d badge", "%d badges", badges).printf (badges);
+
+            return "%s · %s".printf (played, earned);
+        } catch (Error e) {
+            return null;
+        }
+    }
+
     // Throws away the imported copy. The player's ROM and saves are untouched;
     // this only makes the next launch import again, which is otherwise a path
     // you get to walk once.

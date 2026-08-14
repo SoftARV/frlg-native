@@ -427,6 +427,143 @@ static int command_import(const char *path)
     return 0;
 }
 
+// What a save says about itself, for a launcher listing them.
+//
+// The offsets are mirrored from the game's own headers rather than reached
+// through them: pulling global.h into port code would drag the game's whole
+// include world across a layer it is not supposed to cross. Same arrangement as
+// agb/m4a.h, and the same risk -- if upstream moves these, this reports
+// nonsense rather than failing, so they are cited precisely.
+//
+//   vendor/pokefirered/include/save.h        the sector layout
+//   vendor/pokefirered/include/global.h:327  struct SaveBlock2
+//   vendor/pokefirered/include/global.h:759  struct SaveBlock1
+//   vendor/pokefirered/include/constants/flags.h:1324  SYS_FLAGS = 0x800
+#define SAVE_SECTOR_DATA 3968
+#define SAVE_SECTOR_SIZE 4096
+#define SAVE_SECTOR_COUNT 32
+#define SAVE_SIGNATURE 0x08012025u
+
+#define SB2_PLAYER_NAME 0x000
+#define SB2_PLAY_HOURS 0x00E
+#define SB2_PLAY_MINUTES 0x010
+#define SB1_FLAGS 0xEE0
+#define FLAG_BADGE01 (0x800 + 0x20)
+
+// The game keeps two save slots and rotates the sectors inside them, so the
+// copy to read is the one with the highest counter, per sector id.
+static int newest_sector(const uint8_t *save, unsigned id, const uint8_t **data)
+{
+    uint32_t best_counter = 0;
+    int found = 0;
+
+    for (unsigned i = 0; i < SAVE_SECTOR_COUNT; i++)
+    {
+        const uint8_t *sector = save + (size_t)i * SAVE_SECTOR_SIZE;
+        uint16_t sector_id;
+        uint16_t stored_sum;
+        uint32_t signature, counter, sum = 0;
+
+        memcpy(&sector_id, sector + SAVE_SECTOR_SIZE - 12, sizeof(sector_id));
+        memcpy(&stored_sum, sector + SAVE_SECTOR_SIZE - 10, sizeof(stored_sum));
+        memcpy(&signature, sector + SAVE_SECTOR_SIZE - 8, sizeof(signature));
+        memcpy(&counter, sector + SAVE_SECTOR_SIZE - 4, sizeof(counter));
+
+        if (signature != SAVE_SIGNATURE || sector_id != id)
+            continue;
+        if (found && counter <= best_counter)
+            continue;
+
+        // The game's own checksum: 32-bit words summed, folded to 16 bits.
+        // Reading past a corrupt sector would report a plausible wrong answer,
+        // which is worse than reporting nothing.
+        for (unsigned w = 0; w < SAVE_SECTOR_DATA / 4; w++)
+        {
+            uint32_t word;
+
+            memcpy(&word, sector + w * 4, sizeof(word));
+            sum += word;
+        }
+        if ((uint16_t)((sum >> 16) + sum) != stored_sum)
+            continue;
+
+        best_counter = counter;
+        *data = sector;
+        found = 1;
+    }
+    return found;
+}
+
+static int command_save_info(const char *path)
+{
+    static uint8_t save[SAVE_SECTOR_COUNT * SAVE_SECTOR_SIZE];
+    static uint8_t block1[4 * SAVE_SECTOR_DATA];
+    const uint8_t *sb2 = NULL;
+    FILE *fh = fopen(path, "rb");
+    size_t read;
+    unsigned badges = 0;
+    int have_block1 = 1;
+
+    if (fh == NULL)
+    {
+        printf("ok=no\nerror=no save yet\n");
+        return 3;
+    }
+    read = fread(save, 1, sizeof(save), fh);
+    fclose(fh);
+    if (read != sizeof(save))
+    {
+        printf("ok=no\nerror=that file is not a save for this game\n");
+        return 3;
+    }
+
+    if (!newest_sector(save, 0, &sb2))
+    {
+        // An empty save file is what a profile has before its first save, which
+        // is a state to report rather than an error to complain about.
+        printf("ok=no\nerror=nothing saved yet\n");
+        return 3;
+    }
+
+    for (unsigned i = 0; i < 4; i++)
+    {
+        const uint8_t *sector = NULL;
+
+        if (!newest_sector(save, 1 + i, &sector))
+        {
+            have_block1 = 0;
+            break;
+        }
+        memcpy(block1 + (size_t)i * SAVE_SECTOR_DATA, sector, SAVE_SECTOR_DATA);
+    }
+
+    if (have_block1)
+        for (unsigned i = 0; i < 8; i++)
+        {
+            unsigned flag = FLAG_BADGE01 + i;
+
+            if (block1[SB1_FLAGS + flag / 8] & (1u << (flag % 8)))
+                badges++;
+        }
+
+    {
+        uint16_t hours;
+        char name[8] = {0};
+
+        memcpy(&hours, sb2 + SB2_PLAY_HOURS, sizeof(hours));
+        // The name is in the game's own text encoding, not ASCII, so it is left
+        // to whoever wants to decode it rather than printed as mojibake.
+        (void)name;
+
+        printf("ok=yes\n");
+        printf("hours=%u\n", hours);
+        printf("minutes=%u\n", sb2[SB2_PLAY_MINUTES]);
+        if (have_block1)
+            printf("badges=%u\n", badges);
+    }
+    return 0;
+}
+
 // The other half of --import, and mostly a testing tool: importing is a
 // first-boot path, and a first boot is otherwise something you get one of.
 // Removing what was imported does not touch the player's ROM or their saves.
@@ -510,6 +647,8 @@ int main(int argc, char **argv)
     // questions about the install, not a run of the game.
     if (argc > 1 && strcmp(argv[1], "--describe") == 0)
         return command_describe();
+    if (argc > 2 && strcmp(argv[1], "--save-info") == 0)
+        return command_save_info(argv[2]);
     if (argc > 1 && strcmp(argv[1], "--forget") == 0)
         return command_forget();
     if (argc > 1 && strcmp(argv[1], "--import") == 0)
