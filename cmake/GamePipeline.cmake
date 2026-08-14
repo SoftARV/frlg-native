@@ -68,7 +68,7 @@ set(FRLG_GAME_DATA_ONLY
 # the symbol would bind to whatever the ROM holds at that address -- ARM machine
 # code this port cannot execute. Checked against the ROM build's own objects,
 # which is the only place these files are compiled at all.
-if(FRLG_GAME_DATA_FROM_ROM)
+if(FRLG_GAME_DATA_FROM_ROM AND FRLG_GAME_DATA_ONLY)
     execute_process(
         COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_data_only.py"
                 arm-none-eabi-readelf "${FRLG_VENDOR_DIR}/build/firered/src"
