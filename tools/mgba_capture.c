@@ -13,10 +13,12 @@
 // FRLG_INPUT=<trace> replays the port's own input trace here too, so a frame
 // that can only be reached by playing can still be compared. The trace holds
 // active-low masks, the way the key register reads; mGBA wants the pressed bits,
-// so they are inverted on the way in.
+// so they are inverted on the way in. FRLG_SAV=<file> supplies the save the
+// trace was recorded against, which a replayed trace is meaningless without.
 
 // mGBA's headers use PATH_MAX, which is POSIX rather than ISO -- hence gnu11
 // for this file. It is a host tool; the port itself stays strict C11.
+#include <fcntl.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -26,6 +28,7 @@
 #include <mgba/core/core.h>
 #include <mgba/core/config.h>
 #include <mgba/core/log.h>
+#include <mgba-util/vfs.h>
 // The affine parameters are write-only on hardware, so the bus returns open bus
 // for them and busRead16 cannot see what the game wrote. mGBA keeps every I/O
 // write in its own shadow array regardless, which is the only way to read them
@@ -173,6 +176,18 @@ int main(int argc, char** argv)
     {
         fprintf(stderr, "mgba-capture: cannot load %s\n", argv[1]);
         return 1;
+    }
+    // FRLG_SAV loads the port's own flash image, so a trace recorded from a save
+    // reaches the same place here. Opened read-write because mGBA maps flash
+    // writable and a read-only file leaves it with no save memory at all.
+    {
+        const char* sav = getenv("FRLG_SAV");
+        struct VFile* vf = sav ? VFileOpen(sav, O_RDWR) : NULL;
+
+        if (sav && !vf)
+            fprintf(stderr, "mgba-capture: cannot read %s\n", sav);
+        if (vf)
+            core->loadSave(core, vf);
     }
     core->reset(core);
 
