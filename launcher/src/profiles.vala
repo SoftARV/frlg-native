@@ -64,6 +64,11 @@ public class Profiles : Object {
             if (!group.has_prefix ("save:"))
                 continue;
             var id = group.substring ("save:".length);
+            // A hand-edited file with an empty id would name the saves
+            // directory itself, and deleting that profile would take every
+            // other save with it.
+            if (id.strip () == "")
+                continue;
             string name;
             try {
                 name = store.get_string (group, "name");
@@ -124,6 +129,55 @@ public class Profiles : Object {
         selected_id = id;
         save ();
         return profile;
+    }
+
+    // The id stays what it was: it names a directory, and renaming a save is
+    // not a reason to move its files about.
+    public void rename (Profile profile, string name) {
+        profile.name = name;
+        store.set_string ("save:" + profile.id, "name", name);
+        save ();
+    }
+
+    private void delete_tree (string path) {
+        // Never the root, whatever the id says.
+        if (path == root () || !path.has_prefix (root () + Path.DIR_SEPARATOR_S))
+            return;
+        try {
+            var directory = File.new_for_path (path);
+            var children = directory.enumerate_children ("standard::name",
+                FileQueryInfoFlags.NOFOLLOW_SYMLINKS);
+            FileInfo? child;
+            while ((child = children.next_file ()) != null)
+                directory.get_child (child.get_name ()).delete ();
+            directory.delete ();
+        } catch (Error e) {
+            warning ("could not remove %s: %s", path, e.message);
+        }
+    }
+
+    public void remove (Profile profile) {
+        delete_tree (profile.directory);
+        try {
+            store.remove_group ("save:" + profile.id);
+        } catch (Error e) {
+        }
+
+        for (uint i = 0; i < items.get_n_items (); i++) {
+            if (((Profile) items.get_item (i)).id == profile.id) {
+                items.remove (i);
+                break;
+            }
+        }
+
+        // Play always needs somewhere to write, so the list is never empty.
+        if (items.get_n_items () == 0) {
+            add (_("Vanilla"));
+            return;
+        }
+        if (selected_id == profile.id)
+            selected_id = ((Profile) items.get_item (0)).id;
+        save ();
     }
 
     public Profile? selected () {

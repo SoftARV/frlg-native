@@ -127,12 +127,25 @@ public class Window : Adw.ApplicationWindow {
         import_save.clicked.connect (() => { popover.popdown (); this.import_save (profile); });
         box.append (import_save);
 
+        var rename = new Gtk.Button.with_label (_("Rename…")) {
+            halign = Gtk.Align.FILL, has_frame = false };
+        rename.get_first_child ().halign = Gtk.Align.START;
+        rename.clicked.connect (() => { popover.popdown (); this.rename_save (profile); });
+        box.append (rename);
+
         var export_save = new Gtk.Button.with_label (_("Export a copy…")) {
             halign = Gtk.Align.FILL, has_frame = false };
         export_save.get_first_child ().halign = Gtk.Align.START;
         export_save.sensitive = profile.has_save;
         export_save.clicked.connect (() => { popover.popdown (); this.export_save (profile); });
         box.append (export_save);
+
+        var remove = new Gtk.Button.with_label (_("Delete…")) {
+            halign = Gtk.Align.FILL, has_frame = false };
+        remove.get_first_child ().halign = Gtk.Align.START;
+        remove.add_css_class ("destructive-action");
+        remove.clicked.connect (() => { popover.popdown (); this.delete_save (profile); });
+        box.append (remove);
 
         return button;
     }
@@ -235,6 +248,52 @@ public class Window : Adw.ApplicationWindow {
         var summary = yield game.save_summary (profile.save_path);
         if (summary != null)
             row.subtitle = summary;
+    }
+
+    private void rename_save (Profile profile) {
+        var entry = new Gtk.Entry () { text = profile.name };
+        var dialog = new Adw.AlertDialog (_("Rename this save"), null);
+
+        dialog.set_extra_child (entry);
+        dialog.add_response ("cancel", _("Cancel"));
+        dialog.add_response ("rename", _("Rename"));
+        dialog.set_response_appearance ("rename", Adw.ResponseAppearance.SUGGESTED);
+        dialog.set_default_response ("rename");
+        dialog.set_close_response ("cancel");
+
+        dialog.response.connect ((response) => {
+            var name = entry.text.strip ();
+            if (response == "rename" && name != "") {
+                profiles.rename (profile, name);
+                this.fill_saves ();
+            }
+        });
+        dialog.present (this);
+    }
+
+    private void delete_save (Profile profile) {
+        // The one destructive action here with nothing behind it -- the imported
+        // game can be imported again, a save cannot -- so the way out is named
+        // rather than implied.
+        var body = profile.has_save
+            ? _("“%s” has a game in it, and deleting is permanent. Export a copy first if you might want it back.").printf (profile.name)
+            : _("“%s” has nothing saved in it yet.").printf (profile.name);
+
+        var dialog = new Adw.AlertDialog (_("Delete this save?"), body);
+        dialog.add_response ("cancel", _("Cancel"));
+        dialog.add_response ("delete", _("Delete"));
+        dialog.set_response_appearance ("delete", Adw.ResponseAppearance.DESTRUCTIVE);
+        dialog.set_default_response ("cancel");
+        dialog.set_close_response ("cancel");
+
+        dialog.response.connect ((response) => {
+            if (response == "delete") {
+                profiles.remove (profile);
+                this.fill_saves ();
+                toasts.add_toast (new Adw.Toast (_("Save deleted")));
+            }
+        });
+        dialog.present (this);
     }
 
     private void on_add_save () {
