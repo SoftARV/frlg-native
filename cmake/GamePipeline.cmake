@@ -48,6 +48,8 @@ set(FRLG_GAME_CPPFLAGS
 # m4a_tables.c is deliberately absent: its jump table holds pointers to the
 # sequencer's own routines, which this port replaces, and the copy in the ROM
 # names the cartridge's. That one stays compiled.
+set(FRLG_CUT_DATA "${CMAKE_SOURCE_DIR}/tools/patch_data_definitions.py")
+
 set(FRLG_GAME_DATA_ONLY
     graphics.c
     tilesets.c
@@ -78,6 +80,19 @@ if(FRLG_GAME_DATA_FROM_ROM)
     endif()
     message(STATUS "frlg-native: ${data_only_says}")
 endif()
+
+# Data defined in a file that also holds code, which is most of it. The whole
+# file cannot be dropped, so the definition is cut out of the preprocessed copy
+# and the declaration the decompilation already puts in a header is what the
+# rest of the file compiles against. The symbol is then unresolved and binds
+# into the cart region like any other.
+#
+# gTypeEffectiveness is absent on purpose: two places take ARRAY_COUNT of it,
+# and an array with no bound has no size.
+set(FRLG_GAME_DATA_SYMBOLS
+    "item.c=gItems"
+    "pokemon.c=gSpeciesInfo,gBattleMoves,gLevelUpLearnsets,gEvolutionTable"
+    "wild_encounter.c=gWildMonHeaders")
 
 set(FRLG_GAME_EXCLUDED
     multiboot.c       # ARM busy-wait; GameCube link, out of scope
@@ -170,6 +185,18 @@ function(frlg_preprocess_game rel out_var)
     # choosing between themselves.
     set(post "")
     set(extra_deps "")
+
+    if(FRLG_GAME_DATA_FROM_ROM)
+        foreach(entry ${FRLG_GAME_DATA_SYMBOLS})
+            string(REGEX MATCH "^([^=]+)=(.*)$" _ "${entry}")
+            if(CMAKE_MATCH_1 STREQUAL base)
+                string(REPLACE "," ";" wanted "${CMAKE_MATCH_2}")
+                list(APPEND post COMMAND "${CMAKE_COMMAND}" -E env python3
+                     "${FRLG_CUT_DATA}" "${c}" ${wanted})
+                list(APPEND extra_deps "${FRLG_CUT_DATA}")
+            endif()
+        endforeach()
+    endif()
     foreach(pair "FRLG_GAME_STRIP_WAITS;${FRLG_STRIP_WAITS}"
                  "FRLG_GAME_PATCH_LAYOUT;${FRLG_PATCH_LAYOUT}"
                  "FRLG_GAME_PATCH_NULL;${FRLG_PATCH_NULL}")

@@ -490,6 +490,18 @@ The game is unchanged by it, which is the point: same frames, and byte-identical
 trace. What remains is data defined in translation units that *also* hold code, which cannot be
 dropped this way — [issue #11](https://github.com/SoftARV/frlg-native/issues/11).
 
+Most of the data shares a file with code, which cannot be dropped that way. For those,
+`FRLG_GAME_DATA_SYMBOLS` names the symbol and `tools/patch_data_definitions.py` rewrites the
+definition in the preprocessed copy into a **declaration** — `const struct Evolution
+gEvolutionTable[412][5] = {…};` becomes `extern const struct Evolution gEvolutionTable[412][5];`.
+A declaration rather than a deletion for two reasons: some of these have no `extern` in any header,
+and the bounds have to survive or code taking `ARRAY_COUNT` of one stops compiling. The symbol is then
+unresolved and binds like the rest.
+
+That is what moved the tables `required-to-function.md` names — species, moves, learnsets, evolutions,
+encounters and items — out of the binary. They are small compiled (about 50 KB for all six) and large
+in source, which is why the file shrinks far more than the binary.
+
 **Only files with no code may be listed**, and it is checked rather than trusted: a file that grows a
 function would have it silently dropped and its symbol would bind to whatever the ROM holds at that
 address — ARM machine code this port cannot execute. `tools/check_data_only.py` reads the ROM build's
