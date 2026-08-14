@@ -5,9 +5,15 @@
 
 ## Context
 
-The cartridge was compiled by `agbcc`, which rounds every structure's size up to a multiple of four.
-No modern compiler does this — not on x86, and not on ARM either; `arm-none-eabi-gcc` agrees with our
-x86 build, so this is agbcc's rule rather than the target's.
+The cartridge was compiled by `agbcc`, which pads some structures our compilers do not. No modern
+compiler agrees with it — not on x86, and not on ARM either; `arm-none-eabi-gcc` matches our x86
+build, so this is agbcc's doing rather than the target's.
+
+**It is not a rule that can be applied by inspection.** `struct MonCoords` is two bytes here and four
+in the cart, but `struct LevelUpMove` — also two bytes, also a small struct — is two in both, and
+widening it would corrupt every learnset. Whatever agbcc's exact criterion is, guessing it from a
+type's shape produces errors in both directions. Each type is therefore verified against the ROM's own
+symbol size divided by the entry count in the decompilation's source, and only then widened.
 
 A type whose natural size is not already a multiple of four therefore has two layouts: a narrow one in
 this build, and a wider one in the ROM. While all game data was compiled in, only our layout existed
@@ -23,8 +29,15 @@ the reader uses.
 `union AffineAnimCmd` is six bytes here and eight in the cart. One mismatched type produced: a wild
 battle that loops the send-out animation forever, blank battler and trainer sprites, corrupt Pokémon
 in the intro, and a `SIGFPE` in `UpdateSpriteMatrixAnchorPos` dividing by a matrix that was never
-written. `struct MonCoords` is two against four, which moves every battle sprite. Forty-five types
-have the property.
+written. `struct MonCoords` is two against four, which moves every battle sprite.
+
+Fixing those two made battles playable, which is how the next layer was found: with the send-out no
+longer hanging, moves could be used, and `gBattleMoves` turned out to be misparsed the same way —
+`struct BattleMove` is nine bytes here and twelve in the cart, so every move read a neighbour's power,
+type and effect. `gSpeciesInfo` (26 against 28) and `gEvolutionTable` (6 against 8) are the same
+story. **A visible symptom names one type, not the class**; the list has to be derived from the
+extraction, which is what `tools/audit_layout.py` and the mapping in §"What this says about
+verification" are for.
 
 ## Decision
 

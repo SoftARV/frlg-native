@@ -17,14 +17,28 @@ submodule bump is reported.
 import re
 import sys
 
-# Types whose data this port reads out of the cart. Confirmed against the ROM's
-# own symbol sizes: gMonFrontPicCoords is 0x6e0 over 440 entries, four bytes
-# each, where this build would give two. Types that only ever live in RAM are
-# deliberately absent -- their layout is this build's business, and widening
-# them would change the save format.
+# Types whose data this port reads out of the cart, each confirmed against the
+# ROM's own symbol size divided by the entry count in the decompilation's
+# source. Membership is never assumed from the type's shape: struct LevelUpMove
+# is two bytes here and two in the cart, so widening it would break the
+# learnsets it is meant to protect. Verify, then add.
+#
+#   union  AffineAnimCmd  sAffineAnim_Scene3_Mons_Normal  0x10 / 2   = 8
+#   struct MonCoords      gMonFrontPicCoords              0x6e0 / 440 = 4
+#   struct BattleMove     gBattleMoves                    4260 / 355 = 12
+#   struct SpeciesInfo    gSpeciesInfo                    11536 / 412 = 28
+#   struct Evolution      gEvolutionTable   16480 / (412 * EVOS_PER_MON) = 8
+#   struct TrainerMoney   gTrainerMoneyTable              420 / 105  = 4
+#
+# Types that only ever live in RAM are deliberately absent -- their layout is
+# this build's business, and widening them would change the save format.
 TYPES = (
     ("union", "AffineAnimCmd", 8),
     ("struct", "MonCoords", 4),
+    ("struct", "BattleMove", 12),
+    ("struct", "SpeciesInfo", 28),
+    ("struct", "Evolution", 8),
+    ("struct", "TrainerMoney", 4),
 )
 
 ALIGNED = "__attribute__((aligned(4)))"

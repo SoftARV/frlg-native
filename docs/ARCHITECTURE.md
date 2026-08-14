@@ -247,12 +247,17 @@ reachable once the phase before it worked: a save to exist, a save to load, a ba
 Pokémon worth looking at, a trainer card worth opening.
 
 **The fourth class has the widest reach of the four, and applies to the cart rather than to the code.**
-The cartridge was compiled by `agbcc` ([`Makefile:82`](../vendor/pokefirered/Makefile)), which rounds
-every structure's size up to a multiple of four. Modern compilers do not, on ARM or anywhere else. A
-type whose natural size is not already a multiple of four therefore occupies *fewer* bytes here than
-it does in the ROM, and every table of that type read out of the cart ([§5.3c](#53c-not-compiling-the-data-in))
-is misparsed from its second element onward. The first element is right, which is what makes it so
-quiet: the data is byte-perfect, the relocations are correct, and only the reader's stride is wrong.
+The cartridge was compiled by `agbcc` ([`Makefile:82`](../vendor/pokefirered/Makefile)), which pads
+some structures our compilers do not — on ARM as well as x86, so it is agbcc's doing and not the
+target's. Such a type occupies *fewer* bytes here than in the ROM, and every table of it read out of
+the cart ([§5.3c](#53c-not-compiling-the-data-in)) is misparsed from its second element onward. The
+first element is right, which is what makes it so quiet: the data is byte-perfect, the relocations are
+correct, and only the reader's stride is wrong.
+
+**Which types are affected cannot be told from their shape.** `MonCoords` is two bytes here and four
+in the cart; `LevelUpMove` is also two bytes and is two in both. Each type is verified against the
+ROM's own symbol size over the entry count in the source — `gBattleMoves` is 4260 bytes over 355
+moves, so twelve each against our nine — and only then widened.
 
 `union AffineAnimCmd` is six bytes here and eight in the cart. Reading an affine animation with a
 six-byte stride never reaches the END marker, so the animation never completes — a Pokémon's send-out
@@ -261,9 +266,9 @@ written, which makes `UpdateSpriteMatrixAnchorPos` divide by a zero scale. One m
 produced a hung battle, blank battlers, corrupt intro Pokémon and a `SIGFPE`, all at once.
 `struct MonCoords` is two bytes here and four there, which moves every battle sprite.
 
-**Forty-five game types have this property** in `pokemon.c`'s headers alone — `SpeciesInfo` (26 against
-28), `BattleMove` (9 against 12), `Evolution` (6 against 8), the trainer party structs. The two above
-are the ones whose data the cart currently supplies. The rest are listed by `tools/audit_layout.py`
+**Six types are widened today** — `AffineAnimCmd`, `MonCoords`, `BattleMove`, `SpeciesInfo`,
+`Evolution` and `TrainerMoney` — each verified against the ROM as above. Forty-five types in
+`pokemon.c`'s headers alone are candidates by size. The rest are listed by `tools/audit_layout.py`
 and are only latent while their data stays compiled in — widening the extraction list without
 consulting that audit is how this returns. Types that live only in RAM are deliberately *not*
 widened: their layout is this build's own business, and changing it would change the save format.
