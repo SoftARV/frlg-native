@@ -39,6 +39,12 @@ def cut_definition(text, symbol, byte_size=0):
 
     indent, kind, dims = match.group(1), match.group(2).strip(), match.group(3)
 
+    # `extern static const T sFoo;` is not valid C. A symbol the ROM's table
+    # calls global but the source defines static cannot be declared away -- it
+    # has to be pointed at the cart instead, like any other static.
+    if kind.split()[0] == "static":
+        return None
+
     # Brace matching from the opening brace, skipping strings and characters so
     # that a brace inside them cannot end the definition early.
     at = text.index("{", match.end() - 1)
@@ -101,11 +107,93 @@ def cut_tentative(text, symbol):
 
     def replace(match):
         kind = match.group(1).strip()
-        if kind.split()[0] in ("extern", "return", "typedef"):
+        # `static` too: `extern static const T sFoo;` is not valid C, and a
+        # static's tentative declaration is not ours to turn into an extern.
+        if kind.split()[0] in ("extern", "return", "typedef", "static"):
             return match.group(0)
         return f"extern {kind} {symbol}{match.group(2)};"
 
     return pattern.sub(replace, text)
+
+
+def point_at_cart(text, symbol, offset):
+    """Replace a static's definition with a pointer into the imported image.
+
+    A file-scope static has no name another translation unit can bind to, so it
+    cannot be declared away like a global -- and statics are where most of the
+    game's data still lives. What it can be is a pointer: the bytes are already
+    in the cart image at a known offset, so
+
+        static const struct Foo sBar[] = { ... };
+
+    becomes
+
+        static const struct Foo *const sBar = (const struct Foo *)(agb_cart + 0x1234);
+
+    Indexing, `&sBar[0]` and passing it along all still compile and mean the same
+    thing. `sizeof` does not: it silently becomes the size of a pointer, so
+    ARRAY_COUNT would quietly compute the wrong number. That is refused here
+    rather than guarded at run time, because a wrong count is exactly the kind of
+    fault that looks like something else entirely.
+    """
+    if re.search(r"sizeof\s*\(\s*" + re.escape(symbol) + r"\s*\)", text):
+        return None
+
+    # A forward declaration of the same static -- `static const T sFoo[];`
+    # ahead of its definition -- would contradict the pointer this becomes, and
+    # the compiler reports it against the declaration rather than here.
+    if re.search(r"^[^\S\n]*static[^\S\n][^;{=\n]*\b" + re.escape(symbol)
+                 + r"[^\S\n]*(?:\[[^\]]*\])*[^\S\n]*;", text, re.MULTILINE):
+        return None
+
+    pattern = re.compile(
+        r"^([^\S\n]*)((?:[A-Za-z_][A-Za-z0-9_]*[^\S\n]+|\*+[^\S\n]*)+)"
+        + re.escape(symbol) + r"[^\S\n]*((?:\[[^\]]*\])+)[^\S\n]*=[^\S\n]*\{",
+        re.MULTILINE)
+    match = pattern.search(text)
+    if match is None:
+        return None
+
+    indent, kind, dims = match.group(1), match.group(2).strip(), match.group(3)
+    words = kind.split()
+    if words[0] != "static":
+        return None                      # not ours to rewrite
+    base = " ".join(words[1:])
+
+    at = text.index("{", match.end() - 1)
+    depth, i, n = 0, at, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"' or c == "'":
+            quote = c
+            i += 1
+            while i < n and text[i] != quote:
+                i += 2 if text[i] == "\\" else 1
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                end = text.find(";", i)
+                if end == -1:
+                    return None
+                # Only the outermost dimension is the one being replaced by a
+                # pointer. `sFoo[][3]` indexed as sFoo[a][b] must stay a pointer
+                # *to an array of 3*, or the inner subscript has nothing to
+                # apply to -- which the compiler reports somewhere else entirely.
+                inner = "".join(re.findall(r"\[[^\]]*\]", dims)[1:])
+                if inner:
+                    return (text[:match.start()]
+                            + f"{indent}static {base} (*const {symbol}){inner} = "
+                              f"({base} (*){inner})(agb_cart + {offset:#x});"
+                            + text[end + 1:])
+
+                return (text[:match.start()]
+                        + f"{indent}static {base} *const {symbol} = "
+                          f"({base} *)(agb_cart + {offset:#x});"
+                        + text[end + 1:])
+        i += 1
+    return None
 
 
 def main():
@@ -116,18 +204,38 @@ def main():
     with open(path) as fh:
         text = fh.read()
 
+    # Every refusal in one pass, not the first one. Reporting them one at a time
+    # makes the caller rebuild once per symbol, and there are thousands.
+    refused = []
     for symbol in symbols:
-        # `name@bytes` says how large the ROM says the symbol is, which is only
-        # needed for an array whose definition carried no bound.
+        # `name#offset` is a static, which becomes a pointer into the cart
+        # rather than a declaration -- nothing can bind to a static's name.
+        if "#" in symbol:
+            name, _, offset_text = symbol.partition("#")
+            pointed = point_at_cart(text, name, int(offset_text, 0))
+            if pointed is None:
+                refused.append(name)
+            else:
+                text = pointed
+            continue
+
         byte_size = 0
+        name = symbol
         if "@" in symbol:
-            symbol, _, size_text = symbol.partition("@")
+            name, _, size_text = symbol.partition("@")
             byte_size = int(size_text)
 
-        cut = cut_definition(text, symbol, byte_size)
+        cut = cut_definition(text, name, byte_size)
         if cut is None:
-            sys.exit(f"patch_data_definitions: no definition of {symbol} in {path}")
-        text = cut_tentative(cut, symbol)
+            refused.append(name)
+            continue
+        text = cut_tentative(cut, name)
+
+    if refused:
+        for name in refused:
+            print(f"patch_data_definitions: cannot rewrite {name} in {path}",
+                  file=sys.stderr)
+        sys.exit(1)
 
     with open(path, "w") as fh:
         fh.write(text)
