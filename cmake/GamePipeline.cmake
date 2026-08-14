@@ -98,7 +98,7 @@ endif()
 # is exactly how a build directory called "zero-play" quietly became a
 # globals-only build: the list is restored, the directory is rebuilt, and its
 # name still claims otherwise.
-option(FRLG_GAME_DATA_STATICS "Extract file-scope statics from the ROM as well" OFF)
+option(FRLG_GAME_DATA_STATICS "Extract file-scope statics from the ROM as well" ON)
 if(FRLG_GAME_DATA_STATICS)
     include("${CMAKE_CURRENT_LIST_DIR}/game_data_symbols_statics.cmake")
 else()
