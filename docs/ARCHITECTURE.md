@@ -469,6 +469,32 @@ read. Both answer before a window, a device or a session is opened, because they
 the install rather than a run of the game. `key=value` lines, which a shell and a `GSubprocess` read
 equally well and which need no parser on either side.
 
+### 5.3c Not compiling the data in
+
+Binding only ever reached symbols the linker called **unresolved**, and those are the ones from
+`data/*.s` that no host assembler can build. Everything the decompilation defines in C resolved
+locally and was compiled straight into the binary — which is ADR 0006's *developer* data path, and
+nothing announced that the project was still on it.
+
+`FRLG_GAME_DATA_FROM_ROM=ON` is the shipping path. `FRLG_GAME_DATA_ONLY` names translation units that
+contain **only data**; they are not compiled, their symbols are therefore unresolved, and the existing
+machinery binds each into the cart region. No new mechanism — the old one simply never saw them.
+
+| | ROM chunks in the binary | size |
+| --- | --- | --- |
+| data compiled in | 49 of 200 | 19.4 MB |
+| `graphics.c` alone excluded | 22 of 200 | 15.5 MB |
+| twelve data-only files excluded | **17 of 200** | **14.6 MB** |
+
+The game is unchanged by it, which is the point: same frames, and byte-identical audio over a battle
+trace. What remains is data defined in translation units that *also* hold code, which cannot be
+dropped this way — [issue #11](https://github.com/SoftARV/frlg-native/issues/11).
+
+**Only files with no code may be listed**, and it is checked rather than trusted: a file that grows a
+function would have it silently dropped and its symbol would bind to whatever the ROM holds at that
+address — ARM machine code this port cannot execute. `tools/check_data_only.py` reads the ROM build's
+own objects, since that is the only place these files are compiled, and fails configuration.
+
 ### 5.4 Data the host cannot build
 
 `data/*.s` — event scripts, battle scripts, map data — **is never assembled, on any platform.**

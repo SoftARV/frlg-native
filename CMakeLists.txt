@@ -6,6 +6,14 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(FRLG_32BIT "Build 32-bit (required until the 64-bit migration, see docs/adr/0003)" ON)
+# Whether the game's data comes from the player's ROM or from the binary.
+#
+# OFF is ADR 0006's developer path: the decompilation's own C definitions are
+# compiled in, which is how six phases of work were done. ON is the shipping
+# path -- those definitions are not compiled and the symbols resolve into the
+# imported cart image instead. Nothing distributable can be built with it OFF.
+option(FRLG_GAME_DATA_FROM_ROM "Take game data from the imported ROM, not the binary" OFF)
+
 set(FRLG_HOST_BACKEND "sdl3" CACHE STRING "Host backend: sdl3 or null")
 set_property(CACHE FRLG_HOST_BACKEND PROPERTY STRINGS sdl3 null)
 

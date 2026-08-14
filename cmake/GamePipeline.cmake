@@ -33,6 +33,52 @@ set(FRLG_GAME_CPPFLAGS
 
 # Sources carrying ARM inline assembly that no host target can assemble.
 # See the override table in docs/ARCHITECTURE.md.
+# Translation units that are only data.
+#
+# ADR 0006 says the binary ships no game data and the player's ROM supplies it,
+# and the mechanism for that already exists -- a symbol the linker cannot resolve
+# is bound to its address inside the cart region. What was missing is that these
+# were never *unresolved*: the decompilation defines them in C, so they compiled
+# in and the binding machinery never saw them. Not compiling them is what hands
+# them to the machinery.
+#
+# Only files with no code in them can go here. That is checked rather than
+# assumed -- see tools/check_data_only.py, which fails the build if one of these
+# grows a function.
+# m4a_tables.c is deliberately absent: its jump table holds pointers to the
+# sequencer's own routines, which this port replaces, and the copy in the ROM
+# names the cartridge's. That one stays compiled.
+set(FRLG_GAME_DATA_ONLY
+    graphics.c
+    tilesets.c
+    data.c
+    strings.c
+    move_descriptions.c
+    trainer_tower_sets.c
+    decoration.c
+    union_room_message.c
+    keyboard_text.c
+    mystery_gift_scripts.c
+    mystery_event_msg.c
+    bg_regs.c)
+
+# A file listed above that grows a function would have it silently dropped, and
+# the symbol would bind to whatever the ROM holds at that address -- ARM machine
+# code this port cannot execute. Checked against the ROM build's own objects,
+# which is the only place these files are compiled at all.
+if(FRLG_GAME_DATA_FROM_ROM)
+    execute_process(
+        COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_data_only.py"
+                arm-none-eabi-readelf "${FRLG_VENDOR_DIR}/build/firered/src"
+                ${FRLG_GAME_DATA_ONLY}
+        RESULT_VARIABLE data_only_ok
+        OUTPUT_VARIABLE data_only_says)
+    if(NOT data_only_ok EQUAL 0)
+        message(FATAL_ERROR "FRLG_GAME_DATA_ONLY names a file that contains code")
+    endif()
+    message(STATUS "frlg-native: ${data_only_says}")
+endif()
+
 set(FRLG_GAME_EXCLUDED
     multiboot.c       # ARM busy-wait; GameCube link, out of scope
     librfu_intr.c     # naked ARM trampolines; RFU wireless, stubbed until phase 10
@@ -98,6 +144,9 @@ function(frlg_collect_game_sources out_var)
         endif()
         get_filename_component(base "${rel}" NAME)
         if(base IN_LIST FRLG_GAME_EXCLUDED)
+            continue()
+        endif()
+        if(FRLG_GAME_DATA_FROM_ROM AND base IN_LIST FRLG_GAME_DATA_ONLY)
             continue()
         endif()
         list(APPEND result "${rel}")
