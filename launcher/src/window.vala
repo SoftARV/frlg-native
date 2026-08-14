@@ -8,9 +8,14 @@ public class Window : Adw.ApplicationWindow {
     [GtkChild] private unowned Gtk.Label import_error;
     [GtkChild] private unowned Adw.ActionRow game_row;
     [GtkChild] private unowned Adw.StatusPage import_page;
+    [GtkChild] private unowned Adw.PreferencesGroup saves_group;
+    [GtkChild] private unowned Gtk.Button add_save_button;
 
     private Game? game = null;
     private SimpleAction? forget_action = null;
+    private Profiles profiles = new Profiles ();
+    private Gtk.CheckButton? radio_group = null;
+    private Gtk.Widget[] save_rows = {};
 
     public Window (Gtk.Application app) {
         Object (application: app);
@@ -24,6 +29,8 @@ public class Window : Adw.ApplicationWindow {
 
         import_button.clicked.connect (this.on_import_clicked);
         play_button.clicked.connect (this.on_play_clicked);
+        add_save_button.clicked.connect (this.on_add_save);
+        this.fill_saves ();
 
         var binary = Game.find ();
         if (binary == null) {
@@ -46,6 +53,63 @@ public class Window : Adw.ApplicationWindow {
         game_row.title = game.title;
         stack.visible_child_name = game.imported ? "library" : "import";
         forget_action.set_enabled (game.imported);
+    }
+
+    // Rebuilt rather than patched: the list is a handful of rows, and a rule
+    // that always redraws is one that cannot disagree with the model.
+    private void fill_saves () {
+        foreach (var row in save_rows)
+            saves_group.remove (row);
+        save_rows = {};
+        radio_group = null;
+
+        var chosen = profiles.selected ();
+        for (uint i = 0; i < profiles.items.get_n_items (); i++) {
+            var profile = (Profile) profiles.items.get_item (i);
+            var row = new Adw.ActionRow () {
+                title = profile.name,
+                subtitle = profile.has_save ? _("Saved game") : _("Not started yet"),
+            };
+
+            var pick = new Gtk.CheckButton () { valign = Gtk.Align.CENTER };
+            if (radio_group == null)
+                radio_group = pick;
+            else
+                pick.group = radio_group;
+            pick.active = (chosen != null && profile.id == chosen.id);
+
+            pick.toggled.connect (() => {
+                if (pick.active)
+                    profiles.select (profile);
+            });
+
+            row.add_prefix (pick);
+            row.activatable_widget = pick;
+            saves_group.add (row);
+            save_rows += row;
+        }
+    }
+
+    private void on_add_save () {
+        var entry = new Gtk.Entry () { placeholder_text = _("Name") };
+        var dialog = new Adw.AlertDialog (_("New save"),
+            _("A separate game, with its own progress and its own options."));
+
+        dialog.set_extra_child (entry);
+        dialog.add_response ("cancel", _("Cancel"));
+        dialog.add_response ("create", _("Create"));
+        dialog.set_response_appearance ("create", Adw.ResponseAppearance.SUGGESTED);
+        dialog.set_default_response ("create");
+        dialog.set_close_response ("cancel");
+
+        dialog.response.connect ((response) => {
+            var name = entry.text.strip ();
+            if (response == "create" && name != "") {
+                profiles.add (name);
+                this.fill_saves ();
+            }
+        });
+        dialog.present (this);
     }
 
     private void on_import_clicked () {
@@ -125,13 +189,15 @@ public class Window : Adw.ApplicationWindow {
         stack.visible_child_name = "playing";
         this.set_visible (false);
 
+        var profile = profiles.selected ();
         try {
-            yield game.play (null);
+            yield game.play (profile != null ? profile.save_path : null);
         } catch (Error e) {
             warning ("could not start the game: %s", e.message);
         }
 
         yield this.refresh ();
+        this.fill_saves ();   // A first run turns "not started yet" into a save.
         this.set_visible (true);
         this.present ();
     }

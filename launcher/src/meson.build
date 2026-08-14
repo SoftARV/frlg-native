@@ -3,6 +3,7 @@ sources = files(
   'application.vala',
   'window.vala',
   'game.vala',
+  'profiles.vala',
 )
 
 executable('frlg-launcher',

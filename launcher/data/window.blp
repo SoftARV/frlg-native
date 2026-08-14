@@ -81,19 +81,16 @@ template $FrlgWindow : Adw.ApplicationWindow {
                 }
               }
 
-              Adw.PreferencesGroup {
+              Adw.PreferencesGroup saves_group {
                 title: _("Saves");
-                description: _("Each save keeps its own game options. A second one can run a different mod without touching this one.");
+                description: _("The one you pick is the one the game plays. A second save can run a different mod later without touching this one.");
 
-                Adw.ActionRow {
-                  title: _("Vanilla");
-                  subtitle: _("The default save");
-
-                  [prefix]
-                  CheckButton save_default {
-                    valign: center;
-                    active: true;
-                  }
+                [header-suffix]
+                Button add_save_button {
+                  valign: center;
+                  tooltip-text: _("New save");
+                  icon-name: "list-add-symbolic";
+                  styles ["flat"]
                 }
               }
             };
