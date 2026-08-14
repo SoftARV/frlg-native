@@ -340,6 +340,22 @@ upstream's own non-modern path avoids it; `MODERN` gates nothing but `NOINLINE` 
 so no layout or ABI changes. The modern path exists to work around a `RegisterRamReset` hazard that
 does not apply when `RegisterRamReset` is ours.
 
+**`task.c` is compiled at revision A** (`FRLG_GAME_REVA`), which is the same mechanism pointed at a
+different flag. `DestroyTask` indexes `gTasks` with whatever it is given, and `FindTaskIdByFunc`
+returns `TASK_NONE` (255) when the task is already gone — 10 200 bytes past a 640-byte array. On a
+GBA that read lands in EWRAM and finds a zero, so nothing happens. Here it found an 8, took the
+non-zero branch, and unlinked a task that does not exist: `gTasks[0].prev` was written with garbage,
+and since `RunTasks` walks a linked list rather than an index range, the head became unreachable and
+the running screen simply stopped being called. The title screen froze on a black frame 4 288 and
+never returned to the intro.
+
+Upstream fixed this in revision A, behind `#if REVISION >= 0xA`. `REVISION` appears exactly once in
+`task.c`, so building that one file at revision A applies their own fix and changes nothing else —
+preferable to a patch of ours ([ADR 0015](adr/0015-enhancement-over-preservation.md) permits the
+deviation either way; taking upstream's is simply less to maintain). This is the same class as
+[§4.2's](#42-overrides) null-tolerance work: the GBA has no MMU, so an out-of-range index is a read
+somebody else's hardware forgave.
+
 The exclusion list is almost exactly the set of files that were already going to be replaced for
 independent reasons, which is good evidence the layering in [§2](#2-layer-model) cuts in the right
 place. Unresolved symbols are bound by `tools/gen_symbol_bindings.py`: ROM data to the cart region,

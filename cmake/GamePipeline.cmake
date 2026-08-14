@@ -155,6 +155,19 @@ set(FRLG_PATCH_NULL "${CMAKE_SOURCE_DIR}/tools/patch_null_tolerance.py")
 # which is what the modern path was working around.
 set(FRLG_GAME_MODERN0 main.c)
 
+# DestroyTask indexes gTasks with whatever it is handed, and FindTaskIdByFunc
+# hands it TASK_NONE (255) when the task is already gone -- 10200 bytes past a
+# 640-byte array. The read is harmless on a GBA; here it found a non-zero byte
+# and unlinked a task that does not exist, writing gTasks[0].prev and orphaning
+# the head of the list. RunTasks walks that list, so the running screen simply
+# stopped being called: the title screen froze on a black frame and never
+# returned to the intro.
+#
+# Upstream fixed this themselves in revision A, behind `#if REVISION >= 0xA`.
+# REVISION appears exactly once in task.c, so building that one file at revision
+# A applies their fix and changes nothing else. See docs/ARCHITECTURE.md 4.2.
+set(FRLG_GAME_REVA task.c)
+
 function(frlg_collect_game_sources out_var)
     file(GLOB_RECURSE all_c RELATIVE "${FRLG_VENDOR_DIR}" "${FRLG_VENDOR_DIR}/src/*.c")
     set(result "")
@@ -184,6 +197,9 @@ function(frlg_preprocess_game rel out_var)
     set(cppflags ${FRLG_GAME_CPPFLAGS})
     if(base IN_LIST FRLG_GAME_MODERN0)
         list(TRANSFORM cppflags REPLACE "^-DMODERN=1$" "-DMODERN=0")
+    endif()
+    if(base IN_LIST FRLG_GAME_REVA)
+        list(TRANSFORM cppflags REPLACE "^-DREVISION=0$" "-DREVISION=0xA")
     endif()
 
     # A file may need more than one of these, so they accumulate rather than
