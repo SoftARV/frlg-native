@@ -68,6 +68,35 @@ def cut_definition(text, symbol):
     return None
 
 
+def cut_tentative(text, symbol):
+    """Turn `const struct SpriteTemplate gFoo;` into a declaration too.
+
+    A file-scope declaration with no initialiser and no `extern` is a *tentative
+    definition*: on its own it allocates a zero-filled object. The
+    decompilation has these -- field_effect_object_template_pointers.h declares
+    every template it then takes the address of -- so replacing the initialised
+    definition elsewhere is not enough. The tentative one silently becomes the
+    definition, the symbol stays local, the cart binding never applies, and the
+    game reads a structure full of zeros. It crashed on a null callback the
+    moment a field effect was created.
+    """
+    # At column zero only. Indented means inside a function, where `return
+    # gSomething;` has exactly this shape and turning it into
+    # `extern return gSomething;` is not an improvement.
+    pattern = re.compile(
+        r"^((?:[A-Za-z_][A-Za-z0-9_]*[^\S\n]+|\*+[^\S\n]*)+)"
+        + re.escape(symbol) + r"[^\S\n]*((?:\[[^\]]*\])*)[^\S\n]*;",
+        re.MULTILINE)
+
+    def replace(match):
+        kind = match.group(1).strip()
+        if kind.split()[0] in ("extern", "return", "typedef"):
+            return match.group(0)
+        return f"extern {kind} {symbol}{match.group(2)};"
+
+    return pattern.sub(replace, text)
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit("usage: patch_data_definitions.py FILE SYMBOL [SYMBOL...]")
@@ -80,7 +109,7 @@ def main():
         cut = cut_definition(text, symbol)
         if cut is None:
             sys.exit(f"patch_data_definitions: no definition of {symbol} in {path}")
-        text = cut
+        text = cut_tentative(cut, symbol)
 
     with open(path, "w") as fh:
         fh.write(text)

@@ -51,7 +51,7 @@ DEFINITION = re.compile(
 INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.MULTILINE)
 
 
-def scan(srcdir):
+def scan(srcdir, also=frozenset()):
     """symbol -> file that defines it, and file -> files it includes."""
     defines, includes = {}, {}
     for path in sorted(Path(srcdir).rglob("*")):
@@ -69,9 +69,10 @@ def scan(srcdir):
                 continue
 
             # `gFoo[] = {...}` has no bound to carry into a declaration, so the
-            # type would be incomplete -- and code that takes ARRAY_COUNT of it
-            # stops compiling. Left alone rather than guessed at.
-            if dims.replace(" ", "") == "[]":
+            # type is incomplete and anything taking ARRAY_COUNT of it stops
+            # compiling. Excluded by default; --also names the ones that have
+            # been built and played through, since most are only ever indexed.
+            if dims.replace(" ", "") == "[]" and name not in also:
                 continue
 
             defines.setdefault(name, rel)
@@ -132,6 +133,8 @@ def main():
                     help="symbols to leave compiled in, comma separated")
     ap.add_argument("--skip-file", default="",
                     help="translation units to leave alone, comma separated")
+    ap.add_argument("--also", default="",
+                    help="unbounded arrays to include anyway, comma separated")
     ap.add_argument("--defined-in",
                     help="a linked port binary; without it every symbol the "
                          "decompilation defines is listed, and most are already "
@@ -139,10 +142,11 @@ def main():
     args = ap.parse_args()
 
     skip = {s for s in args.skip.split(",") if s}
+    also = {s for s in args.also.split(",") if s}
     skip_files = {s for s in args.skip_file.split(",") if s}
     leaking = defined_outside_cart(args.defined_in) if args.defined_in else None
     rom = rom_data_symbols(args.elf, args.sym)
-    defines, includes = scan(args.srcdir)
+    defines, includes = scan(args.srcdir, also)
     owner = owning_units(includes)
 
     by_unit, unresolved = {}, []

@@ -1,20 +1,22 @@
 # Data the game defines in C, which the player's ROM supplies instead.
 #
-# A VERIFIED SUBSET. tools/gen_data_symbols.py derives the full candidate list
-# from the ROM build's symbol table and the decompilation's sources -- 922
-# symbols across 44 files -- and applying all of it builds cleanly and then
-# crashes at frame 807 on a null pointer. One of them must not be bound, and
-# which one is not yet known.
+# A VERIFIED SUBSET, not the full list. tools/gen_data_symbols.py derives the
+# candidates -- 927 symbols across 45 files -- and that build is *nearly* right:
+# it runs, its audio is byte-identical over a 13,500-frame battle trace, and one
+# frame in three differs by 174 pixels, the player drawn on the wrong animation
+# frame. Something in the object-event sprite data binds wrong. Until that is
+# found, only what has been compared frame for frame ships.
 #
-# What is here is what has been played through and compared frame for frame and
-# sample for sample. Regenerate the candidates with:
+# Regenerate the candidates with:
 #
 #   python3 tools/gen_data_symbols.py \
 #       vendor/pokefirered/pokefirered.elf vendor/pokefirered/pokefirered.sym \
 #       vendor/pokefirered/src -o /tmp/candidates.cmake \
-#       --defined-in build/norom/ports/desktop/frlg-native
+#       --defined-in build/retail/ports/desktop/frlg-native \
+#       --also gSpeciesInfo,gItems
 #
-# See https://github.com/SoftARV/frlg-native/issues/11.
+# The reference binary must be one with the data still compiled in, or the
+# filter drops everything already bound. See issue #11.
 set(FRLG_GAME_DATA_SYMBOLS
     "item.c=gItems"
     "pokemon.c=gSpeciesInfo,gBattleMoves,gLevelUpLearnsets,gEvolutionTable"
