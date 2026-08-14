@@ -1,59 +1,107 @@
 #!/usr/bin/env python3
-"""List every game type agbcc lays out differently than this build does.
+"""Find extracted symbols whose type the cartridge lays out differently.
 
-agbcc rounds a structure's size up to a multiple of four. Our compilers do not,
-so any type whose natural size is not already a multiple of four occupies fewer
-bytes here than it does in the cartridge -- and every table of that type read
-out of the cart is misparsed from its second element onward.
+agbcc pads some structures our compilers do not, so a type whose size here is
+not a multiple of four is a candidate for occupying fewer bytes here than in the
+ROM. Every table of such a type read out of the cart is then misparsed from its
+second element onward -- the first is correct, which is what makes the class so
+quiet ([ADR 0018](../docs/adr/0018-match-the-cartridges-structure-layout.md)).
 
-Sizes come from a preprocessed game translation unit, which already carries
-every type definition with the port's own prelude applied. Each type is probed
-as an array symbol so the file need only compile, never link.
+Sizes come from the binary's own debug information, so every type the port
+compiles is covered rather than the ones a single translation unit happens to
+include. Membership is never assumed from the size alone: a candidate is only
+real once its ROM symbol size divides by the entry count to something wider than
+ours, which is why the report prints the arithmetic instead of a verdict.
+
+usage: audit_layout.py [BINARY] [SYMBOL_LIST]
 """
 import os
 import re
 import subprocess
 import sys
 
-PP = sys.argv[1] if len(sys.argv) > 1 else "build/rom-play/platform/agb/pp/pokemon.c"
-TMP = os.environ.get("TMPDIR", "/tmp")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BINARY = sys.argv[1] if len(sys.argv) > 1 else f"{ROOT}/build/rom-play/ports/desktop/frlg-native"
+LIST = sys.argv[2] if len(sys.argv) > 2 else f"{ROOT}/cmake/game_data_symbols.cmake"
+VENDOR = f"{ROOT}/vendor/pokefirered"
 
-text = open(PP, encoding="utf-8", errors="surrogateescape").read()
 
-# Definitions, not forward declarations: the brace must follow the name.
-types = []
-for kw in ("struct", "union"):
-    for m in re.finditer(rf"^{kw}\s+(\w+)\s*\{{", text, re.M):
-        types.append((kw, m.group(1)))
-seen = set()
-types = [t for t in types if not (t in seen or seen.add(t))]
-print(f"{len(types)} type definitions found in {PP.split('/')[-1]}", flush=True)
+def type_sizes(binary):
+    """Every struct/union size this build uses, from DWARF."""
+    out = subprocess.run(["pahole", "--sizes", binary], capture_output=True, text=True)
+    sizes = {}
+    for line in out.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            try:
+                sizes[parts[0]] = int(parts[1])
+            except ValueError:
+                pass
+    return sizes
 
-probe = [text, "\n/* layout probes */\n"]
-for kw, name in types:
-    probe.append(f"char __probe_{kw}_{name}[sizeof({kw} {name})];\n")
-open(f"{TMP}/probe.c", "w", encoding="utf-8", errors="surrogateescape").write("".join(probe))
 
-r = subprocess.run(["gcc", "-m32", "-std=gnu11", "-w", "-c", f"{TMP}/probe.c",
-                    "-o", f"{TMP}/probe.o"], capture_output=True, text=True)
-if r.returncode != 0:
-    print(r.stderr[-2000:])
-    sys.exit("probe failed to compile")
+def extracted_symbols(path):
+    names = set()
+    for line in open(path):
+        m = re.search(r'"([^"=]+)=([^"]*)"', line)
+        if m:
+            for s in m.group(2).split(","):
+                if s:
+                    names.add(s.split("@")[0].split("#")[0])
+    return names
 
-sizes = {}
-out = subprocess.run(["nm", "-S", f"{TMP}/probe.o"], capture_output=True, text=True).stdout
-for line in out.splitlines():
-    p = line.split()
-    if len(p) == 4 and p[3].startswith("__probe_"):
-        sizes[p[3][len("__probe_"):]] = int(p[1], 16)
 
-bad = []
-for kw, name in types:
-    key = f"{kw}_{name}"
-    if key in sizes and sizes[key] % 4 != 0:
-        bad.append((kw, name, sizes[key], (sizes[key] + 3) // 4 * 4))
+def symbols_of_type(names):
+    """Map a symbol to the struct/union it is an array of, from the sources."""
+    decl = re.compile(
+        r"(?:^|\n)\s*(?:extern\s+)?(?:static\s+)?(?:const\s+)?(struct|union)\s+(\w+)\s+"
+        r"(?:\*\s*)?(?:const\s+)?(\w+)\s*\[")
+    found = {}
+    for base in (f"{VENDOR}/src", f"{VENDOR}/include"):
+        for dirpath, _, files in os.walk(base):
+            for name in files:
+                if not name.endswith((".c", ".h")):
+                    continue
+                path = os.path.join(dirpath, name)
+                try:
+                    body = open(path, encoding="utf-8", errors="surrogateescape").read()
+                except OSError:
+                    continue
+                for kw, tname, sym in decl.findall(body):
+                    if sym in names and sym not in found:
+                        found[sym] = (kw, tname)
+    return found
 
-print(f"\n{len(bad)} types differ between this build and the cartridge:\n")
-print(f"  {'type':52s} {'ours':>5s} {'agbcc':>6s}")
-for kw, name, ours, theirs in sorted(bad, key=lambda x: x[1]):
-    print(f"  {kw + ' ' + name:52s} {ours:5d} {theirs:6d}")
+
+def main():
+    sizes = type_sizes(BINARY)
+    if not sizes:
+        sys.exit("audit_layout: pahole returned nothing; is the binary built with debug info?")
+    names = extracted_symbols(LIST)
+    owned = symbols_of_type(names)
+
+    suspect = {}
+    for sym, (kw, tname) in owned.items():
+        n = sizes.get(tname)
+        if n is not None and n % 4 != 0:
+            suspect.setdefault((kw, tname, n, (n + 3) // 4 * 4), []).append(sym)
+
+    print(f"{len(sizes)} types in {os.path.basename(BINARY)}; "
+          f"{len(names)} extracted symbols, {len(owned)} resolved to a struct or union")
+    if not suspect:
+        print("\nNo extracted symbol uses a type whose size is not a multiple of four.")
+        return
+    print(f"\n{len(suspect)} type(s) need checking against the ROM's own symbol sizes:\n")
+    for (kw, tname, ours, theirs), syms in sorted(suspect.items(), key=lambda x: -len(x[1])):
+        print(f"  {kw} {tname:34s} ours {ours:3d}  agbcc would pad to {theirs:3d}")
+        for s in sorted(syms)[:8]:
+            print(f"      {s}")
+        if len(syms) > 8:
+            print(f"      ... and {len(syms) - 8} more")
+    print("\nConfirm each against the ROM before widening: the symbol's size in the\n"
+          "reference build divided by its entry count in the source is the cartridge's\n"
+          "stride. struct LevelUpMove is two bytes in both worlds and must not be widened.")
+
+
+if __name__ == "__main__":
+    main()

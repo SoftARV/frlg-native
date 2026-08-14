@@ -274,9 +274,16 @@ written, which makes `UpdateSpriteMatrixAnchorPos` divide by a zero scale. One m
 produced a hung battle, blank battlers, corrupt intro Pokémon and a `SIGFPE`, all at once.
 `struct MonCoords` is two bytes here and four there, which moves every battle sprite.
 
-**Six types are widened today** — `AffineAnimCmd`, `MonCoords`, `BattleMove`, `SpeciesInfo`,
-`Evolution` and `TrainerMoney` — each verified against the ROM as above. Forty-five types in
-`pokemon.c`'s headers alone are candidates by size. The rest are listed by `tools/audit_layout.py`
+**Eleven types are widened today.** Six are reachable from the list on `main`: `AffineAnimCmd`,
+`MonCoords`, `BattleMove`, `SpeciesInfo`, `Evolution` and `TrainerMoney`. Five more —
+`BattleWindowText`, `WinCoords`, `ListMenuWindowRect`, `CreditsOverworldCmd` and
+`BattleTowerPokemonTemplate` — are reachable only once the statics are extracted too. Each is
+verified against the ROM as above.
+
+`tools/audit_layout.py` reads every type's size from the binary's own debug information and reports
+which *extracted* symbols use one whose size is not a multiple of four. Reading sizes from a single
+translation unit is not enough: an earlier version did that and reported no mismatches while
+`BattleWindowText` was actively crashing the build, because the type is not in that unit's headers. The rest are listed by `tools/audit_layout.py`
 and are only latent while their data stays compiled in — widening the extraction list without
 consulting that audit is how this returns. Types that live only in RAM are deliberately *not*
 widened: their layout is this build's own business, and changing it would change the save format.

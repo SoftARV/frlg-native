@@ -32,6 +32,16 @@ import sys
 #
 # Types that only ever live in RAM are deliberately absent -- their layout is
 # this build's business, and widening them would change the save format.
+#   struct BattleWindowText  sTextOnWindowsInfo_Normal   300 / 25 entries = 12
+#   struct WinCoords         sNameWindowCoords_5Players   20 / 5 entries  = 4
+#   struct ListMenuWindowRect sListMenuRects_OrderedList  40 / 5 entries  = 8
+#   struct CreditsOverworldCmd sOverworldCmd_PewterCity    32 / 8 = 4, /6 not whole
+#   struct BattleTowerPokemonTemplate gBattleTowerLevel50Mons
+#                                                       4800 / 16 = 300, /14 not whole
+#
+# The last five are only reachable once the statics are extracted as well; they
+# were found by tools/audit_layout.py against that list rather than by a crash,
+# except BattleWindowText, which crashed first and prompted the audit.
 TYPES = (
     ("union", "AffineAnimCmd", 8),
     ("struct", "MonCoords", 4),
@@ -39,6 +49,11 @@ TYPES = (
     ("struct", "SpeciesInfo", 28),
     ("struct", "Evolution", 8),
     ("struct", "TrainerMoney", 4),
+    ("struct", "BattleWindowText", 12),
+    ("struct", "WinCoords", 4),
+    ("struct", "ListMenuWindowRect", 8),
+    ("struct", "CreditsOverworldCmd", 8),
+    ("struct", "BattleTowerPokemonTemplate", 16),
 )
 
 ALIGNED = "__attribute__((aligned(4)))"
