@@ -31,10 +31,13 @@ public class Window : Adw.ApplicationWindow {
         import_button.clicked.connect (this.on_import_clicked);
         play_button.clicked.connect (this.on_play_clicked);
         add_save_button.clicked.connect (this.on_add_save);
-        this.fill_saves ();
 
+        // The game has to exist before the saves are listed: only it can read a
+        // save, and a list built before it is found silently skips every lookup
+        // and leaves the rows saying nothing but "Saved game".
         var binary = Game.find ();
         if (binary == null) {
+            this.fill_saves ();
             import_page.title = _("The game is not installed");
             import_page.description =
                 _("The launcher could not find the frlg-native binary. Set FRLG_GAME_BIN to its path.");
@@ -43,6 +46,7 @@ public class Window : Adw.ApplicationWindow {
         }
 
         game = new Game (binary);
+        this.fill_saves ();
         this.refresh.begin ();
     }
 

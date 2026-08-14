@@ -494,6 +494,36 @@ static int newest_sector(const uint8_t *save, unsigned id, const uint8_t **data)
     return found;
 }
 
+// The game's own text encoding, not ASCII: a name is stored in it and reads as
+// nonsense if handed over raw. Only the run of characters a name can contain is
+// translated, from vendor/pokefirered/charmap.txt -- space at 00, digits from
+// A1, capitals from BB, lower case from D5, and FF ending the string.
+#define PLAYER_NAME_MAX 7
+
+static void decode_name(const uint8_t *encoded, char *out)
+{
+    unsigned n = 0;
+
+    for (; n < PLAYER_NAME_MAX; n++)
+    {
+        uint8_t c = encoded[n];
+
+        if (c == 0xFF)
+            break;
+        if (c == 0x00)
+            out[n] = ' ';
+        else if (c >= 0xA1 && c <= 0xAA)
+            out[n] = (char)('0' + (c - 0xA1));
+        else if (c >= 0xBB && c <= 0xD4)
+            out[n] = (char)('A' + (c - 0xBB));
+        else if (c >= 0xD5 && c <= 0xEE)
+            out[n] = (char)('a' + (c - 0xD5));
+        else
+            out[n] = '?';   // A name can hold characters this does not cover.
+    }
+    out[n] = '\0';
+}
+
 static int command_save_info(const char *path)
 {
     static uint8_t save[SAVE_SECTOR_COUNT * SAVE_SECTOR_SIZE];
@@ -548,14 +578,13 @@ static int command_save_info(const char *path)
 
     {
         uint16_t hours;
-        char name[8] = {0};
+        char name[PLAYER_NAME_MAX + 1];
 
         memcpy(&hours, sb2 + SB2_PLAY_HOURS, sizeof(hours));
-        // The name is in the game's own text encoding, not ASCII, so it is left
-        // to whoever wants to decode it rather than printed as mojibake.
-        (void)name;
+        decode_name(sb2 + SB2_PLAYER_NAME, name);
 
         printf("ok=yes\n");
+        printf("name=%s\n", name);
         printf("hours=%u\n", hours);
         printf("minutes=%u\n", sb2[SB2_PLAY_MINUTES]);
         if (have_block1)

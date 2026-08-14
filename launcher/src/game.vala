@@ -125,6 +125,9 @@ public class Game : Object {
             var earned = badges == 0 ? _("no badges")
                        : ngettext ("%d badge", "%d badges", badges).printf (badges);
 
+            var who = fields.get ("name");
+            if (who != null && who.strip () != "")
+                return "%s · %s · %s".printf (who, played, earned);
             return "%s · %s".printf (played, earned);
         } catch (Error e) {
             return null;
