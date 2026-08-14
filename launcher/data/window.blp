@@ -88,11 +88,22 @@ template $FrlgWindow : Adw.ApplicationWindow {
                 description: _("The one you pick is the one the game plays. A second save can run a different mod later without touching this one.");
 
                 [header-suffix]
-                Button add_save_button {
-                  valign: center;
-                  tooltip-text: _("New save");
-                  icon-name: "list-add-symbolic";
-                  styles ["flat"]
+                Box {
+                  spacing: 6;
+
+                  Button import_save_button {
+                    valign: center;
+                    tooltip-text: _("Import a save as a new one");
+                    icon-name: "document-open-symbolic";
+                    styles ["flat"]
+                  }
+
+                  Button add_save_button {
+                    valign: center;
+                    tooltip-text: _("New save");
+                    icon-name: "list-add-symbolic";
+                    styles ["flat"]
+                  }
                 }
               }
             };

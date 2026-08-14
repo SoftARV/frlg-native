@@ -10,6 +10,7 @@ public class Window : Adw.ApplicationWindow {
     [GtkChild] private unowned Adw.StatusPage import_page;
     [GtkChild] private unowned Adw.PreferencesGroup saves_group;
     [GtkChild] private unowned Gtk.Button add_save_button;
+    [GtkChild] private unowned Gtk.Button import_save_button;
     [GtkChild] private unowned Adw.ToastOverlay toasts;
 
     private Game? game = null;
@@ -31,6 +32,7 @@ public class Window : Adw.ApplicationWindow {
         import_button.clicked.connect (this.on_import_clicked);
         play_button.clicked.connect (this.on_play_clicked);
         add_save_button.clicked.connect (this.on_add_save);
+        import_save_button.clicked.connect (this.on_import_save);
 
         // The game has to exist before the saves are listed: only it can read a
         // save, and a list built before it is found silently skips every lookup
@@ -121,12 +123,6 @@ public class Window : Adw.ApplicationWindow {
         show.clicked.connect (() => { popover.popdown (); this.show_files (profile); });
         box.append (show);
 
-        var import_save = new Gtk.Button.with_label (_("Import a save…")) {
-            halign = Gtk.Align.FILL, has_frame = false };
-        import_save.get_first_child ().halign = Gtk.Align.START;
-        import_save.clicked.connect (() => { popover.popdown (); this.import_save (profile); });
-        box.append (import_save);
-
         var rename = new Gtk.Button.with_label (_("Rename…")) {
             halign = Gtk.Align.FILL, has_frame = false };
         rename.get_first_child ().halign = Gtk.Align.START;
@@ -162,7 +158,10 @@ public class Window : Adw.ApplicationWindow {
     // loading it would look like corruption rather than a mistake.
     private const int64 SAVE_BYTES = 131072;
 
-    private void import_save (Profile profile) {
+    // Importing brings a save *in*; it never writes over one that is already
+    // there. A confirmation would have been the other way to do this, and a
+    // dialog is a weaker guard than an action with nothing to destroy.
+    private void on_import_save () {
         var filter = new Gtk.FileFilter () { name = _("Save file") };
         filter.add_pattern ("*.sav");
         var filters = new ListStore (typeof (Gtk.FileFilter));
@@ -183,40 +182,29 @@ public class Window : Adw.ApplicationWindow {
                         .printf (size, SAVE_BYTES));
                     return;
                 }
-                if (profile.has_save)
-                    this.confirm_overwrite (profile, file);
-                else
-                    this.do_import_save (profile, file);
+
+                // Named after the file, since that is the only clue there is
+                // until the game has been asked what is inside it. Renaming is
+                // one menu away.
+                var label = file.get_basename ();
+                if (label.has_suffix (".sav"))
+                    label = label.substring (0, label.length - 4);
+
+                var profile = profiles.add (label);
+                try {
+                    file.copy (File.new_for_path (profile.save_path), FileCopyFlags.NONE);
+                } catch (Error e) {
+                    // Nothing was imported, so nothing should be left behind.
+                    profiles.remove (profile);
+                    this.complain (e.message);
+                    this.fill_saves ();
+                    return;
+                }
+                this.fill_saves ();
+                toasts.add_toast (new Adw.Toast (_("Imported as “%s”").printf (label)));
             } catch (Error e) {
             }
         });
-    }
-
-    private void confirm_overwrite (Profile profile, File file) {
-        var dialog = new Adw.AlertDialog (_("Replace this save?"),
-            _("“%s” already has a game in it. Importing replaces it, and what is there now is gone.")
-                .printf (profile.name));
-        dialog.add_response ("cancel", _("Cancel"));
-        dialog.add_response ("replace", _("Replace"));
-        dialog.set_response_appearance ("replace", Adw.ResponseAppearance.DESTRUCTIVE);
-        dialog.set_default_response ("cancel");
-        dialog.set_close_response ("cancel");
-        dialog.response.connect ((response) => {
-            if (response == "replace")
-                this.do_import_save (profile, file);
-        });
-        dialog.present (this);
-    }
-
-    private void do_import_save (Profile profile, File file) {
-        try {
-            DirUtils.create_with_parents (profile.directory, 0755);
-            file.copy (File.new_for_path (profile.save_path), FileCopyFlags.OVERWRITE);
-            this.fill_saves ();
-            toasts.add_toast (new Adw.Toast (_("Save imported")));
-        } catch (Error e) {
-            this.complain (e.message);
-        }
     }
 
     private void export_save (Profile profile) {
