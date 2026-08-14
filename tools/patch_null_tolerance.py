@@ -230,6 +230,26 @@ EDITS = {
             r"\g<keep>    if (sMapCursor == ((void *)0))\n        return MAPSEC_NONE;\n",
         ),
     ],
+    # DoCursorNewPosUpdate sets the held mon's sprite priority whenever the
+    # cursor moves onto the buttons, the party or a box -- but only
+    # UpdateCursorPos checks sIsMonBeingMoved first. With nothing held,
+    # movingMonSprite is null and the write lands on address 5, which is the
+    # priority byte's offset inside struct Sprite. On hardware that is the BIOS
+    # region and the write is dropped; the cursor keeps moving and nothing shows.
+    #
+    # Guarded in the callee rather than at the three call sites: upstream already
+    # tests this same pointer for null before destroying it, so a null is an
+    # expected state rather than a lost sprite, and one guard covers every caller.
+    "pokemon_storage_system_graphics.c": [
+        (
+            "the held mon's priority written with nothing held",
+            re.compile(
+                r"gStorage->movingMonSprite->oam\.priority = priority;"
+            ),
+            "if (gStorage->movingMonSprite != ((void *)0)) "
+            "gStorage->movingMonSprite->oam.priority = priority;",
+        ),
+    ],
     "pokemon_storage_system_tasks.c": [
         (
             "the storage system's read through its freed state",

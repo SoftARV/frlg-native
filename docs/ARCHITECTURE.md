@@ -242,9 +242,17 @@ all with a save present**. Pointing the three pointers at their own objects make
 where it belongs; offset zero is one of the offsets `SetSaveBlocksPointers` itself picks, so it is a
 state the game already handles.
 
-Nine instances in six phases, every one found by playing rather than by reading, and each only
+Ten instances in six phases, every one found by playing rather than by reading, and each only
 reachable once the phase before it worked: a save to exist, a save to load, a battle to reach, a
-Pokémon worth looking at, a trainer card worth opening.
+Pokémon worth looking at, a trainer card worth opening, a box to move a Pokémon into.
+
+**The tenth is a write, and not a freed-pointer one.** `SetMovingMonPriority` sets the held Pokémon's
+sprite priority, and `DoCursorNewPosUpdate` calls it whenever the cursor moves onto the buttons, the
+party or a box. Only `UpdateCursorPos` checks `sIsMonBeingMoved` first. With nothing held the sprite
+pointer is null and the write lands on address 5 — the priority byte's offset inside `struct Sprite` —
+which on hardware is BIOS ROM and dropped. It is guarded in the callee rather than at the three call
+sites, because upstream already tests that same pointer for null before destroying it: a null there is
+an expected state, not a lost sprite, and one guard covers every caller.
 
 **The fourth class has the widest reach of the four, and applies to the cart rather than to the code.**
 The cartridge was compiled by `agbcc` ([`Makefile:82`](../vendor/pokefirered/Makefile)), which pads
@@ -568,6 +576,7 @@ of the two, since it depends on nothing but the ROM.
 | --- | --- | --- |
 | `newgame.trace` | the intro, then the rival battle | nothing — starts a new game |
 | `input.trace` + `start.sav` | a wild battle from a mid-game save | its own save |
+| `storage.trace` + `storage-start.sav` | the storage system, cursor moved with nothing held | its own save |
 
 What makes them worth keeping is not coverage but *what they are compared against*. Replaying one
 against a build with the data compiled in gives a known-good frame; replaying it against a build

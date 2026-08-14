@@ -145,8 +145,8 @@ set(FRLG_PATCH_STRUCTS "${CMAKE_SOURCE_DIR}/tools/patch_struct_layout.py")
 
 set(FRLG_GAME_PATCH_NULL naming_screen.c load_save.c overworld.c battle_transition.c
                          sprite.c trainer_card.c pokemon_summary_screen.c
-                         pokemon_storage_system_tasks.c region_map.c
-                         battle_controllers.c trade_scene.c)
+                         pokemon_storage_system_tasks.c pokemon_storage_system_graphics.c
+                         region_map.c battle_controllers.c trade_scene.c)
 set(FRLG_PATCH_NULL "${CMAKE_SOURCE_DIR}/tools/patch_null_tolerance.py")
 
 # main.c's only ARM assembly is an IWRAM clear inside `#if MODERN`, so upstream's
