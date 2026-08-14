@@ -369,16 +369,26 @@ public class Window : Adw.ApplicationWindow {
         var model = new Gtk.StringList (labels);
         var row = new Adw.ComboRow () { title = title, model = model };
 
+        // An owned copy, because the closure below outlives this call by as long
+        // as the dialog is open, and `options` arrives as an array literal built
+        // at the call site. Capturing that one directly reads freed memory the
+        // moment somebody changes the setting -- which is exactly when it looks
+        // like the launcher crashing at random.
+        var choices = new string[options.length];
+        for (int i = 0; i < options.length; i++)
+            choices[i] = options[i];
+
         var current = values.get (key);
-        for (uint i = 0; i < options.length; i++)
-            if (options[i] == current)
+        for (uint i = 0; i < choices.length; i++)
+            if (choices[i] == current)
                 row.selected = i;
 
-        // Set after the initial selection, or populating the row would write
-        // the value back to the save it just came from.
+        // Connected after the initial selection, or populating the row would
+        // write the value straight back to the save it just came from.
         row.notify["selected"].connect (() => {
-            var chosen = options[row.selected];
-            this.apply_option.begin (profile, key, chosen);
+            if (row.selected >= choices.length)
+                return;   // No selection is not a value to store.
+            this.apply_option.begin (profile, key, choices[row.selected]);
         });
         group.add (row);
     }
