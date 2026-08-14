@@ -94,8 +94,16 @@ def owning_units(includes):
             seen.add(current)
             owner.setdefault(current, unit)
             for name in includes.get(current, ()):
-                if name in includes:
-                    stack.append(name)
+                # A quoted include resolves against the including file's own
+                # directory first, and the decompilation uses that:
+                # src/data/pokemon/pokedex_text.h says "pokedex_text_fr.h",
+                # not the path from src/. Missing this orphaned 774 symbols --
+                # every Pokedex entry's text -- which then stayed compiled in.
+                beside = str(Path(current).parent / name)
+                for candidate in (name, beside):
+                    if candidate in includes:
+                        stack.append(candidate)
+                        break
     return owner
 
 
