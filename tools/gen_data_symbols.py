@@ -16,6 +16,7 @@ usage: gen_data_symbols.py ROM.elf ROM.sym SRCDIR -o out.cmake [--skip sym,...]
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -101,6 +102,58 @@ def owning_units(includes):
     return owner
 
 
+def unbindable_sites(elf, rom_path, readelf="arm-none-eabi-readelf"):
+    """Offsets holding a pointer to a static function.
+
+    Such a pointer cannot shift into the cart -- native code is not in the cart
+    image -- and cannot rebind, because a static has no name another translation
+    unit can reference. It keeps a cartridge address, and this port links near
+    0x08000000, so it lands inside our own image and reads as plausible garbage
+    rather than faulting: no crash, no link error, nothing audible, just
+    something drawn or timed wrong.
+
+    Harmless while the structure holding it is read from our copy. Fatal once it
+    is read from the cart, so any symbol containing one is left compiled in.
+    """
+    import struct
+
+    sections = elfsections.read_sections(elf, readelf)
+    code = elfsections.code_ranges(sections)
+    data_sections = elfsections.data_relocation_sections(sections)
+    rom = open(rom_path, "rb").read()
+
+    globals_ = set()
+    for line in subprocess.run([readelf, "-sW", elf], capture_output=True,
+                               text=True).stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 8 and parts[4] == "GLOBAL":
+            globals_.add(parts[7])
+
+    out, section = set(), None
+    listing = subprocess.run([readelf, "-rW", elf], capture_output=True, text=True).stdout
+    for line in listing.splitlines():
+        match = re.match(r"Relocation section '(\S+)'", line)
+        if match:
+            section = match.group(1)
+            continue
+        if section not in data_sections:
+            continue
+        parts = line.split()
+        if len(parts) < 5 or not re.fullmatch(r"[0-9a-f]{8}", parts[0]):
+            continue
+
+        site = int(parts[0], 16)
+        if not (0x08000000 <= site < 0x08000000 + len(rom) - 4):
+            continue
+        word = struct.unpack_from("<I", rom, site - 0x08000000)[0]
+        if not elfsections.is_code(code, word & ~1):
+            continue
+        if parts[4] in globals_:
+            continue          # names a global: rebinds to our function, fine
+        out.add(site)
+    return out
+
+
 def defined_outside_cart(binary):
     """Symbols the port defines itself rather than reading from the cart image.
 
@@ -127,6 +180,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("elf")
     ap.add_argument("sym")
+    ap.add_argument("--rom", help="the ROM image, to find pointers that cannot "
+                                  "be resolved either way")
     ap.add_argument("srcdir")
     ap.add_argument("-o", "--output", required=True)
     ap.add_argument("--skip", default="",
@@ -146,10 +201,19 @@ def main():
     skip_files = {s for s in args.skip_file.split(",") if s}
     leaking = defined_outside_cart(args.defined_in) if args.defined_in else None
     rom = rom_data_symbols(args.elf, args.sym)
+    # Where each symbol is and how big it is. rom_data_symbols returns sizes
+    # alone, which is not enough to ask whether a site falls inside one.
+    extent = {}
+    for line in open(args.sym):
+        parts = line.split()
+        if len(parts) == 4:
+            extent[parts[3]] = (int(parts[0], 16), int(parts[2], 16))
     defines, includes = scan(args.srcdir, also)
     owner = owning_units(includes)
 
-    by_unit, unresolved = {}, []
+    unbindable = unbindable_sites(args.elf, args.rom) if args.rom else set()
+
+    by_unit, unresolved, unsafe = {}, [], []
     for symbol in sorted(rom):
         if symbol in skip or symbol not in defines:
             continue
@@ -160,6 +224,12 @@ def main():
             unresolved.append(symbol)
             continue
         if Path(unit).name in skip_files:
+            continue
+
+        # A symbol holding a pointer nothing can resolve stays compiled in.
+        start, size = extent.get(symbol, (0, 0))
+        if size and any(start <= site < start + size for site in unbindable):
+            unsafe.append(symbol)
             continue
         by_unit.setdefault(Path(unit).name, []).append(symbol)
 
@@ -173,6 +243,7 @@ def main():
 
     total = sum(len(v) for v in by_unit.values())
     print(f"gen_data_symbols: {total} symbols across {len(by_unit)} files"
+          + (f", {len(unsafe)} left compiled in (unresolvable pointer)" if unsafe else "")
           + (f", {len(unresolved)} unplaced" if unresolved else ""))
 
 
