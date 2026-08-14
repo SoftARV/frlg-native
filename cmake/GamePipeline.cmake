@@ -136,6 +136,13 @@ set(FRLG_PATCH_LAYOUT "${CMAKE_SOURCE_DIR}/tools/patch_layout_assumptions.py")
 # The GBA has no MMU, so upstream may read through a null pointer and get
 # garbage rather than a fault. naming_screen.c does. See
 # tools/patch_null_tolerance.py.
+# The cartridge was built by agbcc, which rounds structure sizes up to a multiple
+# of four. Types whose natural size is not already a multiple of four therefore
+# have a different layout in the ROM than in this build, and every table of them
+# read out of the cart is misparsed. See tools/patch_struct_layout.py and the
+# override table in docs/ARCHITECTURE.md.
+set(FRLG_PATCH_STRUCTS "${CMAKE_SOURCE_DIR}/tools/patch_struct_layout.py")
+
 set(FRLG_GAME_PATCH_NULL naming_screen.c load_save.c overworld.c battle_transition.c
                          sprite.c trainer_card.c pokemon_summary_screen.c
                          pokemon_storage_system_tasks.c region_map.c
@@ -183,6 +190,13 @@ function(frlg_preprocess_game rel out_var)
     # choosing between themselves.
     set(post "")
     set(extra_deps "")
+
+    # Runs on every game source rather than a named list: the type reaches 270 of
+    # them, and a file that stopped matching would otherwise revert to the narrow
+    # layout without saying so. See tools/patch_struct_layout.py.
+    list(APPEND post COMMAND "${CMAKE_COMMAND}" -E env python3
+         "${FRLG_PATCH_STRUCTS}" "${c}")
+    list(APPEND extra_deps "${FRLG_PATCH_STRUCTS}")
 
     if(FRLG_GAME_DATA_FROM_ROM)
         foreach(entry ${FRLG_GAME_DATA_SYMBOLS})

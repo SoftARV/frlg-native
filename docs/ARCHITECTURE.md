@@ -210,7 +210,7 @@ into two groups, and every one describes hardware rather than game logic.
 | --- | --- | --- |
 | `script.c` | `svc 2` (HALT) | **built** — the halt becomes `VBlankIntrWait`, which is what it meant; the pointer accessor is a 64-bit concern ([§12](#12-pointer-width)) |
 
-**Three classes of statement are replaced in the preprocessed copy** rather than by overriding a whole
+**Four classes of edit are made in the preprocessed copy** rather than by overriding a whole
 file for a line. Each has its own script, each match is exact, and each fails the build when its
 target is absent, so a submodule bump is reported rather than silently changing what compiles:
 
@@ -218,6 +218,7 @@ target is absent, so a submodule bump is reported rather than silently changing 
 | --- | --- | --- |
 | `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `main.c`, `script.c` |
 | `patch_layout_assumptions.py` | assumes upstream's linker script | `load_save.c` |
+| `patch_struct_layout.py` | is laid out differently by the cartridge's compiler | every game source |
 | `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c`, `overworld.c`, `battle_transition.c`, `sprite.c`, `trainer_card.c`, `pokemon_summary_screen.c`, `pokemon_storage_system_tasks.c`, `region_map.c`, `battle_controllers.c`, `trade_scene.c` |
 
 The third is worth understanding, because more of it will turn up. **The GBA has no MMU**: every
@@ -244,6 +245,32 @@ state the game already handles.
 Nine instances in six phases, every one found by playing rather than by reading, and each only
 reachable once the phase before it worked: a save to exist, a save to load, a battle to reach, a
 Pokémon worth looking at, a trainer card worth opening.
+
+**The fourth class has the widest reach of the four, and applies to the cart rather than to the code.**
+The cartridge was compiled by `agbcc` ([`Makefile:82`](../vendor/pokefirered/Makefile)), which rounds
+every structure's size up to a multiple of four. Modern compilers do not, on ARM or anywhere else. A
+type whose natural size is not already a multiple of four therefore occupies *fewer* bytes here than
+it does in the ROM, and every table of that type read out of the cart ([§5.3c](#53c-not-compiling-the-data-in))
+is misparsed from its second element onward. The first element is right, which is what makes it so
+quiet: the data is byte-perfect, the relocations are correct, and only the reader's stride is wrong.
+
+`union AffineAnimCmd` is six bytes here and eight in the cart. Reading an affine animation with a
+six-byte stride never reaches the END marker, so the animation never completes — a Pokémon's send-out
+loops forever, the sprite keeps whatever pixels its buffer already held, and the matrix is never
+written, which makes `UpdateSpriteMatrixAnchorPos` divide by a zero scale. One mismatched type
+produced a hung battle, blank battlers, corrupt intro Pokémon and a `SIGFPE`, all at once.
+`struct MonCoords` is two bytes here and four there, which moves every battle sprite.
+
+**Forty-five game types have this property** in `pokemon.c`'s headers alone — `SpeciesInfo` (26 against
+28), `BattleMove` (9 against 12), `Evolution` (6 against 8), the trainer party structs. The two above
+are the ones whose data the cart currently supplies. The rest are listed by `tools/audit_layout.py`
+and are only latent while their data stays compiled in — widening the extraction list without
+consulting that audit is how this returns. Types that live only in RAM are deliberately *not*
+widened: their layout is this build's own business, and changing it would change the save format.
+
+None of this was caught by trace replay, by the entropy probe, or by comparing extracted bytes against
+the ROM, because all three were measuring the data. It was caught by playing the game and by bisecting
+the extraction list against a recorded play-through ([§5.3d](#53d-recorded-play-throughs)).
 
 **A screen's callback outliving the screen's data is five of the eight** — the naming screen,
 the battle transition, the trainer card, the summary screen, the storage system — the fourth and fifth
@@ -506,6 +533,30 @@ in source, which is why the file shrinks far more than the binary.
 function would have it silently dropped and its symbol would bind to whatever the ROM holds at that
 address — ARM machine code this port cannot execute. `tools/check_data_only.py` reads the ROM build's
 own objects, since that is the only place these files are compiled, and fails configuration.
+
+### 5.3d Recorded play-throughs
+
+`tests/playthrough/` holds recordings of somebody actually playing, and they exist because the
+verification that came before them said the extraction was clean while battles were unplayable.
+
+A trace and the save it started from are one artefact — a trace replayed against any other save is
+meaningless. `newgame.trace` needs no save at all: it starts a new game, which makes it the better
+of the two, since it depends on nothing but the ROM.
+
+| Recording | Reaches | Needs |
+| --- | --- | --- |
+| `newgame.trace` | the intro, then the rival battle | nothing — starts a new game |
+| `input.trace` + `start.sav` | a wild battle from a mid-game save | its own save |
+
+What makes them worth keeping is not coverage but *what they are compared against*. Replaying one
+against a build with the data compiled in gives a known-good frame; replaying it against a build
+reading the same data from the cart must give that frame back, pixel for pixel. That comparison is
+mechanical, so it bisects: the extraction list is halved until one entry is left. Both of the layout
+mismatches in [§4.2](#42-overrides) were found that way, in a handful of builds each, after inspection
+had cleared the same code five times.
+
+**Frame 17500 of `newgame.trace` is the canonical check** — the rival's Pokémon on the field, which is
+the first moment a battle sprite is drawn at all. Nothing in the earlier trace set ever rendered one.
 
 ### 5.4 Data the host cannot build
 
