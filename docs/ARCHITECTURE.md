@@ -577,6 +577,8 @@ of the two, since it depends on nothing but the ROM.
 | `newgame.trace` | the intro, then the rival battle | nothing — starts a new game |
 | `input.trace` + `start.sav` | a wild battle from a mid-game save | its own save |
 | `storage.trace` + `storage-start.sav` | the storage system, cursor moved with nothing held | its own save |
+| `overworld.trace` + `overworld-start.sav` | eight minutes of ordinary play, no faults | its own save |
+| `loss.trace` | a new game through to losing the first rival battle | nothing — starts a new game |
 
 What makes them worth keeping is not coverage but *what they are compared against*. Replaying one
 against a build with the data compiled in gives a known-good frame; replaying it against a build
