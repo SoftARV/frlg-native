@@ -134,6 +134,32 @@ public class Game : Object {
         }
     }
 
+    // The options the game keeps inside a save. Empty when there is no save
+    // yet, which is a state the caller shows rather than an error.
+    public async HashTable<string, string> options (string save_path) {
+        try {
+            int status;
+            var output = yield run ({ binary, "--options", save_path }, out status);
+            var fields = parse (output ?? "");
+            if (fields.get ("ok") != "yes")
+                return new HashTable<string, string> (str_hash, str_equal);
+            return fields;
+        } catch (Error e) {
+            return new HashTable<string, string> (str_hash, str_equal);
+        }
+    }
+
+    public async bool set_option (string save_path, string key, string value) {
+        try {
+            int status;
+            var output = yield run ({ binary, "--set-option", save_path,
+                                      "%s=%s".printf (key, value) }, out status);
+            return parse (output ?? "").get ("ok") == "yes";
+        } catch (Error e) {
+            return false;
+        }
+    }
+
     // Throws away the imported copy. The player's ROM and saves are untouched;
     // this only makes the next launch import again, which is otherwise a path
     // you get to walk once.

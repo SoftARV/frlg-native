@@ -318,15 +318,74 @@ public class Window : Adw.ApplicationWindow {
         mine.add (scale);
         page.add (mine);
 
+        var profile = profiles.selected ();
         var theirs = new Adw.PreferencesGroup () {
-            title = _("The selected save"),
-            description = _("Sound, text speed and the rest are kept inside each save, so they belong to the game rather than to this computer. Not wired up yet."),
+            title = profile != null
+                ? _("The save “%s”").printf (profile.name)
+                : _("The selected save"),
+            description = _("The game keeps these inside the save itself, so each one has its own."),
         };
         page.add (theirs);
+
+        if (profile != null && profile.has_save && game != null)
+            this.fill_options.begin (theirs, profile);
+        else
+            theirs.add (new Adw.ActionRow () {
+                title = _("Nothing saved yet"),
+                subtitle = _("Play once and save, and the game's own options appear here."),
+            });
 
         var dialog = new Adw.PreferencesDialog ();
         dialog.add (page);
         dialog.present (this);
+    }
+
+    // The game's own options, in the order its OPTION screen lists them. The
+    // frame style and the map zoom are left out: one is twenty numbered borders
+    // and the other is not a setting, it is where the map was last left.
+    private async void fill_options (Adw.PreferencesGroup group, Profile profile) {
+        var values = yield game.options (profile.save_path);
+        if (values.size () == 0) {
+            group.add (new Adw.ActionRow () { title = _("This save could not be read") });
+            return;
+        }
+
+        this.add_choice (group, profile, values, "sound", _("Sound"),
+                         { "mono", "stereo" }, { _("Mono"), _("Stereo") });
+        this.add_choice (group, profile, values, "text-speed", _("Text speed"),
+                         { "slow", "mid", "fast" }, { _("Slow"), _("Medium"), _("Fast") });
+        this.add_choice (group, profile, values, "battle-style", _("Battle style"),
+                         { "shift", "set" }, { _("Shift"), _("Set") });
+        this.add_choice (group, profile, values, "battle-scene", _("Battle animations"),
+                         { "on", "off" }, { _("On"), _("Off") });
+        this.add_choice (group, profile, values, "button-mode", _("Button mode"),
+                         { "help", "lr", "l-equals-a" },
+                         { _("Help"), _("L and R"), _("L equals A") });
+    }
+
+    private void add_choice (Adw.PreferencesGroup group, Profile profile,
+                             HashTable<string, string> values, string key,
+                             string title, string[] options, string[] labels) {
+        var model = new Gtk.StringList (labels);
+        var row = new Adw.ComboRow () { title = title, model = model };
+
+        var current = values.get (key);
+        for (uint i = 0; i < options.length; i++)
+            if (options[i] == current)
+                row.selected = i;
+
+        // Set after the initial selection, or populating the row would write
+        // the value back to the save it just came from.
+        row.notify["selected"].connect (() => {
+            var chosen = options[row.selected];
+            this.apply_option.begin (profile, key, chosen);
+        });
+        group.add (row);
+    }
+
+    private async void apply_option (Profile profile, string key, string value) {
+        if (!yield game.set_option (profile.save_path, key, value))
+            this.complain (_("That option could not be saved."));
     }
 
     private void on_add_save () {

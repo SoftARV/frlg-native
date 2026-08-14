@@ -524,6 +524,220 @@ static void decode_name(const uint8_t *encoded, char *out)
     out[n] = '\0';
 }
 
+// The seven the game itself keeps, packed into two bytes of SaveBlock2:
+//
+//   0x013  u8  optionsButtonMode
+//   0x014  u16 textSpeed:3, windowFrame:5, sound:1, battleStyle:1,
+//              battleSceneOff:1, regionMapZoom:1
+//
+// Bit positions rather than a struct, for the reason the offsets above are
+// mirrored rather than included -- and little-endian, LSB first, which is what
+// both the ROM build and this one do.
+#define SB2_BUTTON_MODE 0x013
+#define SB2_OPTION_BITS 0x014
+
+struct option_field
+{
+    const char *name;
+    unsigned shift;       // in the 16-bit word; ignored when byte_at is set
+    unsigned width;
+    unsigned byte_at;     // non-zero when the option is a byte of its own
+    const char *const *words;
+};
+
+static const char *const speed_words[] = {"slow", "mid", "fast", NULL};
+static const char *const sound_words[] = {"mono", "stereo", NULL};
+static const char *const style_words[] = {"shift", "set", NULL};
+static const char *const scene_words[] = {"on", "off", NULL};
+static const char *const button_words[] = {"help", "lr", "l-equals-a", NULL};
+static const char *const zoom_words[] = {"out", "in", NULL};
+
+static const struct option_field options[] = {
+    {"text-speed",   0, 3, 0,               speed_words},
+    {"frame",        3, 5, 0,               NULL},
+    {"sound",        8, 1, 0,               sound_words},
+    {"battle-style", 9, 1, 0,               style_words},
+    {"battle-scene", 10, 1, 0,              scene_words},
+    {"map-zoom",     11, 1, 0,              zoom_words},
+    {"button-mode",  0, 8, SB2_BUTTON_MODE, button_words},
+};
+
+#define OPTION_COUNT (sizeof(options) / sizeof(options[0]))
+
+static unsigned option_read(const uint8_t *sb2, const struct option_field *f)
+{
+    uint16_t word;
+
+    if (f->byte_at != 0)
+        return sb2[f->byte_at];
+    memcpy(&word, sb2 + SB2_OPTION_BITS, sizeof(word));
+    return (word >> f->shift) & ((1u << f->width) - 1u);
+}
+
+static int command_options(const char *path)
+{
+    static uint8_t save[SAVE_SECTOR_COUNT * SAVE_SECTOR_SIZE];
+    const uint8_t *sb2 = NULL;
+    FILE *fh = fopen(path, "rb");
+    size_t read;
+
+    if (fh == NULL)
+    {
+        printf("ok=no\nerror=no save yet\n");
+        return 3;
+    }
+    read = fread(save, 1, sizeof(save), fh);
+    fclose(fh);
+    if (read != sizeof(save) || !newest_sector(save, 0, &sb2))
+    {
+        printf("ok=no\nerror=nothing saved yet\n");
+        return 3;
+    }
+
+    printf("ok=yes\n");
+    for (unsigned i = 0; i < OPTION_COUNT; i++)
+    {
+        unsigned value = option_read(sb2, &options[i]);
+
+        if (options[i].words != NULL && options[i].words[value] != NULL)
+            printf("%s=%s\n", options[i].name, options[i].words[value]);
+        else
+            printf("%s=%u\n", options[i].name, value);
+    }
+    return 0;
+}
+
+// Writing one option back.
+//
+// Only the newest copy of SaveBlock2 is touched: the game reads the slot with
+// the highest counter, and the older slot is the backup that exists precisely so
+// that a bad write is survivable. Its checksum is recomputed, since a sector the
+// game cannot verify is a sector it discards -- which would silently undo this
+// and, worse, look like the save going bad on its own.
+static int command_set_option(const char *path, const char *assignment)
+{
+    static uint8_t save[SAVE_SECTOR_COUNT * SAVE_SECTOR_SIZE];
+    const uint8_t *found = NULL;
+    uint8_t *sb2;
+    const struct option_field *field = NULL;
+    const char *equals = strchr(assignment, '=');
+    char name[32];
+    unsigned value = 0;
+    FILE *fh;
+    size_t read;
+    char temp[600];
+
+    if (equals == NULL || (size_t)(equals - assignment) >= sizeof(name))
+    {
+        printf("ok=no\nerror=expected name=value\n");
+        return 2;
+    }
+    memcpy(name, assignment, (size_t)(equals - assignment));
+    name[equals - assignment] = '\0';
+
+    for (unsigned i = 0; i < OPTION_COUNT; i++)
+        if (strcmp(options[i].name, name) == 0)
+            field = &options[i];
+    if (field == NULL)
+    {
+        printf("ok=no\nerror=no such option\n");
+        return 2;
+    }
+
+    {
+        const char *want = equals + 1;
+        int matched = 0;
+
+        if (field->words != NULL)
+            for (unsigned i = 0; field->words[i] != NULL; i++)
+                if (strcmp(field->words[i], want) == 0)
+                {
+                    value = i;
+                    matched = 1;
+                }
+        if (!matched)
+        {
+            char *end;
+            unsigned long parsed = strtoul(want, &end, 10);
+
+            if (*want == '\0' || *end != '\0' || parsed >= (1u << field->width))
+            {
+                printf("ok=no\nerror=not a value this option takes\n");
+                return 2;
+            }
+            value = (unsigned)parsed;
+        }
+    }
+
+    fh = fopen(path, "rb");
+    if (fh == NULL)
+    {
+        printf("ok=no\nerror=no save yet\n");
+        return 3;
+    }
+    read = fread(save, 1, sizeof(save), fh);
+    fclose(fh);
+    if (read != sizeof(save) || !newest_sector(save, 0, &found))
+    {
+        printf("ok=no\nerror=nothing saved yet\n");
+        return 3;
+    }
+
+    sb2 = save + (found - save);
+    if (field->byte_at != 0)
+    {
+        sb2[field->byte_at] = (uint8_t)value;
+    }
+    else
+    {
+        uint16_t word;
+        uint16_t mask = (uint16_t)(((1u << field->width) - 1u) << field->shift);
+
+        memcpy(&word, sb2 + SB2_OPTION_BITS, sizeof(word));
+        word = (uint16_t)((word & ~mask) | ((value << field->shift) & mask));
+        memcpy(sb2 + SB2_OPTION_BITS, &word, sizeof(word));
+    }
+
+    {
+        uint32_t sum = 0;
+        uint16_t folded;
+
+        for (unsigned w = 0; w < SAVE_SECTOR_DATA / 4; w++)
+        {
+            uint32_t block;
+
+            memcpy(&block, sb2 + w * 4, sizeof(block));
+            sum += block;
+        }
+        folded = (uint16_t)((sum >> 16) + sum);
+        memcpy(sb2 + SAVE_SECTOR_SIZE - 10, &folded, sizeof(folded));
+    }
+
+    // Written beside it and renamed over it: a save half-written is a save
+    // lost, and this is the player's game.
+    snprintf(temp, sizeof(temp), "%s.new", path);
+    fh = fopen(temp, "wb");
+    if (fh == NULL || fwrite(save, 1, sizeof(save), fh) != sizeof(save))
+    {
+        if (fh != NULL)
+            fclose(fh);
+        remove(temp);
+        printf("ok=no\nerror=the save could not be written\n");
+        return 4;
+    }
+    fflush(fh);
+    fclose(fh);
+    if (rename(temp, path) != 0)
+    {
+        remove(temp);
+        printf("ok=no\nerror=the save could not be replaced\n");
+        return 4;
+    }
+
+    printf("ok=yes\n%s\n", assignment);
+    return 0;
+}
+
 static int command_save_info(const char *path)
 {
     static uint8_t save[SAVE_SECTOR_COUNT * SAVE_SECTOR_SIZE];
@@ -676,6 +890,10 @@ int main(int argc, char **argv)
     // questions about the install, not a run of the game.
     if (argc > 1 && strcmp(argv[1], "--describe") == 0)
         return command_describe();
+    if (argc > 3 && strcmp(argv[1], "--set-option") == 0)
+        return command_set_option(argv[2], argv[3]);
+    if (argc > 2 && strcmp(argv[1], "--options") == 0)
+        return command_options(argv[2]);
     if (argc > 2 && strcmp(argv[1], "--save-info") == 0)
         return command_save_info(argv[2]);
     if (argc > 1 && strcmp(argv[1], "--forget") == 0)

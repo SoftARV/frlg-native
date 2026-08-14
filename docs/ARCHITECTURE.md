@@ -455,6 +455,12 @@ that could override one would make a recorded run depend on what somebody had cl
 thing the lockstep clock exists to prevent — the golden and audio harnesses set `FRLG_NO_RECORD`, and
 they must keep meaning it.
 
+`--options` and `--set-option` reach the second kind. Writing one touches only the newest copy of
+`SaveBlock2` — the game reads the slot with the highest counter, and the older slot is the backup that
+exists so a bad write is survivable — recomputes that sector's checksum, and renames the result over
+the original. A sector whose checksum does not verify is one the game discards, which would undo the
+change silently and look like the save going bad on its own.
+
 **A launcher asks the game about itself.** One binary is one title, and it is the only thing that
 knows which ROM its manifest describes or whether that ROM has been imported — so the launcher does
 not carry a second copy of any of it. `--describe` prints `title`, `sha1`, `cache` and `imported`;
