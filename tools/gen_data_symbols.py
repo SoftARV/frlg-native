@@ -235,11 +235,29 @@ def main():
     statics = rom_static_data(args.elf, args.sym) if args.statics else {}
     # Where each symbol is and how big it is. rom_data_symbols returns sizes
     # alone, which is not enough to ask whether a site falls inside one.
-    extent = {}
+    # Every symbol's address and size, statics included -- the guard below has
+    # to be able to ask where a static begins and ends too.
+    #
+    # Two fifths of the statics carry a size of zero, and a guard that skips
+    # those is a guard that is not running: sWeatherFuncs' neighbours are full of
+    # function pointers. Where the size is missing, the distance to the next
+    # symbol stands in for it.
+    listed = []
     for line in open(args.sym):
         parts = line.split()
         if len(parts) == 4:
-            extent[parts[3]] = (int(parts[0], 16), int(parts[2], 16))
+            listed.append((int(parts[0], 16), int(parts[2], 16), parts[3]))
+    listed.sort()
+
+    extent = {}
+    for i, (address, size, name) in enumerate(listed):
+        if size == 0:
+            following = next((a for a, _, _ in listed[i + 1:] if a > address), address)
+            size = following - address
+        # A later definition of the same name wins only if it is larger, so a
+        # zero-sized alias cannot shrink a real symbol's range.
+        if name not in extent or size > extent[name][1]:
+            extent[name] = (address, size)
     defines, includes, unbounded = scan(args.srcdir, also)
     owner = owning_units(includes)
 
@@ -281,6 +299,16 @@ def main():
         unit = owner.get(defines[symbol])
         if unit is None or Path(unit).name in skip_files:
             continue
+
+        # The same guard the globals get, and it was missing here. A static
+        # table of function pointers -- sWeatherFuncs is one -- points at the
+        # ROM's addresses once it points at the cart, and the game jumps through
+        # one the first time the weather changes.
+        start, size = extent.get(symbol, (0, 0))
+        if size and any(start <= site < start + size for site in unbindable):
+            unsafe.append(symbol)
+            continue
+
         by_unit.setdefault(Path(unit).name, []).append(f"{symbol}#{statics[symbol]:#x}")
 
     with open(args.output, "w") as fh:
