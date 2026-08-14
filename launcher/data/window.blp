@@ -17,7 +17,9 @@ template $FrlgWindow : Adw.ApplicationWindow {
       }
     }
 
-    content: Stack stack {
+    content: Adw.ToastOverlay toasts {
+
+    child: Stack stack {
       transition-type: crossfade;
 
       // Nothing imported yet: the one thing to do is supply a ROM.
@@ -108,6 +110,8 @@ template $FrlgWindow : Adw.ApplicationWindow {
           description: _("This window comes back when the game exits.");
         };
       }
+    };
+
     };
   }
 }

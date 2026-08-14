@@ -10,6 +10,7 @@ public class Window : Adw.ApplicationWindow {
     [GtkChild] private unowned Adw.StatusPage import_page;
     [GtkChild] private unowned Adw.PreferencesGroup saves_group;
     [GtkChild] private unowned Gtk.Button add_save_button;
+    [GtkChild] private unowned Adw.ToastOverlay toasts;
 
     private Game? game = null;
     private SimpleAction? forget_action = null;
@@ -84,10 +85,141 @@ public class Window : Adw.ApplicationWindow {
             });
 
             row.add_prefix (pick);
+            row.add_suffix (this.make_row_menu (profile));
             row.activatable_widget = pick;
             saves_group.add (row);
             save_rows += row;
         }
+    }
+
+    // A menu per row rather than three buttons: the row stays readable, and
+    // there is somewhere obvious to put rename and delete later.
+    private Gtk.Widget make_row_menu (Profile profile) {
+        var box = new Gtk.Box (Gtk.Orientation.VERTICAL, 0) { margin_top = 6,
+            margin_bottom = 6, margin_start = 6, margin_end = 6 };
+        var popover = new Gtk.Popover () { child = box };
+        var button = new Gtk.MenuButton () {
+            icon_name = "view-more-symbolic",
+            valign = Gtk.Align.CENTER,
+            popover = popover,
+            tooltip_text = _("Save options"),
+        };
+        button.add_css_class ("flat");
+
+        var show = new Gtk.Button.with_label (_("Show files")) {
+            halign = Gtk.Align.FILL, has_frame = false };
+        show.get_first_child ().halign = Gtk.Align.START;
+        show.clicked.connect (() => { popover.popdown (); this.show_files (profile); });
+        box.append (show);
+
+        var import_save = new Gtk.Button.with_label (_("Import a save…")) {
+            halign = Gtk.Align.FILL, has_frame = false };
+        import_save.get_first_child ().halign = Gtk.Align.START;
+        import_save.clicked.connect (() => { popover.popdown (); this.import_save (profile); });
+        box.append (import_save);
+
+        var export_save = new Gtk.Button.with_label (_("Export a copy…")) {
+            halign = Gtk.Align.FILL, has_frame = false };
+        export_save.get_first_child ().halign = Gtk.Align.START;
+        export_save.sensitive = profile.has_save;
+        export_save.clicked.connect (() => { popover.popdown (); this.export_save (profile); });
+        box.append (export_save);
+
+        return button;
+    }
+
+    private void show_files (Profile profile) {
+        DirUtils.create_with_parents (profile.directory, 0755);
+        var launcher = new Gtk.FileLauncher (File.new_for_path (profile.directory));
+        launcher.launch.begin (this, null, null);
+    }
+
+    // The save is the flash image an emulator writes, so this is how a game
+    // moves between mGBA, a cartridge dump and here. Which is also why the size
+    // is checked: a file of the wrong length is some other game's save, and
+    // loading it would look like corruption rather than a mistake.
+    private const int64 SAVE_BYTES = 131072;
+
+    private void import_save (Profile profile) {
+        var filter = new Gtk.FileFilter () { name = _("Save file") };
+        filter.add_pattern ("*.sav");
+        var filters = new ListStore (typeof (Gtk.FileFilter));
+        filters.append (filter);
+
+        var dialog = new Gtk.FileDialog () {
+            title = _("Import a save"), filters = filters, modal = true };
+
+        dialog.open.begin (this, null, (source, result) => {
+            try {
+                var file = dialog.open.end (result);
+                if (file == null)
+                    return;
+
+                var size = file.query_info ("standard::size", FileQueryInfoFlags.NONE).get_size ();
+                if (size != SAVE_BYTES) {
+                    this.complain (_("That file is %lld bytes; a save for this game is %lld.")
+                        .printf (size, SAVE_BYTES));
+                    return;
+                }
+                if (profile.has_save)
+                    this.confirm_overwrite (profile, file);
+                else
+                    this.do_import_save (profile, file);
+            } catch (Error e) {
+            }
+        });
+    }
+
+    private void confirm_overwrite (Profile profile, File file) {
+        var dialog = new Adw.AlertDialog (_("Replace this save?"),
+            _("“%s” already has a game in it. Importing replaces it, and what is there now is gone.")
+                .printf (profile.name));
+        dialog.add_response ("cancel", _("Cancel"));
+        dialog.add_response ("replace", _("Replace"));
+        dialog.set_response_appearance ("replace", Adw.ResponseAppearance.DESTRUCTIVE);
+        dialog.set_default_response ("cancel");
+        dialog.set_close_response ("cancel");
+        dialog.response.connect ((response) => {
+            if (response == "replace")
+                this.do_import_save (profile, file);
+        });
+        dialog.present (this);
+    }
+
+    private void do_import_save (Profile profile, File file) {
+        try {
+            DirUtils.create_with_parents (profile.directory, 0755);
+            file.copy (File.new_for_path (profile.save_path), FileCopyFlags.OVERWRITE);
+            this.fill_saves ();
+            toasts.add_toast (new Adw.Toast (_("Save imported")));
+        } catch (Error e) {
+            this.complain (e.message);
+        }
+    }
+
+    private void export_save (Profile profile) {
+        var dialog = new Gtk.FileDialog () {
+            title = _("Export a copy of this save"),
+            initial_name = "%s.sav".printf (profile.id),
+            modal = true,
+        };
+
+        dialog.save.begin (this, null, (source, result) => {
+            try {
+                var target = dialog.save.end (result);
+                if (target == null)
+                    return;
+                File.new_for_path (profile.save_path).copy (target, FileCopyFlags.OVERWRITE);
+                toasts.add_toast (new Adw.Toast (_("Save exported")));
+            } catch (Error e) {
+            }
+        });
+    }
+
+    private void complain (string message) {
+        var dialog = new Adw.AlertDialog (_("That did not work"), message);
+        dialog.add_response ("close", _("Close"));
+        dialog.present (this);
     }
 
     private void on_add_save () {
