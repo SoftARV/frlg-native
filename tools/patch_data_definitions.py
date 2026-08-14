@@ -19,7 +19,7 @@ import re
 import sys
 
 
-def cut_definition(text, symbol):
+def cut_definition(text, symbol, byte_size=0):
     """Turn `... symbol[...] = { ... };` into `extern ... symbol[...];`."""
     # Everything a declaration can put between the start of a line and the name:
     # type words, qualifiers and stars, in any order and any number -- `const u16
@@ -61,8 +61,19 @@ def cut_definition(text, symbol):
                 # A declaration rather than nothing, and one that keeps the
                 # bounds: some of these have no extern in any header, and code
                 # that takes ARRAY_COUNT of one needs the size to survive.
+                #
+                # An array written `gFoo[] = {...}` has no bound to keep, which
+                # would leave an incomplete type. The ROM's symbol table knows
+                # how many bytes it occupies and the compiler knows how big an
+                # element is, so the declaration works out its own length --
+                # `extern const T gFoo[1234 / sizeof(const T)]`. That is the
+                # same number the definition had, and ARRAY_COUNT still works.
+                bound = dims
+                if bound.replace(" ", "") == "[]" and byte_size:
+                    bound = f"[{byte_size} / sizeof({kind})]"
+
                 return (text[:match.start()]
-                        + f"{indent}extern {kind} {symbol}{dims};"
+                        + f"{indent}extern {kind} {symbol}{bound};"
                         + text[end + 1:])
         i += 1
     return None
@@ -106,7 +117,14 @@ def main():
         text = fh.read()
 
     for symbol in symbols:
-        cut = cut_definition(text, symbol)
+        # `name@bytes` says how large the ROM says the symbol is, which is only
+        # needed for an array whose definition carried no bound.
+        byte_size = 0
+        if "@" in symbol:
+            symbol, _, size_text = symbol.partition("@")
+            byte_size = int(size_text)
+
+        cut = cut_definition(text, symbol, byte_size)
         if cut is None:
             sys.exit(f"patch_data_definitions: no definition of {symbol} in {path}")
         text = cut_tentative(cut, symbol)
