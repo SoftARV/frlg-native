@@ -30,8 +30,12 @@ int agb_ppu_height(void);
 // the room left of the view is 128 - (W - 240) / 2, which is a metatile only up
 // to W = 464 -- at 480 it is half of one, and the column written for the right
 // edge spills eight pixels into the left of the screen. Vertically the offset is
-// two metatiles and a half, so the room above is 40 - (H - 160) / 2, a metatile
-// up to H = 208.
+// two metatiles and a half, and that half is what decides the height: the fill
+// grid sits eight pixels off the scroll, so a view whose bottom edge does not
+// land on one of its lines cuts the rewritten row in half and shows the top of
+// it. 208 leaves exactly those eight pixels showing -- a strip of somewhere
+// else along the bottom, for the moment it takes the next step to cover it.
+// 192 ends on a line.
 //
 // Both were measured rather than derived -- a walk in each direction, looking
 // for a strip that fails to scroll with the rest of the frame. Raising either
@@ -42,7 +46,7 @@ int agb_ppu_height(void);
 #define AGB_PPU_MIN_W 240
 #define AGB_PPU_MIN_H 160
 #define AGB_PPU_MAX_W 464
-#define AGB_PPU_MAX_H 208
+#define AGB_PPU_MAX_H 192
 
 // Clamped to the range above. Returns true if the viewport is now different
 // from what it was, which is the caller's cue to resize anything it keeps in

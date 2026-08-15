@@ -168,9 +168,11 @@ static void test_odd_sizes(void)
     render_native();
 
     // An odd difference cannot be split evenly, and the renderer and this test
-    // have to round it the same way or everything lands a pixel out.
-    CHECK(contains_native(247, 199) == 0,
-          "247x199 does not contain the native frame unchanged");
+    // have to round it the same way or everything lands a pixel out. Both odd
+    // and both inside the ceiling, or the clamp answers a different question
+    // than the one being asked.
+    CHECK(contains_native(247, 191) == 0,
+          "247x191 does not contain the native frame unchanged");
 }
 
 // The layer the dialogue box and the pause menu are drawn into is 256 pixels
