@@ -595,9 +595,19 @@ of the two, since it depends on nothing but the ROM.
 | --- | --- | --- |
 | `newgame.trace` | the intro, then the rival battle | nothing — starts a new game |
 | `input.trace` + `start.sav` | a wild battle from a mid-game save | its own save |
-| `storage.trace` + `storage-start.sav` | the storage system, cursor moved with nothing held | its own save |
+| `storage.trace` + `storage-start.sav` | a mid-game save; despite the name it never opens a PC | its own save |
 | `overworld.trace` + `overworld-start.sav` | eight minutes of ordinary play, no faults | its own save |
 | `loss.trace` | a new game through to losing the first rival battle | nothing — starts a new game |
+| `gym.trace` + `gym-start.sav` | play as far as the first gym | its own save |
+| `teachytv.trace` + `teachytv-start.sav` | Teachy TV, which read a freed state | its own save |
+| `artifacts.trace` + `artifacts-start.sav` | the storage and item-use screens that drew no background | its own save |
+| `battleanim.trace` + `battleanim-start.sav` | Metal Claw, the animation that crashed on a sign-extended pointer | its own save |
+| `pcbox.trace` + `pcbox-start.sav` | a PC box, cursor through its still, open and fist animations | its own save |
+| `tutorialloss.trace` | a new game through to losing the tutorial battle, where [issue #8](https://github.com/SoftARV/frlg-native/issues/8) breaks | nothing — starts a new game |
+
+The saves are **not committed** — `*.sav` is ignored — so a fresh clone can only replay the three
+that start a new game. That is a real limit on what this set proves to anyone but its author, and it
+is the reason a recording needing no save is worth more than one that does.
 
 What makes them worth keeping is not coverage but *what they are compared against*. Replaying one
 against a build with the data compiled in gives a known-good frame; replaying it against a build
