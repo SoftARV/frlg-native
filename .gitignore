@@ -19,3 +19,8 @@ __pycache__/
 
 # The launcher's own build tree (Meson, not CMake).
 launcher/build/
+
+# flatpak build artifacts
+ports/desktop/flatpak/repo/
+ports/desktop/flatpak/build-dir/
+ports/desktop/flatpak/.flatpak-builder/
