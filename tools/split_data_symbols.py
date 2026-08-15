@@ -75,7 +75,18 @@ def read(path):
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__.strip().splitlines()[-2])
-    listing = read(sys.argv[1])
+    if sys.argv[1] != "--hoisted":
+        listing = read(sys.argv[1])
+
+    if sys.argv[1] == "--hoisted":
+        # `file.c=name=newname#offset` entries, appended to the response file.
+        with open(sys.argv[2], "a") as fh:
+            for entry in sys.argv[3:]:
+                _, _, rest = entry.partition("=")
+                _, _, rest = rest.partition("=")
+                newname, _, off = rest.partition("#")
+                fh.write(f"-Wl,--defsym,{newname}=agb_cart+{off}\n")
+        return 0
 
     if sys.argv[2] == "--defsyms":
         lines = []

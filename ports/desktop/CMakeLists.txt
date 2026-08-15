@@ -63,6 +63,8 @@ add_custom_command(
     OUTPUT "${static_bindings}"
     COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/split_data_symbols.py"
             "${FRLG_SYMBOL_LIST}" --defsyms "${static_bindings}"
+    COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/split_data_symbols.py"
+            --hoisted "${static_bindings}" ${FRLG_HOIST_STATICS}
     DEPENDS "${CMAKE_SOURCE_DIR}/tools/split_data_symbols.py" "${FRLG_SYMBOL_LIST}"
     COMMENT "static cart bindings"
     VERBATIM)

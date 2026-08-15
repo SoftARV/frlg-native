@@ -51,6 +51,21 @@ set(FRLG_GAME_CPPFLAGS
 set(FRLG_CUT_DATA "${CMAKE_SOURCE_DIR}/tools/patch_data_definitions.py")
 set(FRLG_DESTATIC "${CMAKE_SOURCE_DIR}/tools/destatic.py")
 set(FRLG_SPLIT_SYMBOLS "${CMAKE_SOURCE_DIR}/tools/split_data_symbols.py")
+set(FRLG_HOIST "${CMAKE_SOURCE_DIR}/tools/hoist_static.py")
+
+# Statics declared inside a function. `static` there means storage, not linkage,
+# so destatic cannot touch them -- the declaration has to move out to file scope
+# instead, under a name of its own. Five tables, and the list is written by hand
+# because there is no generator that knows which function each belongs to.
+# ADR 0020.
+set(FRLG_HOIST_STATICS
+    "string_util.c=lengths=frlg_string_util_lengths#0x231ea8"
+    "event_object_movement.c=jumpLandingFlags=frlg_eom_jumpLandingFlags#0x3a7044"
+    "event_object_movement.c=bikeTireTracks_Transitions=frlg_eom_bikeTireTracks#0x3a70ac"
+    "pokemon_storage_system_data.c=sAnim_Cursor_Bouncing=frlg_pss_sAnim_Cursor_Bouncing#0x3d34d8"
+    "pokemon_storage_system_data.c=sAnim_Cursor_Fist=frlg_pss_sAnim_Cursor_Fist#0x260104")
+# Read at link time too, from another directory's scope.
+set(FRLG_HOIST_STATICS "${FRLG_HOIST_STATICS}" CACHE INTERNAL "hoisted statics")
 
 set(FRLG_GAME_DATA_ONLY
     graphics.c
@@ -250,6 +265,15 @@ function(frlg_preprocess_game rel out_var)
                          "${FRLG_CUT_DATA}" "${c}" ${to_cut})
                     list(APPEND extra_deps "${FRLG_CUT_DATA}")
                 endif()
+                foreach(h ${FRLG_HOIST_STATICS})
+                    string(REGEX MATCH "^([^=]+)=([^=]+)=([^#]+)#(.*)$" _ "${h}")
+                    if(CMAKE_MATCH_1 STREQUAL base)
+                        list(APPEND post COMMAND "${CMAKE_COMMAND}" -E env python3
+                             "${FRLG_HOIST}" "${c}"
+                             "${CMAKE_MATCH_2}=${CMAKE_MATCH_3}")
+                        list(APPEND extra_deps "${FRLG_HOIST}")
+                    endif()
+                endforeach()
                 if(to_destatic)
                     list(APPEND post COMMAND "${CMAKE_COMMAND}" -E env python3
                          "${FRLG_DESTATIC}" "${c}" ${to_destatic})
