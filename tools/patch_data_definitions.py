@@ -47,7 +47,24 @@ def cut_definition(text, symbol, byte_size=0):
 
     match = pattern.search(text)
     if match is None:
-        return None
+        # A string initialiser rather than a brace one:
+        # `const char BuildDateTime[] = "2004 04 26 11:20";`
+        strpat = re.compile(
+            r"(?:^|(?<=;))([^\S\n]*)((?:[A-Za-z_][A-Za-z0-9_]*\s+|\*+\s*)+)"
+            + re.escape(symbol) + r"\s*((?:\[[^\]]*\])*)\s*=\s*"
+            r"(?:\s*\"(?:[^\"\\]|\\.)*\")+\s*;",
+            re.MULTILINE)
+        m = strpat.search(text)
+        if m is None:
+            return None
+        indent, kind, dims = m.group(1), m.group(2).strip(), m.group(3)
+        if kind.split()[0] == "static":
+            return None
+        bound = dims
+        if bound.replace(" ", "") == "[]" and byte_size:
+            bound = f"[{byte_size}]"
+        return (text[:m.start()] + f"{indent}extern {kind} {symbol}{bound};"
+                + text[m.end():])
 
     indent, kind, dims = match.group(1), match.group(2).strip(), match.group(3)
 

@@ -24,11 +24,18 @@ import sys
 # discovered, so that a new collision is a build error rather than a silent
 # change of mechanism.
 SHARED_NAMES = {
-    "sWindowTemplates",
-    "sBg_Tilemap",
+    "sAnim_Cloud",
+    "sBGTemplates",
     "sBg_Gfx",
-    "sStar_Gfx",
     "sBg_Pal",
+    "sBg_Tilemap",
+    "sMartMaps",
+    "sStar_Gfx",
+    "sTextColorTable",
+    "sTiles",
+    "sWindowTemplate",
+    "sWindowTemplates",
+    "sWindowTemplates_Results",
 }
 
 

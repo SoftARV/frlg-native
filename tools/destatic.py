@@ -24,26 +24,61 @@ import sys
 
 
 def destatic(text, symbol):
-    """Remove `static` from the definition of one file-scope symbol."""
-    # The declaration runs from `static` to the symbol's name, with anything in
-    # between: qualifiers, a type name, a whole anonymous struct body. It ends at
-    # the name followed by dimensions or an initialiser, so a mention of the
-    # symbol elsewhere cannot match.
-    pattern = re.compile(
-        r"(?:^|(?<=[;}]))([^\S\n]*)static([^\S\n]+(?:[^;{}]|\{[^{}]*\})*?"
-        + re.escape(symbol) + r"[^\S\n]*(?:\[[^\]]*\])*[^\S\n]*=)",
-        re.MULTILINE | re.DOTALL)
-    patched, count = pattern.subn(r"\1\2", text, count=1)
-    if count:
-        return patched
+    """Remove `static` from the definition of one file-scope symbol.
 
-    # text.c writes the storage class after the struct body:
-    # `struct { ... } static const sKeypadIcons[] = {`.
-    trailing = re.compile(
-        r"(\}[^\S\n]*)static([^\S\n]+[^;{}]*?" + re.escape(symbol)
-        + r"[^\S\n]*(?:\[[^\]]*\])*[^\S\n]*=)")
-    patched, count = trailing.subn(r"\1\2", text, count=1)
-    return patched if count else None
+    Found by locating the definition and walking back to the keyword, rather
+    than by matching forward from every `static`. The forward version had to
+    describe everything that can sit between the keyword and the name -- an
+    anonymous struct body among it -- and that pattern backtracks
+    catastrophically on a multi-megabyte preprocessed source: forty-six of them
+    ran for hours without finishing. Walking back is linear and guesses nothing,
+    which also means an attribute in front of the keyword, or a storage class
+    written after a struct body, need no cases of their own.
+    """
+    # A definition: the name, optional dimensions, then `=`. A mere mention
+    # cannot match, because a mention is not followed by an initialiser.
+    site = re.compile(r"\b" + re.escape(symbol) + r"\b[^\S\n]*(?:\[[^\]]*\])*\s*=")
+    for m in site.finditer(text):
+        # Back to the start of the declaration: the previous `;` or `}`. A `{`
+        # in between means this sits inside a function or another initialiser,
+        # so it is not the definition we are looking for.
+        at = m.start()
+        while True:
+            stop = max(text.rfind(";", 0, at), text.rfind("}", 0, at))
+            head = text[stop + 1:at]
+            if "{" in head:
+                break
+            word = re.search(r"\bstatic\b", head)
+            if word is not None:
+                cut = stop + 1 + word.start()
+                text = text[:cut] + text[cut + len("static"):]
+                # A forward declaration of the same symbol keeps its own
+                # `static`, and internal linkage declared once cannot be
+                # undeclared: "non-static declaration follows static
+                # declaration". Both have to go.
+                forward = re.compile(
+                    r"((?:^|(?<=[;}]))[^\S\n]*)static\b([^;{}=]*\b"
+                    + re.escape(symbol) + r"\b[^\S\n]*(?:\[[^\]]*\])*[^\S\n]*;)",
+                    re.MULTILINE)
+                return forward.sub(r"\1\2", text)
+            # `static const struct { ... } sFoo[] =` puts the keyword in front
+            # of a body of its own, so the `}` we stopped at is that body's.
+            # Step over it to its opening brace and keep looking back.
+            if stop < 0 or text[stop] != "}":
+                break
+            depth, i = 0, stop
+            while i >= 0:
+                if text[i] == "}":
+                    depth += 1
+                elif text[i] == "{":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i -= 1
+            if i < 0:
+                break
+            at = i
+    return None
 
 
 def rename(text, old, new):
