@@ -20,6 +20,23 @@ add-extensions:
     no-autodownload: false
     autodelete: false
 
+  # The graphics driver, 32-bit. Compat.i386 carries the GLVND dispatch libraries
+  # but no driver behind them, so without this SDL finds no renderer at all --
+  # Vulkan fails to load, GL is absent, and window creation succeeds onto nothing.
+  # It has to match the driver the host is running, which is what `active-gl-driver`
+  # resolves.
+  org.freedesktop.Platform.GL32:
+    directory: lib/i386-linux-gnu/GL
+    version: '1.4'
+    versions: '25.08;1.4'
+    subdirectories: true
+    no-autodownload: true
+    autodelete: false
+    add-ld-path: lib
+    merge-dirs: vulkan/icd.d;glvnd/egl_vendor.d;egl/egl_external_platform.d;OpenCL/vendors;lib/dri;lib/d3d;vulkan/explicit_layer.d;vulkan/implicit_layer.d
+    download-if: active-gl-driver
+    enable-if: active-gl-driver
+
 finish-args:
   # Without this the sandbox's seccomp filter rejects the 32-bit syscall ABI and
   # the game dies on SIGSYS before printing a line -- it presents as silence.
@@ -43,8 +60,9 @@ modules:
     build-commands:
       - install -Dm755 frlg-native /app/lib/frlg/frlg-native
       - install -Dm755 frlg-native-wrapper.sh /app/bin/frlg-native
-      # add-extensions mounts over this, so it has to exist in the app first.
+      # add-extensions mounts over these, so they have to exist in the app first.
       - mkdir -p /app/lib/i386-linux-gnu
+      - mkdir -p /app/lib/i386-linux-gnu/GL
     sources:
       - type: file
         path: ../../../build/rom-play/ports/desktop/frlg-native
