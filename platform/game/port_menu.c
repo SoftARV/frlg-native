@@ -68,7 +68,7 @@ static const struct WindowTemplate sWindows[] = {
         .width = 28,
         .height = 17,
         .paletteNum = 15,
-        .baseBlock = 1,
+        .baseBlock = 16,
     },
     DUMMY_WIN_TEMPLATE,
 };
@@ -274,9 +274,9 @@ static void CB2_PortMenu(void)
         CopyWindowToVram(0, COPYWIN_FULL);
         break;
     case 6:
-        ShowBg(0);
         SetGpuReg(REG_OFFSET_DISPCNT, DISPCNT_MODE_0 | DISPCNT_OBJ_ON
                                       | DISPCNT_OBJ_1D_MAP);
+        ShowBg(0);
         BeginNormalPaletteFade(PALETTES_ALL, 0, 16, 0, RGB_BLACK);
         SetVBlankCallback(VBlankCB);
         break;
