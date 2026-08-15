@@ -21,15 +21,30 @@ import sys
 
 
 def depth_map(text):
-    """Brace depth before each position, ignoring braces in strings."""
+    """Brace depth at each position, ignoring braces inside literals.
+
+    A literal's own characters carry the depth of the code around them. Skipping
+    the span without writing to it leaves them zero, which reads as file scope --
+    and the walk that looks forward for the end of a function stops at the first
+    zero it finds, so a function containing a string ended early. Every reference
+    past that point kept its old name while the declaration moved out from under
+    it, which the compiler catches, but only for whichever symbol happened to be
+    mentioned after a string.
+    """
     depth, out, i, n = 0, bytearray(len(text)), 0, len(text)
     while i < n:
         c = text[i]
         if c in "\"'":
-            quote, i = c, i + 1
+            quote, out[i], i = c, min(depth, 255), i + 1
             while i < n and text[i] != quote:
-                i += 2 if text[i] == "\\" else 1
-        elif c == "{":
+                step = min(2 if text[i] == "\\" else 1, n - i)
+                out[i:i + step] = bytes([min(depth, 255)]) * step
+                i += step
+            if i < n:
+                out[i] = min(depth, 255)
+            i += 1
+            continue
+        if c == "{":
             depth += 1
         elif c == "}":
             depth -= 1
