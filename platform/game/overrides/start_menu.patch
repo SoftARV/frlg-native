@@ -1,0 +1,227 @@
+--- a/src/start_menu.c
++++ b/src/start_menu.c
+@@ -49,9 +49,23 @@
+     STARTMENU_EXIT,
+     STARTMENU_RETIRE,
+     STARTMENU_PLAYER2,
++    STARTMENU_PORT,
+     MAX_STARTMENU_ITEMS
+ };
+ 
++// The port's own entry and the screen behind it. platform/game/port_menu.c.
++extern const u8 agb_port_menu_label[];
++extern const u8 agb_port_menu_desc[];
++extern bool8 agb_port_menu_open(void);
++
++// The menu window is built at a fixed base block with the dialogue box directly
++// above it: 0x13D, and 0x198. Seven entries fill the 91 tiles between them
++// exactly, so the list scrolls rather than growing past its neighbour.
++#define START_MENU_MAX_VISIBLE 7
++
++// What the cursor is actually pointing at, once the list can be scrolled.
++#define START_MENU_SELECTED (sStartMenuOrder[sStartMenuScroll + sStartMenuCursorPos])
++
+ enum SaveCBReturn
+ {
+     SAVECB_RETURN_CONTINUE = 0,
+@@ -62,6 +76,7 @@
+ 
+ static EWRAM_DATA bool8 (*sStartMenuCallback)(void) = NULL;
+ static EWRAM_DATA u8 sStartMenuCursorPos = 0;
++static EWRAM_DATA u8 sStartMenuScroll = 0;
+ static EWRAM_DATA u8 sNumStartMenuItems = 0;
+ static EWRAM_DATA u8 sStartMenuOrder[MAX_STARTMENU_ITEMS] = {};
+ static EWRAM_DATA s8 sDrawStartMenuState[2] = {};
+@@ -112,6 +127,9 @@
+ static void PrintSaveStats(void);
+ static void CloseSaveStatsWindow(void);
+ static void CloseStartMenu(void);
++static u8 StartMenuVisibleCount(void);
++static void StartMenuRedrawItems(void);
++static s8 PrintStartMenuItems(s8 *cursor_p, u8 nitems);
+ 
+ static const struct MenuAction sStartMenuActionTable[] = {
+     [STARTMENU_POKEDEX] = { gText_MenuPokedex, {.u8_void = StartMenuPokedexCallback} },
+@@ -122,7 +140,8 @@
+     [STARTMENU_OPTION]  = { gText_MenuOption,  {.u8_void = StartMenuOptionCallback} },
+     [STARTMENU_EXIT]    = { gText_MenuExit,    {.u8_void = StartMenuExitCallback} },
+     [STARTMENU_RETIRE]  = { gText_MenuRetire,  {.u8_void = StartMenuSafariZoneRetireCallback} },
+-    [STARTMENU_PLAYER2] = { gText_MenuPlayer,  {.u8_void = StartMenuLinkPlayerCallback} }
++    [STARTMENU_PLAYER2] = { gText_MenuPlayer,  {.u8_void = StartMenuLinkPlayerCallback} },
++    [STARTMENU_PORT]    = { agb_port_menu_label, {.u8_void = agb_port_menu_open} }
+ };
+ 
+ static const struct WindowTemplate sSafariZoneStatsWindowTemplate = {
+@@ -144,7 +163,8 @@
+     gStartMenuDesc_Option,
+     gStartMenuDesc_Exit,
+     gStartMenuDesc_Retire,
+-    gStartMenuDesc_Player
++    gStartMenuDesc_Player,
++    agb_port_menu_desc
+ };
+ 
+ static const struct BgTemplate sBGTemplates_AfterLinkSaveMessage[] = {
+@@ -195,6 +215,7 @@
+ static void SetUpStartMenu(void)
+ {
+     sNumStartMenuItems = 0;
++    sStartMenuScroll = 0;
+     if (IsUpdateLinkStateCBActive() == TRUE)
+         SetUpStartMenu_Link();
+     else if (InUnionRoom() == TRUE)
+@@ -220,6 +241,7 @@
+     AppendToStartMenuItems(STARTMENU_PLAYER);
+     AppendToStartMenuItems(STARTMENU_SAVE);
+     AppendToStartMenuItems(STARTMENU_OPTION);
++    AppendToStartMenuItems(STARTMENU_PORT);
+     AppendToStartMenuItems(STARTMENU_EXIT);
+ }
+ 
+@@ -275,22 +297,46 @@
+     }
+ }
+ 
++static u8 StartMenuVisibleCount(void)
++{
++    if (sNumStartMenuItems < START_MENU_MAX_VISIBLE)
++        return sNumStartMenuItems;
++    return START_MENU_MAX_VISIBLE;
++}
++
++// Reprints the visible rows after the list has scrolled under a stationary
++// cursor. The cursor is re-initialised because it lives in the window's own
++// pixels, and refilling those to clear the old text takes it with them.
++static void StartMenuRedrawItems(void)
++{
++    s8 state = 0;
++
++    FillWindowPixelBuffer(GetStartMenuWindowId(), PIXEL_FILL(1));
++    while (PrintStartMenuItems(&state, 1) == FALSE)
++        ;
++    sStartMenuCursorPos = Menu_InitCursor(GetStartMenuWindowId(), FONT_NORMAL, 0, 0, 15,
++                                          StartMenuVisibleCount(), sStartMenuCursorPos);
++    CopyWindowToVram(GetStartMenuWindowId(), COPYWIN_GFX);
++}
++
+ static s8 PrintStartMenuItems(s8 *cursor_p, u8 nitems)
+ {
+     s16 i = *cursor_p;
+     do
+     {
+-        if (sStartMenuOrder[i] == STARTMENU_PLAYER || sStartMenuOrder[i] == STARTMENU_PLAYER2)
++        u8 entry = sStartMenuOrder[sStartMenuScroll + i];
++
++        if (entry == STARTMENU_PLAYER || entry == STARTMENU_PLAYER2)
+         {
+-            Menu_PrintFormatIntlPlayerName(GetStartMenuWindowId(), sStartMenuActionTable[sStartMenuOrder[i]].text, 8, i * 15);
++            Menu_PrintFormatIntlPlayerName(GetStartMenuWindowId(), sStartMenuActionTable[entry].text, 8, i * 15);
+         }
+         else
+         {
+-            StringExpandPlaceholders(gStringVar4, sStartMenuActionTable[sStartMenuOrder[i]].text);
++            StringExpandPlaceholders(gStringVar4, sStartMenuActionTable[entry].text);
+             AddTextPrinterParameterized(GetStartMenuWindowId(), FONT_NORMAL, gStringVar4, 8, i * 15, 0xFF, NULL);
+         }
+         i++;
+-        if (i >= sNumStartMenuItems)
++        if (i >= StartMenuVisibleCount())
+         {
+             *cursor_p = i;
+             return TRUE;
+@@ -313,7 +359,7 @@
+         break;
+     case 2:
+         LoadStdWindowFrameGfx();
+-        DrawStdWindowFrame(CreateStartMenuWindow(sNumStartMenuItems), FALSE);
++        DrawStdWindowFrame(CreateStartMenuWindow(StartMenuVisibleCount()), FALSE);
+         sDrawStartMenuState[0]++;
+         break;
+     case 3:
+@@ -326,10 +372,10 @@
+             sDrawStartMenuState[0]++;
+         break;
+     case 5:
+-        sStartMenuCursorPos = Menu_InitCursor(GetStartMenuWindowId(), FONT_NORMAL, 0, 0, 15, sNumStartMenuItems, sStartMenuCursorPos);
++        sStartMenuCursorPos = Menu_InitCursor(GetStartMenuWindowId(), FONT_NORMAL, 0, 0, 15, StartMenuVisibleCount(), sStartMenuCursorPos);
+         if (!MenuHelpers_IsLinkActive() && InUnionRoom() != TRUE && gSaveBlock2Ptr->optionsButtonMode == OPTIONS_BUTTON_MODE_HELP)
+         {
+-            DrawHelpMessageWindowWithText(sStartMenuDescPointers[sStartMenuOrder[sStartMenuCursorPos]]);
++            DrawHelpMessageWindowWithText(sStartMenuDescPointers[START_MENU_SELECTED]);
+         }
+         CopyWindowToVram(GetStartMenuWindowId(), COPYWIN_MAP);
+         return TRUE;
+@@ -410,19 +456,51 @@
+     if (JOY_NEW(DPAD_UP))
+     {
+         PlaySE(SE_SELECT);
+-        sStartMenuCursorPos = Menu_MoveCursor(-1);
++        if (sStartMenuCursorPos == 0 && sStartMenuScroll > 0)
++        {
++            sStartMenuScroll--;
++            StartMenuRedrawItems();
++        }
++        else if (sStartMenuCursorPos == 0 && sNumStartMenuItems > StartMenuVisibleCount())
++        {
++            // Wrapping past the top lands on the last entry, which is only on
++            // screen once the list is scrolled to the end.
++            sStartMenuScroll = sNumStartMenuItems - StartMenuVisibleCount();
++            sStartMenuCursorPos = StartMenuVisibleCount() - 1;
++            StartMenuRedrawItems();
++        }
++        else
++        {
++            sStartMenuCursorPos = Menu_MoveCursor(-1);
++        }
+         if (!MenuHelpers_IsLinkActive() && InUnionRoom() != TRUE && gSaveBlock2Ptr->optionsButtonMode == OPTIONS_BUTTON_MODE_HELP)
+         {
+-            PrintTextOnHelpMessageWindow(sStartMenuDescPointers[sStartMenuOrder[sStartMenuCursorPos]], 2);
++            PrintTextOnHelpMessageWindow(sStartMenuDescPointers[START_MENU_SELECTED], 2);
+         }
+     }
+     if (JOY_NEW(DPAD_DOWN))
+     {
+         PlaySE(SE_SELECT);
+-        sStartMenuCursorPos = Menu_MoveCursor(+1);
++        if (sStartMenuCursorPos == StartMenuVisibleCount() - 1
++         && sStartMenuScroll + StartMenuVisibleCount() < sNumStartMenuItems)
++        {
++            sStartMenuScroll++;
++            StartMenuRedrawItems();
++        }
++        else if (sStartMenuCursorPos == StartMenuVisibleCount() - 1
++              && sNumStartMenuItems > StartMenuVisibleCount())
++        {
++            sStartMenuScroll = 0;
++            sStartMenuCursorPos = 0;
++            StartMenuRedrawItems();
++        }
++        else
++        {
++            sStartMenuCursorPos = Menu_MoveCursor(+1);
++        }
+         if (!MenuHelpers_IsLinkActive() && InUnionRoom() != TRUE && gSaveBlock2Ptr->optionsButtonMode == OPTIONS_BUTTON_MODE_HELP)
+         {
+-            PrintTextOnHelpMessageWindow(sStartMenuDescPointers[sStartMenuOrder[sStartMenuCursorPos]], 2);
++            PrintTextOnHelpMessageWindow(sStartMenuDescPointers[START_MENU_SELECTED], 2);
+         }
+     }
+     if (JOY_NEW(A_BUTTON))
+@@ -430,7 +508,7 @@
+         PlaySE(SE_SELECT);
+         if (!StartMenuPokedexSanityCheck())
+             return FALSE;
+-        sStartMenuCallback = sStartMenuActionTable[sStartMenuOrder[sStartMenuCursorPos]].func.u8_void;
++        sStartMenuCallback = sStartMenuActionTable[START_MENU_SELECTED].func.u8_void;
+         StartMenu_FadeScreenIfLeavingOverworld();
+         return FALSE;
+     }
+@@ -457,7 +535,7 @@
+ 
+ static bool8 StartMenuPokedexSanityCheck(void)
+ {
+-    if (sStartMenuActionTable[sStartMenuOrder[sStartMenuCursorPos]].func.u8_void == StartMenuPokedexCallback && GetNationalPokedexCount(0) == 0)
++    if (sStartMenuActionTable[START_MENU_SELECTED].func.u8_void == StartMenuPokedexCallback && GetNationalPokedexCount(0) == 0)
+         return FALSE;
+     return TRUE;
+ }

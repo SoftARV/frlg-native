@@ -53,6 +53,15 @@ set(FRLG_DESTATIC "${CMAKE_SOURCE_DIR}/tools/destatic.py")
 set(FRLG_SPLIT_SYMBOLS "${CMAKE_SOURCE_DIR}/tools/split_data_symbols.py")
 set(FRLG_HOIST "${CMAKE_SOURCE_DIR}/tools/hoist_static.py")
 
+# Source patches: unified diffs against upstream .c files, applied to a copy in
+# the build tree before anything else runs.
+#
+# This is the mechanism for a change an insertion cannot express -- replacing a
+# function body rather than adding a line to it. A fork would do the same job by
+# copying the file here and editing it, which would put pret's code in this
+# repository; a diff holds only what we changed. See ADR 0023.
+set(FRLG_GAME_PATCH_DIR "${CMAKE_SOURCE_DIR}/platform/game/overrides")
+
 # Statics declared inside a function. `static` there means storage, not linkage,
 # so destatic cannot touch them -- the declaration has to move out to file scope
 # instead, under a name of its own. The list is written by hand because there is
@@ -180,6 +189,7 @@ set(FRLG_STRIP_WAITS "${CMAKE_SOURCE_DIR}/tools/strip_hardware_waits.py")
 # correct because upstream's linker script places them adjacently. Nothing does
 # that here, so the fill runs off the end. See tools/patch_layout_assumptions.py.
 set(FRLG_GAME_PATCH_LAYOUT load_save.c battle_anim_normal.c)
+
 set(FRLG_PATCH_LAYOUT "${CMAKE_SOURCE_DIR}/tools/patch_layout_assumptions.py")
 
 # The GBA has no MMU, so upstream may read through a null pointer and get
@@ -311,16 +321,70 @@ function(frlg_preprocess_game rel out_var)
         endif()
     endforeach()
 
+    # A patched source is cpp'd from a copy in the build tree; the submodule
+    # stays untouched. Quoted includes still resolve -- cpp tries the including
+    # file's own directory first and -iquote include second, and upstream
+    # headers are found by the second anyway.
+    set(patch "${FRLG_GAME_PATCH_DIR}/${name}.patch")
+    set(source_in "${rel}")
+    set(patch_step "")
+    set(patch_dep "")
+    if(EXISTS "${patch}")
+        set(patched "${stage_dir}/${name}.patched.c")
+        set(source_in "${patched}")
+        set(patch_dep "${patch}")
+        set(patch_step
+            COMMAND "${CMAKE_COMMAND}" -E copy "${FRLG_VENDOR_DIR}/${rel}" "${patched}"
+            COMMAND patch --forward --silent -p1 "${patched}" "${patch}")
+    endif()
+
     add_custom_command(
         OUTPUT "${c}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${stage_dir}"
-        COMMAND "${CMAKE_C_COMPILER}" ${cppflags} "${rel}" -o "${i}"
+        ${patch_step}
+        COMMAND "${CMAKE_C_COMPILER}" ${cppflags} "${source_in}" -o "${i}"
         COMMAND sh -c "'${FRLG_PREPROC}' '${i}' charmap.txt > '${c}'"
         ${post}
         WORKING_DIRECTORY "${FRLG_VENDOR_DIR}"
-        DEPENDS "${FRLG_VENDOR_DIR}/${rel}" "${FRLG_PREPROC}" ${FRLG_PRELUDE_DEPS}
-                ${extra_deps}
+        DEPENDS "${FRLG_VENDOR_DIR}/${rel}" "${FRLG_PREPROC}" ${patch_dep}
+                ${FRLG_PRELUDE_DEPS} ${extra_deps}
         COMMENT "preproc ${rel}"
+        VERBATIM)
+
+    set(${out_var} "${c}" PARENT_SCOPE)
+endfunction()
+
+# The port's own game-layer sources (ADR 0022). Same treatment as an upstream
+# one -- the game's headers, the game's prelude, and preproc -- because that is
+# what the code has to compile against and because the port's UI strings need
+# the game's text encoding: `_("PORT")` becomes bytes only if preproc sees it.
+#
+# Separate from the function above because that one names its input relative to
+# the vendor tree and these live outside it. Everything else is deliberately the
+# same, including the working directory, which is what makes charmap.txt and
+# `-iquote include` resolve.
+function(frlg_preprocess_port_game abs out_var)
+    get_filename_component(name "${abs}" NAME_WE)
+    set(stage_dir "${CMAKE_CURRENT_BINARY_DIR}/pp")
+    set(i "${stage_dir}/${name}.i")
+    set(c "${stage_dir}/${name}.c")
+
+    add_custom_command(
+        OUTPUT "${c}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${stage_dir}"
+        # The host headers are added here and nowhere else: these sources may
+        # call downward past platform/agb (ADR 0022), and an upstream source
+        # never should.
+        COMMAND "${CMAKE_C_COMPILER}" ${FRLG_GAME_CPPFLAGS}
+                -I "${CMAKE_SOURCE_DIR}/platform/host/include" "${abs}" -o "${i}"
+        COMMAND sh -c "'${FRLG_PREPROC}' '${i}' charmap.txt > '${c}'"
+        # The same widening the upstream sources get: this code names the game's
+        # structs, so it has to agree with them about how big they are.
+        COMMAND "${CMAKE_COMMAND}" -E env python3 "${FRLG_PATCH_STRUCTS}" "${c}"
+        WORKING_DIRECTORY "${FRLG_VENDOR_DIR}"
+        DEPENDS "${abs}" "${FRLG_PREPROC}" "${FRLG_PATCH_STRUCTS}"
+                ${FRLG_PRELUDE_DEPS}
+        COMMENT "preproc port ${name}.c"
         VERBATIM)
 
     set(${out_var} "${c}" PARENT_SCOPE)

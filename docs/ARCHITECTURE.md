@@ -199,6 +199,16 @@ Every override is listed here, with its reason and the upstream file it forked f
 | --- | --- | --- |
 | _(none yet)_ | | |
 
+**A diff is not an override, and is preferred to one** ([ADR 0023](adr/0023-source-patches-instead-of-forks.md)).
+Where an anchored insertion cannot express a change — replacing a function body rather than adding a
+line to it — `platform/game/overrides/<name>.patch` is applied to a copy of the upstream source in
+the build tree. It keeps what a fork is for and drops what it costs: the repository holds our
+changes, not pret's file.
+
+| Diff | Applies to | Reason |
+| --- | --- | --- |
+| `start_menu.patch` | `src/start_menu.c` | the pause menu scrolls, so the port can add an entry to a tile budget that is already exactly full |
+
 Overrides carry a **maintenance** cost, not a fidelity one: a forked file stops receiving upstream
 fixes. Prefer a shadow macro; reach for an override only when there is no macro seam. That an override
 makes the port differ from the cartridge is not itself an objection — deliberate divergence is what
