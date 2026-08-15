@@ -26,16 +26,22 @@ import sys
 SHARED_NAMES = {
     "sAnim_Cloud",
     "sBGTemplates",
+    "sBgTemplates",
     "sBg_Gfx",
     "sBg_Pal",
     "sBg_Tilemap",
     "sMartMaps",
+    "sOamData_ItemIcon",
+    "sOamData_Star",
     "sStar_Gfx",
+    "sStar_Pal",
     "sTextColorTable",
+    "sTextColors",
     "sTiles",
     "sWindowTemplate",
     "sWindowTemplates",
     "sWindowTemplates_Results",
+    "sYesNoWindowTemplate",
 }
 
 
