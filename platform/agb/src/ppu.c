@@ -411,24 +411,13 @@ static void render_text_bg_line(int bg, int line)
 // One edge of a window, from a register holding its start in the high byte and
 // its end in the low one. An end past the screen, or before the start, is
 // garbage that hardware reads as the far edge.
-// `extra` is how far the viewport reaches past the hardware on each side. A
-// window that starts at the hardware's edge starts at the viewport's, and one
-// that reaches the far edge reaches the viewport's -- the extra area is more of
-// the same scene, not somewhere the window stopped. Without this the game's
-// own full-screen window masks everything outside 240x160 and the widened
-// field draws a 240-pixel picture in the middle of a black frame.
-static int window_contains(uint16_t bounds, int value, int limit, int extra)
+static int window_contains(uint16_t bounds, int value, int limit)
 {
     int start = (bounds >> 8) & 0xFF;
     int end = bounds & 0xFF;
 
     if (end > limit || start > end)
         end = limit;
-
-    if (start == 0)
-        start = -extra;
-    if (end >= limit)
-        end = limit + extra;
 
     return value >= start && value < end;
 }
@@ -461,14 +450,14 @@ static void compute_window_mask(int line, uint16_t dispcnt)
     outside = winout & WINDOW_CONTROL_MASK;
     inside_obj = (winout >> 8) & WINDOW_CONTROL_MASK;
 
-    row0 = win0 && window_contains(io16(REG_WIN0V), line - view_oy(), NATIVE_H, view_oy());
-    row1 = win1 && window_contains(io16(REG_WIN0V + 2), line - view_oy(), NATIVE_H, view_oy());
+    row0 = win0 && window_contains(io16(REG_WIN0V), line - view_oy(), NATIVE_H);
+    row1 = win1 && window_contains(io16(REG_WIN0V + 2), line - view_oy(), NATIVE_H);
 
     for (int x = 0; x < screen_w; x++)
     {
-        if (row0 && window_contains(io16(REG_WIN0H), x - view_ox(), NATIVE_W, view_ox()))
+        if (row0 && window_contains(io16(REG_WIN0H), x - view_ox(), NATIVE_W))
             window_mask[x] = inside0;
-        else if (row1 && window_contains(io16(REG_WIN0H + 2), x - view_ox(), NATIVE_W, view_ox()))
+        else if (row1 && window_contains(io16(REG_WIN0H + 2), x - view_ox(), NATIVE_W))
             window_mask[x] = inside1;
         else if (win_obj && obj_window[x])
             window_mask[x] = inside_obj;

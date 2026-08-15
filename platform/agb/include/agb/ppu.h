@@ -10,16 +10,17 @@ int agb_ppu_width(void);
 int agb_ppu_height(void);
 
 // The viewport is a window onto the backgrounds the game already draws, so the
-// ceiling is not this renderer's to choose: it is however much map the field
-// keeps drawn. That is 64x32 tiles now -- 512x256 pixels -- since the map
-// layers were widened and the camera taught to fill them. Asking for more shows
-// the opposite edge wrapped round, not more of the world.
+// ceiling is not this renderer's to choose: the overworld keeps a 32x32 tilemap
+// -- 256x256 pixels -- and asking for more than that shows the opposite edge
+// wrapped round, not more of the world. The floor is the hardware's own size,
+// because showing less than a Game Boy Advance did would hide things the game
+// put on screen.
 //
-// The floor is the hardware's own size, because showing less than a Game Boy
-// Advance did would hide things the game put on screen.
+// Widening past this needs the game to draw more map, which is a change to the
+// backgrounds and the field camera rather than to the renderer.
 #define AGB_PPU_MIN_W 240
 #define AGB_PPU_MIN_H 160
-#define AGB_PPU_MAX_W 512
+#define AGB_PPU_MAX_W 256
 #define AGB_PPU_MAX_H 256
 
 // Clamped to the range above. Returns true if the viewport is now different
