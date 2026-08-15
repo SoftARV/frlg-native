@@ -146,12 +146,16 @@
      }
  }
  
-@@ -187,16 +209,16 @@
+@@ -187,16 +209,20 @@
  {
      u8 i;
      u8 temp;
 -    u8 r5 = cameraOffset->xTileOffset + 28;
-+    u8 r5 = cameraOffset->xTileOffset + 60;
++    // The last column the buffer holds, not the one before it. Upstream redraws
++    // the second-to-last because its screen never reaches the last -- fifteen
++    // metatiles shown of sixteen held. A wider screen does reach it, and a
++    // column nothing redraws keeps what it held a lap ago.
++    u8 r5 = cameraOffset->xTileOffset + 62;
  
 -    if (r5 >= 32)
 -        r5 -= 32;
@@ -163,11 +167,11 @@
          if (temp >= 32)
              temp -= 32;
 -        DrawMetatileAt(mapLayout, temp * 32 + r5, gSaveBlock1Ptr->pos.x + 14, gSaveBlock1Ptr->pos.y + i / 2);
-+        DrawMetatileAt(mapLayout, TilemapOffset(r5, temp), gSaveBlock1Ptr->pos.x + 30 - VIEW_MARGIN, gSaveBlock1Ptr->pos.y + i / 2);
++        DrawMetatileAt(mapLayout, TilemapOffset(r5, temp), gSaveBlock1Ptr->pos.x + 31 - VIEW_MARGIN, gSaveBlock1Ptr->pos.y + i / 2);
      }
  }
  
-@@ -308,13 +330,13 @@
+@@ -308,13 +334,13 @@
  
  static s32 MapPosToBgTilemapOffset(struct FieldCameraOffset *cameraOffset, s32 x, s32 y)
  {
@@ -185,7 +189,7 @@
  
      y = (y - gSaveBlock1Ptr->pos.y) * 2;
      if (y >= 32 || y < 0)
-@@ -323,7 +345,7 @@
+@@ -323,7 +349,7 @@
      if (y >= 32)
          y -= 32;
  
