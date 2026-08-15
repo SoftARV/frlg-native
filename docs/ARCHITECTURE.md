@@ -1341,6 +1341,11 @@ load-bearing ([spike 0011](spikes/0011-flatpak-32-bit.md)):
 | `--allow=multiarch` | without it seccomp rejects the 32-bit syscall ABI; the game dies on SIGSYS with stdout unflushed, so it fails silently |
 | a wrapper invoking `ld-linux.so.2` | the binary hard-codes `/lib/ld-linux.so.2`, which the sandbox does not have, and `execve` then returns ENOENT for a file that is present |
 | `FRLG_GAME_BIN` | the launcher's other two lookups are a development tree and a sibling path, neither of which exists in a sandbox |
+| `GL32`, and a driver matching the host's | `Compat.i386` carries the GLVND dispatch libraries with nothing behind them, so SDL finds no renderer at all — not even software — and the game exits before drawing. From the launcher that looks like a window that closes and reopens, which is a report about the launcher for a fault in the game |
+
+The last row is a per-machine trap, not only a per-manifest one: `GL32.default` is Mesa and
+`GL32.nvidia-*` is nvidia, and the one that must be present is the one matching the GPU actually in
+use. A laptop that switches between integrated and discrete changes the answer while installed.
 
 The game is **installed, not built**, by the manifest: its build needs `agbcc`, an `arm-none-eabi`
 toolchain and a byte-matching reference build to generate the manifest from. That is a constraint on
