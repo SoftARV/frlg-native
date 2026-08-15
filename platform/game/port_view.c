@@ -12,6 +12,8 @@
 // routine; this counts frames since it last did.
 
 #include "global.h"
+#include "quest_log.h"
+#include "constants/quest_log.h"
 
 #include "agb/frame.h"
 
@@ -35,6 +37,14 @@ bool8 agb_port_field_active(void)
     u32 now;
 
     if (!sSeenField)
+        return FALSE;
+
+    // A quest log replay runs on the field's own callback, so it counts as the
+    // field by every test above -- but what it shows is a recording being
+    // narrated, framed by boxes drawn for a 240-pixel screen. Widening it shows
+    // more of a map the recording never walked and leaves the narration boxes
+    // floating in it. It keeps the hardware's size, like a menu.
+    if (QL_IS_PLAYBACK_STATE)
         return FALSE;
 
     now = agb_frame_count();
