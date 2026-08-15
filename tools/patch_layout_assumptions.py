@@ -57,7 +57,7 @@ def _combined_fill(block, dma):
             % (block, block.removeprefix("g"), dma))
 
 
-REPLACEMENTS = [
+LOAD_SAVE = [
     (
         "ClearSav2",
         _combined_fill("gSaveBlock2", "gSaveBlock2_DMA"),
@@ -82,6 +82,34 @@ REPLACEMENTS = [
 ]
 
 
+# A pointer split across two `s16` sprite data slots and put back together:
+#
+#     *(u16 *)(sprite->data[6] | (sprite->data[7] << 16))
+#
+# `data[6]` is signed, so promoting it sign-extends, and if the address's low
+# half has bit 15 set every high bit turns on and the `|` cannot clear them.
+# In GBA RAM those variables sit low enough that it never happens. Here
+# gSpriteCoordOffsetY is at 0x086994a0 -- low half 0x94a0 -- and the read went
+# to 0xFFFF94A0 and killed the game, on Metal Claw, which is the animation that
+# reaches the branch selecting that particular variable.
+#
+# Upstream casts in battle_anim_mons.c and not here, so the fix is theirs: make
+# the three read the low half unsigned, as the fourth already does.
+BATTLE_ANIM_NORMAL = [
+    (
+        "sign-extended pointer halves",
+        "*(u16 *)(sprite->data[6] | (sprite->data[7] << 16))",
+        "*(u16 *)((u16)sprite->data[6] | (sprite->data[7] << 16))",
+        3,
+    ),
+]
+
+REPLACEMENTS = {
+    "load_save.c": [(what, old, new, 1) for what, old, new in LOAD_SAVE],
+    "battle_anim_normal.c": BATTLE_ANIM_NORMAL,
+}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("file")
@@ -89,15 +117,17 @@ def main():
 
     text = open(args.file).read()
 
-    for what, old, new in REPLACEMENTS:
+    import os
+    base = os.path.basename(args.file)
+    for what, old, new, expect in REPLACEMENTS.get(base, []):
         found = text.count(old)
-        if found != 1:
+        if found != expect:
             sys.exit(
-                f"patch_layout_assumptions: expected exactly one occurrence of the "
-                f"{what} fill in {args.file}, found {found}. Upstream has changed it; "
+                f"patch_layout_assumptions: expected {expect} occurrence(s) of the "
+                f"{what} in {args.file}, found {found}. Upstream has changed it; "
                 "see docs/ARCHITECTURE.md 4.3."
             )
-        text = text.replace(old, new, 1)
+        text = text.replace(old, new, expect)
 
     open(args.file, "w").write(text)
 

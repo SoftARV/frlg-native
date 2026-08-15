@@ -143,7 +143,7 @@ set(FRLG_STRIP_WAITS "${CMAKE_SOURCE_DIR}/tools/strip_hardware_waits.py")
 # load_save.c clears one variable using the combined size of two, which is only
 # correct because upstream's linker script places them adjacently. Nothing does
 # that here, so the fill runs off the end. See tools/patch_layout_assumptions.py.
-set(FRLG_GAME_PATCH_LAYOUT load_save.c)
+set(FRLG_GAME_PATCH_LAYOUT load_save.c battle_anim_normal.c)
 set(FRLG_PATCH_LAYOUT "${CMAKE_SOURCE_DIR}/tools/patch_layout_assumptions.py")
 
 # The GBA has no MMU, so upstream may read through a null pointer and get

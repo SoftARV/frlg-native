@@ -217,7 +217,7 @@ target is absent, so a submodule bump is reported rather than silently changing 
 | Script | Class | Files |
 | --- | --- | --- |
 | `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `main.c`, `script.c` |
-| `patch_layout_assumptions.py` | assumes upstream's linker script | `load_save.c` |
+| `patch_layout_assumptions.py` | assumes upstream's linker script, or where it put a variable | `load_save.c`, `battle_anim_normal.c` |
 | `patch_struct_layout.py` | is laid out differently by the cartridge's compiler | every game source |
 | `patch_null_tolerance.py` | reads and writes only a machine without an MMU tolerates | `naming_screen.c`, `load_save.c`, `overworld.c`, `battle_transition.c`, `sprite.c`, `trainer_card.c`, `pokemon_summary_screen.c`, `pokemon_storage_system_tasks.c`, `region_map.c`, `battle_controllers.c`, `trade_scene.c` |
 
