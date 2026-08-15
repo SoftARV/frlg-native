@@ -144,3 +144,12 @@ distributable.
 Nintendo, Game Freak and The Pokémon Company own the trademarks and the original work. This is an
 unaffiliated preservation and portability project, with no association with, or endorsement by,
 any of them.
+
+## Licence
+
+The code written for this project is **GPL-3.0-or-later** — see [LICENSE](LICENSE). That covers what
+is actually ours: `platform/`, `ports/`, `launcher/`, `tools/`, `cmake/` and `docs/`.
+
+It does not, and cannot, cover the decompiled game. `vendor/pokefirered` is a pinned submodule
+carrying no licence of its own, and it is fetched by whoever builds rather than redistributed here.
+Nothing in this repository grants rights over the original work, and no licence chosen here could.

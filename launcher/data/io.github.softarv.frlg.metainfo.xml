@@ -6,10 +6,7 @@
   <summary>Play a cartridge you own, natively</summary>
 
   <metadata_license>CC0-1.0</metadata_license>
-  <!-- The repository carries no LICENSE file, so there is nothing to declare
-       here yet. This is a placeholder and not a claim: Flathub requires a real
-       SPDX identifier, and one has to be chosen before submission. -->
-  <project_license>LicenseRef-proprietary</project_license>
+  <project_license>GPL-3.0-or-later</project_license>
 
   <developer id="io.github.softarv">
     <name>SoftARV</name>
