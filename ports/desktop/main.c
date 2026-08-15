@@ -1052,6 +1052,28 @@ int main(int argc, char **argv)
             }
         }
 
+        // FRLG_VRAM_DUMP writes video memory to a file, overwritten each frame,
+        // so the file holds whatever was there last. Widescreen needs somewhere
+        // to put larger tilemaps, and where VRAM is free is a question about
+        // what the game does rather than what its constants say -- the region
+        // the arithmetic suggested turned out to be occupied and one nobody had
+        // named was empty. Costs a 96 KB write per frame and is for answering
+        // that kind of question, not for leaving on.
+        {
+            const char *dump = getenv("FRLG_VRAM_DUMP");
+
+            if (dump != NULL)
+            {
+                FILE *fh = fopen(dump, "wb");
+
+                if (fh != NULL)
+                {
+                    fwrite(agb_mem.vram, 1, sizeof(agb_mem.vram), fh);
+                    fclose(fh);
+                }
+            }
+        }
+
         copy_frame();
         // Through the pipeline rather than straight to the backend: with no
         // stage registered this is the same call with one branch in front.
