@@ -116,7 +116,7 @@ def cut_tentative(text, symbol):
     return pattern.sub(replace, text)
 
 
-def point_at_cart(text, symbol, offset):
+def point_at_cart(text, symbol, offset, byte_size=0):
     """Replace a static's definition with a pointer into the imported image.
 
     A file-scope static has no name another translation unit can bind to, so it
@@ -136,8 +136,20 @@ def point_at_cart(text, symbol, offset):
     rather than guarded at run time, because a wrong count is exactly the kind of
     fault that looks like something else entirely.
     """
-    if re.search(r"sizeof\s*\(\s*" + re.escape(symbol) + r"\s*\)", text):
-        return None
+    # `sizeof(sBar)` on a pointer is four, so ARRAY_COUNT would quietly compute
+    # the wrong number -- and ARRAY_COUNT is where most of these appear, since
+    # the macro expands to sizeof(x) / sizeof((x)[0]) before this ever runs.
+    #
+    # Given the symbol's real size, the whole-array sizeof is replaced with that
+    # literal and ARRAY_COUNT keeps working: the divisor `sizeof((sBar)[0])` is
+    # the element type either way, and its text does not match this pattern.
+    # Without a size there is nothing honest to substitute, so it is still
+    # refused -- a wrong count is exactly the fault that looks like another one.
+    whole_sizeof = re.compile(r"sizeof\s*\(\s*" + re.escape(symbol) + r"\s*\)")
+    if whole_sizeof.search(text):
+        if not byte_size:
+            return None
+        text = whole_sizeof.sub(f"({byte_size}u)", text)
 
     # A forward declaration of the same static -- `static const T sFoo[];`
     # ahead of its definition -- would contradict the pointer this becomes, and
@@ -148,7 +160,8 @@ def point_at_cart(text, symbol, offset):
 
     pattern = re.compile(
         r"^([^\S\n]*)((?:[A-Za-z_][A-Za-z0-9_]*[^\S\n]+|\*+[^\S\n]*)+)"
-        + re.escape(symbol) + r"[^\S\n]*((?:\[[^\]]*\])+)[^\S\n]*=[^\S\n]*\{",
+        # The brace may sit on the next line, which several of these do.
+        + re.escape(symbol) + r"[^\S\n]*((?:\[[^\]]*\])+)\s*=\s*\{",
         re.MULTILINE)
     match = pattern.search(text)
     if match is None:
@@ -212,7 +225,11 @@ def main():
         # rather than a declaration -- nothing can bind to a static's name.
         if "#" in symbol:
             name, _, offset_text = symbol.partition("#")
-            pointed = point_at_cart(text, name, int(offset_text, 0))
+            # `name#offset@size` carries the symbol's size as well, which is what
+            # lets a whole-array sizeof survive the rewrite.
+            offset_text, _, size_text = offset_text.partition("@")
+            pointed = point_at_cart(text, name, int(offset_text, 0),
+                                    int(size_text) if size_text else 0)
             if pointed is None:
                 refused.append(name)
             else:
