@@ -92,6 +92,16 @@ if(FRLG_GAME_DATA_FROM_ROM AND FRLG_REFERENCE_BINARY)
     set_tests_properties(extraction_bytes PROPERTIES LABELS unit TIMEOUT 600)
 endif()
 
+# The prelude redefines sixteen macros it inherits from pret's headers, and it
+# is force-included ahead of every game source: a macro that changes shape
+# upstream changes what the whole game compiles to, silently. Nothing else
+# catches that, which is why this is a test rather than a habit.
+add_test(NAME upstream_drift
+    COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_drift.py"
+            --vendor "${FRLG_VENDOR_DIR}"
+            --pins "${CMAKE_SOURCE_DIR}/cmake/upstream_pins.txt")
+set_tests_properties(upstream_drift PROPERTIES LABELS unit)
+
 set(golden "${CMAKE_SOURCE_DIR}/tools/golden.py")
 
 # The thresholds are what make the golden tier survivable, so they are checked

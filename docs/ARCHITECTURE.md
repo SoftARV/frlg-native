@@ -173,9 +173,19 @@ the whole game — `SetDefaultOptions` in `new_game.c`. It reaches only new save
 the save block, so an existing one keeps whatever it stored.
 
 The prelude is invisible at the call site, which is its risk: if pret changes one of the macros it
-overrides, we would diverge silently. `tools/check_drift.py` records the upstream hash of every
-header the prelude depends on and every overridden `.c`, and CI fails when one moves. Bumping the
-submodule pin is always its own commit and always re-runs the check.
+overrides, we would diverge silently. `tools/check_drift.py` records the SHA-256 of every upstream
+file the port depends on the *contents* of — the six headers the prelude inherits macros from, every
+file a patch anchors into, and every fork — in `cmake/upstream_pins.txt`. It runs as the
+`upstream_drift` test, so `ctest` catches a move rather than anyone having to remember to look.
+
+The three kinds fail very differently, which is why they are watched together. A **patched** file is
+already loud: its patch counts its anchors and fails the build. A **fork** stops receiving upstream
+fixes the day it is made, and the cost has to stay visible afterwards. The **prelude** is the one
+nothing else catches — the game keeps compiling and quietly means something else.
+
+Bumping the submodule pin is always its own commit, and moves every hash at once. That is what
+`--bless` is for, and why it is part of bumping rather than a thing to run when the test is
+inconvenient: the diff it produces is the list of what pret changed underneath us, to read.
 
 ### 4.2 Overrides
 
