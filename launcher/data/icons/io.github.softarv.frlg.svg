@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e01b24"/>
+      <stop offset="1" stop-color="#a51d2d"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#99c1f1"/>
+      <stop offset="1" stop-color="#3584e4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- The shell. A handheld silhouette rather than anything from the game:
+       the port ships no game data, and its icon should not either. -->
+  <rect x="12" y="16" width="104" height="96" rx="18" fill="url(#shell)"/>
+  <rect x="12" y="16" width="104" height="96" rx="18" fill="none"
+        stroke="#7a1526" stroke-width="2"/>
+
+  <!-- Screen -->
+  <rect x="34" y="30" width="60" height="46" rx="4" fill="#241f31"/>
+  <rect x="38" y="34" width="52" height="38" rx="2" fill="url(#glass)"/>
+
+  <!-- D-pad -->
+  <path d="M24 88h8v-8h8v8h8v8h-8v8h-8v-8h-8z" fill="#241f31" opacity="0.85"/>
+
+  <!-- Buttons -->
+  <circle cx="98" cy="88" r="6" fill="#241f31" opacity="0.85"/>
+  <circle cx="84" cy="98" r="6" fill="#241f31" opacity="0.85"/>
+</svg>

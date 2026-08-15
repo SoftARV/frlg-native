@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.softarv.frlg</id>
+
+  <name>frlg-native</name>
+  <summary>Play a cartridge you own, natively</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <!-- The repository carries no LICENSE file, so there is nothing to declare
+       here yet. This is a placeholder and not a claim: Flathub requires a real
+       SPDX identifier, and one has to be chosen before submission. -->
+  <project_license>LicenseRef-proprietary</project_license>
+
+  <developer id="io.github.softarv">
+    <name>SoftARV</name>
+  </developer>
+
+  <description>
+    <p>
+      A native source port rather than an emulator: the game's own code is
+      recompiled for the host, so it runs as a normal application instead of
+      being interpreted as machine code for another processor.
+    </p>
+    <p>
+      No game data is included. The launcher imports it from a cartridge image
+      you already own, verifies it, and keeps a prepared copy so the original
+      is not needed again.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.softarv.frlg.desktop</launchable>
+
+  <categories>
+    <category>Game</category>
+  </categories>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-08-15">
+      <description>
+        <p>First packaged build.</p>
+      </description>
+    </release>
+  </releases>
+</component>

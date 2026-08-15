@@ -17,3 +17,20 @@ resources = gnome.compile_resources('frlg-resources',
   dependencies: [window_ui],
   source_dir: meson.current_build_dir(),
 )
+
+# Desktop integration. Needed by any packaged build: without the .desktop file
+# there is no entry to launch, and without the icon the entry has no face. The
+# names are the application id because that is what the shell matches on.
+app_id = 'io.github.softarv.frlg'
+
+install_data(app_id + '.desktop',
+  install_dir: get_option('datadir') / 'applications',
+)
+
+install_data(app_id + '.metainfo.xml',
+  install_dir: get_option('datadir') / 'metainfo',
+)
+
+install_data('icons' / (app_id + '.svg'),
+  install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps',
+)

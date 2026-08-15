@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=frlg-native
+GenericName=Game Launcher
+Comment=Import a cartridge and play the native port
+Exec=frlg-launcher
+Icon=io.github.softarv.frlg
+Terminal=false
+Type=Application
+Categories=Game;
+Keywords=gba;emulator;port;recompilation;
+StartupNotify=true
+StartupWMClass=frlg-launcher
