@@ -83,6 +83,30 @@ Arrow keys move, **X** is A and **Z** is B, **Enter** is Start and **Backspace**
 **S** are L and R. **Ctrl+Q** or the window's close button quits — deliberately not a bare key, since
 one stray press ends a recording.
 
+#### Where your data lives
+
+The same layout in both cases; only the root differs, because a Flatpak gets its own data directory:
+
+| | built from this tree | installed as a Flatpak |
+| --- | --- | --- |
+| root | `~/.local/share/frlg-native/` | `~/.var/app/io.github.softarv.frlg/data/frlg-native/` |
+| imported cartridge | `cache/<sha1>.cart` | `cache/<sha1>.cart` |
+| a profile's save | `saves/<profile>/game.sav` | `saves/<profile>/game.sav` |
+| profile list | `saves/profiles.ini` | `saves/profiles.ini` |
+| recordings | `sessions/` | `sessions/` |
+
+**Saves move between the two by copying them.** The format is the cartridge's
+([ADR 0019](docs/adr/0019-saves-match-the-cartridge.md)) and does not change with the packaging, so
+there is nothing to convert:
+
+```sh
+cp ~/.local/share/frlg-native/saves/vanilla/game.sav \
+   ~/.var/app/io.github.softarv.frlg/data/frlg-native/saves/vanilla/game.sav
+```
+
+Only someone who played a build from this tree before installing the package has anything to move.
+A fresh install imports a cartridge and starts there.
+
 ### 3. Send back what broke
 
 When the game hits a bug it stops, tells you what happened, and writes **one file**:
