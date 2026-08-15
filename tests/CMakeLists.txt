@@ -44,6 +44,24 @@ foreach(m4a_test test_m4a_envelope test_m4a_mix test_m4a_frame test_m4a_track
     target_compile_options("${m4a_test}" PRIVATE -iquote "${FRLG_VENDOR_DIR}/include")
 endforeach()
 
+# Extraction serves the cartridge's bytes in place of a definition, which is
+# only correct if the two agree. They are produced by different compilers and
+# need not: struct BgTemplate is four bytes in both, and agbcc packs its
+# bitfields across the storage units where ours does not -- same size, different
+# bits, and two screens with no backgrounds. A size comparison cannot see that;
+# this compares the bytes.
+# It needs a build that compiles the data in, to compare against -- this build
+# cannot check itself, having replaced the definitions it would be checking.
+# Point FRLG_REFERENCE_BINARY at one (a -DFRLG_GAME_DATA_FROM_ROM=OFF build) and
+# the test appears; without one there is nothing to compare and it does not.
+if(FRLG_GAME_DATA_FROM_ROM AND FRLG_REFERENCE_BINARY)
+    add_test(NAME extraction_bytes
+        COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/verify_extraction.py"
+                "${FRLG_REFERENCE_BINARY}" "${FRLG_SYMBOL_LIST}"
+                "${FRLG_VENDOR_DIR}/pokefirered.gba")
+    set_tests_properties(extraction_bytes PROPERTIES LABELS unit TIMEOUT 600)
+endif()
+
 set(golden "${CMAKE_SOURCE_DIR}/tools/golden.py")
 
 # The thresholds are what make the golden tier survivable, so they are checked
