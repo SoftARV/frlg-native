@@ -474,7 +474,7 @@ static void affine_line_start(int bg, int line, int mos_v, int32_t *x, int32_t *
     int params = REG_AFFINE_BLOCK(bg);
     int16_t pb = (int16_t)io16(params + 2);
     int16_t pd = (int16_t)io16(params + 6);
-    int row = mosaic_snap(line, mos_v);
+    int row = mosaic_snap(line, mos_v) - view_oy();
 
     *x = bg_reference(io32(params + 8)) + (int32_t)pb * row;
     *y = bg_reference(io32(params + 12)) + (int32_t)pd * row;
@@ -505,7 +505,7 @@ static void render_bitmap_bg_line(int mode, int line)
 
     for (int i = 0; i < screen_w; i++)
     {
-        int across = mosaic_snap(i, mos_h);
+        int across = mosaic_snap(i, mos_h) - view_ox();
         int tx = (base_x + (int32_t)pa * across) >> 8;
         int ty = (base_y + (int32_t)pc * across) >> 8;
         uint32_t pixel;
@@ -560,7 +560,7 @@ static void render_affine_bg_line(int bg, int line)
 
     for (int i = 0; i < screen_w; i++)
     {
-        int across = mosaic_snap(i, mos_h);
+        int across = mosaic_snap(i, mos_h) - view_ox();
         int tx = (base_x + (int32_t)pa * across) >> 8;
         int ty = (base_y + (int32_t)pc * across) >> 8;
         int colour;
@@ -654,7 +654,9 @@ static void render_obj_line(int line)
         int x = OBJ_X(attr1);
         // Objects wrap at 256 rather than at the bottom of the screen, so one
         // placed low enough reappears at the top.
-        int py = (line - OBJ_Y(attr0)) & 0xFF;
+        // The hardware's row, not the viewport's: an object's Y is in the
+        // hardware's coordinates like its X, and only the X was being shifted.
+        int py = (line - view_oy() - OBJ_Y(attr0)) & 0xFF;
         int16_t pa = 0, pb = 0, pc = 0, pd = 0;
 
         // A window object contributes shape rather than colour: its opaque
