@@ -14,20 +14,31 @@ int agb_ppu_height(void);
 // keeps drawn. That is 64x32 tiles -- 512x256 pixels -- since the map layers
 // were widened and the camera taught to fill them.
 //
-// The window that scrolls over those 512x256 is smaller than they are, because
-// it is centred on a camera that keeps its own sub-metatile offset: the field
-// scrolls up to a metatile before the buffer shifts under it, and the view has
-// to stay inside the drawn area at both ends of that. What is left after paying
-// for it either side is 496x240. Asking for more shows the opposite edge
-// wrapped round, not more of the world -- silently, and only while walking,
-// which is what made it worth writing down here.
+// The window that scrolls over those 512x256 is smaller than they are, and by
+// more than the arithmetic of "512 minus the scroll" suggests.
+//
+// The camera does not redraw the map as it moves. It rotates: the row leaving
+// one edge is the row rewritten for the other, so at every metatile step one
+// row and one column of the buffer briefly hold the *far* side's new content.
+// The view has to be small enough that those two are off screen when it
+// happens, or a strip of the map ahead appears at the edge behind -- which is
+// what "walking left or down leaves artifacts at the edge" was.
+//
+// 480 across: the buffer is 32 metatiles and the recycled column needs two of
+// them, because the scroll is only metatile-aligned at the instant of the step.
+// 208 down: the buffer is 16 metatiles and the camera's own half-metatile
+// offset (VIEW_SCROLL_Y in field_camera.patch) costs one more.
+//
+// Both were measured rather than derived -- a walk in each direction, looking
+// for a strip that fails to scroll with the rest of the frame. Raising either
+// brings the artifact back at that edge only, and only while walking.
 //
 // The floor is the hardware's own size, because showing less than a Game Boy
 // Advance did would hide things the game put on screen.
 #define AGB_PPU_MIN_W 240
 #define AGB_PPU_MIN_H 160
-#define AGB_PPU_MAX_W 496
-#define AGB_PPU_MAX_H 240
+#define AGB_PPU_MAX_W 480
+#define AGB_PPU_MAX_H 208
 
 // Clamped to the range above. Returns true if the viewport is now different
 // from what it was, which is the caller's cue to resize anything it keeps in
