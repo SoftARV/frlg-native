@@ -231,7 +231,101 @@
      }
  }
  
-@@ -308,22 +380,22 @@
+@@ -222,11 +294,93 @@
+     }
+ }
+ 
++// What the joined map has at a coordinate the map buffer does not reach.
++//
++// The buffer holds seven metatiles past the edge of the map, because that is how
++// far the hardware's screen saw. This port's field view sees further, and past
++// the seventh MapGridGetMetatileIdAt has nothing to answer with, so it answers
++// with the map's border: trees in the middle of a road, all the way up to the
++// boundary, until the player crosses and the joined map's own layout takes over.
++//
++// The data was there the whole time. It is the buffer that stops, not the world.
++//
++// The placement is the connection fill's, read the other way round: fieldmap.c
++// puts the joined map's own (0, 0) at a fixed virtual coordinate for each
++// direction, so a coordinate outside the buffer belongs to that map if it lands
++// inside its width and height. Sharing the arithmetic with FillWestConnection
++// and its three siblings is what keeps the seam invisible.
++//
++// This is the drawing path and nothing else. Collision, elevation and what the
++// player may walk onto still stop where the buffer stops -- they were never
++// wrong, because the player cannot reach these metatiles without crossing onto
++// the map that owns them, and crossing re-bases the whole buffer.
++static bool8 MetatileIdFromConnectedMap(s32 x, s32 y, u16 *metatileId)
++{
++    const struct MapConnection *connection;
++    s32 count;
++    s32 i;
++
++    if (gMapHeader.connections == NULL)
++        return FALSE;
++
++    count = gMapHeader.connections->count;
++    connection = gMapHeader.connections->connections;
++    for (i = 0; i < count; i++, connection++)
++    {
++        const struct MapHeader *connectedMapHeader = GetMapHeaderFromConnection(connection);
++        const struct MapLayout *layout;
++        s32 originX, originY;
++        s32 cx, cy;
++
++        if (connectedMapHeader == NULL || connectedMapHeader->mapLayout == NULL)
++            continue;
++        layout = connectedMapHeader->mapLayout;
++
++        switch (connection->direction)
++        {
++        case CONNECTION_WEST:
++            originX = MAP_OFFSET - layout->width;
++            originY = (s32)connection->offset + MAP_OFFSET;
++            break;
++        case CONNECTION_EAST:
++            originX = gMapHeader.mapLayout->width + MAP_OFFSET;
++            originY = (s32)connection->offset + MAP_OFFSET;
++            break;
++        case CONNECTION_NORTH:
++            originX = (s32)connection->offset + MAP_OFFSET;
++            originY = MAP_OFFSET - layout->height;
++            break;
++        case CONNECTION_SOUTH:
++            originX = (s32)connection->offset + MAP_OFFSET;
++            originY = gMapHeader.mapLayout->height + MAP_OFFSET;
++            break;
++        default:
++            continue;
++        }
++
++        cx = x - originX;
++        cy = y - originY;
++        if (cx < 0 || cx >= layout->width || cy < 0 || cy >= layout->height)
++            continue;
++
++        *metatileId = layout->map[cy * layout->width + cx] & MAPGRID_METATILE_ID_MASK;
++        return TRUE;
++    }
++    return FALSE;
++}
++
+ static void DrawMetatileAt(const struct MapLayout *mapLayout, u16 offset, int x, int y)
+ {
+     u16 metatileId = MapGridGetMetatileIdAt(x, y);
+     const u16 *metatiles;
+ 
++    // Asked before the answer is used rather than after, because outside the
++    // buffer MapGridGetMetatileIdAt does not fail -- it returns the border, which
++    // is a plausible metatile and the reason this went unnoticed as long as it
++    // did.
++    if (x < 0 || x >= VMap.Xsize || y < 0 || y >= VMap.Ysize)
++        MetatileIdFromConnectedMap(x, y, &metatileId);
++
+     if (metatileId > NUM_METATILES_TOTAL)
+         metatileId = 0;
+     if (metatileId < NUM_METATILES_IN_PRIMARY)
+@@ -308,22 +462,22 @@
  
  static s32 MapPosToBgTilemapOffset(struct FieldCameraOffset *cameraOffset, s32 x, s32 y)
  {

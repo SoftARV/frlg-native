@@ -213,7 +213,7 @@ changes, not pret's file.
 | --- | --- | --- |
 | `start_menu.patch` | `src/start_menu.c` | the pause menu scrolls, so the port can add an entry to a tile budget that is already exactly full |
 | `overworld.patch` | `src/overworld.c` | the field's map layers are 64 tiles wide, and the field tells the port when it is on screen |
-| `field_camera.patch` | `src/field_camera.c` | the camera fills those layers and centres them on the player |
+| `field_camera.patch` | `src/field_camera.c` | the camera fills those layers, centres them on the player, and reads through a map connection for what the buffer does not hold |
 
 Two things about a patched source that are silent rather than loud, both found by them happening:
 

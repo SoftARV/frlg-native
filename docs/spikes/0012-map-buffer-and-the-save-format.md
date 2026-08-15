@@ -4,8 +4,9 @@
 as trees or cliff until the boundary is crossed, after which it corrects itself. Where does the wrong
 metatile come from, and what would it take to hold enough map to draw the right one?
 
-**Status: answered, and only half of it shipped.** The cause is exact and the obvious fix works, but
-the constant it changes turns out to be part of the save file. Recorded here rather than merged.
+**Status: answered and fixed** — by the second of the two routes below, not the first. The obvious
+fix works and was built, then abandoned: the constant it changes turns out to be part of the save
+file. The narrow one, reading the joined map's layout in the drawing path, shipped.
 
 ## The wrong metatile is the map's border
 
@@ -88,6 +89,23 @@ one is the drawing path: when the camera asks for a metatile outside the virtual
 through the map connection and read the joined map's layout directly, the way `GetBorderBlockAt`
 resolves the border today. That touches what is *drawn* and nothing that is *stored*, which is the
 distinction this spike is really about.
+
+## What was done
+
+`MetatileIdFromConnectedMap` in `field_camera.patch`, called from `DrawMetatileAt` when the
+coordinate falls outside the map buffer. It reads the joined map's own layout, placed by the same
+arithmetic `FillWestConnection` and its three siblings use — the joined map's `(0, 0)` sits at a
+fixed virtual coordinate per direction, so a coordinate outside the buffer belongs to that map if it
+lands inside its width and height.
+
+Nothing stored changes, and neither does collision or elevation: those still stop where the buffer
+stops, which was never wrong, because the player cannot reach these metatiles without crossing onto
+the map that owns them — and crossing re-bases the buffer.
+
+Measured over a recorded walk from Route 22 into Viridian City, at 464x192 against the commit
+before: **125 of 146 sampled frames identical, 21 differing, and every one of them within four
+hundred frames of the boundary**. At the hardware's own size, 189 of 189 identical — the columns this
+changes are off screen there, and are redrawn before they are not.
 
 ## For the next person measuring this
 
