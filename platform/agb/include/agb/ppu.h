@@ -24,10 +24,14 @@ int agb_ppu_height(void);
 // happens, or a strip of the map ahead appears at the edge behind -- which is
 // what "walking left or down leaves artifacts at the edge" was.
 //
-// 480 across: the buffer is 32 metatiles and the recycled column needs two of
-// them, because the scroll is only metatile-aligned at the instant of the step.
-// 208 down: the buffer is 16 metatiles and the camera's own half-metatile
-// offset (VIEW_SCROLL_Y in field_camera.patch) costs one more.
+// So the view has to leave a whole metatile spare on *each* side of both axes,
+// and where that spare sits is fixed by the camera's scroll offsets rather than
+// being split evenly. Horizontally the offset is 8 metatiles (VIEW_SCROLL_X):
+// the room left of the view is 128 - (W - 240) / 2, which is a metatile only up
+// to W = 464 -- at 480 it is half of one, and the column written for the right
+// edge spills eight pixels into the left of the screen. Vertically the offset is
+// two metatiles and a half, so the room above is 40 - (H - 160) / 2, a metatile
+// up to H = 208.
 //
 // Both were measured rather than derived -- a walk in each direction, looking
 // for a strip that fails to scroll with the rest of the frame. Raising either
@@ -37,7 +41,7 @@ int agb_ppu_height(void);
 // Advance did would hide things the game put on screen.
 #define AGB_PPU_MIN_W 240
 #define AGB_PPU_MIN_H 160
-#define AGB_PPU_MAX_W 480
+#define AGB_PPU_MAX_W 464
 #define AGB_PPU_MAX_H 208
 
 // Clamped to the range above. Returns true if the viewport is now different
