@@ -34,6 +34,9 @@
 #include "host_filters.h"
 #include "host_options.h"
 #include "host_render.h"
+
+// platform/game/port_view.c: whether the field is what is on screen.
+bool agb_port_field_active(void);
 #include "host_session.h"
 
 #include "crash.h"
@@ -1021,6 +1024,13 @@ int main(int argc, char **argv)
             if (want != NULL && sscanf(want, "%dx%d", &vw, &vh) == 2)
             {
                 agb_ppu_set_viewport(vw, vh);
+            }
+            else if (!agb_port_field_active())
+            {
+                // Menus, battles and the like are drawn for the hardware's
+                // size; past that edge there is nothing of theirs to show. They
+                // keep it, and the window letterboxes them.
+                agb_ppu_set_viewport(AGB_PPU_MIN_W, AGB_PPU_MIN_H);
             }
             else
             {

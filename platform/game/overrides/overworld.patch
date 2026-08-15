@@ -1,0 +1,25 @@
+--- a/src/overworld.c
++++ b/src/overworld.c
+@@ -1472,14 +1472,22 @@
+ }
+ 
+ // This CB2 is used when starting
++// The port needs to know the field is what is on screen: it widens the
++// viewport there and nowhere else, because a menu has no more world to show.
++// platform/game/port_view.c. ADR 0023.
++extern void agb_port_field_frame(void);
++
+ void CB2_OverworldBasic(void)
+ {
++    agb_port_field_frame();
+     OverworldBasic();
+ }
+ 
+ static void CB2_Overworld(void)
+ {
+     bool32 fading = !!gPaletteFade.active;
++
++    agb_port_field_frame();
+     if (fading)
+         SetVBlankCallback(NULL);
+     OverworldBasic();

@@ -51,7 +51,7 @@ WATCHED = {
     "src/load_save.c": "patched: linker-script assumptions",
     "src/battle_anim_normal.c": "patched: sign-extended pointer halves",
     "src/naming_screen.c": "patched: null tolerance",
-    "src/overworld.c": "patched: null tolerance",
+    "src/overworld.c": "patched: null tolerance, and diff-patched to tell the port the field is on screen",
     "src/battle_transition.c": "patched: null tolerance",
     "src/sprite.c": "patched: null tolerance",
     "src/trainer_card.c": "patched: null tolerance",
