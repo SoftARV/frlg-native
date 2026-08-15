@@ -16,14 +16,21 @@ Update the status column when a milestone lands.
 | 5 | Saves — flash backed by a host file | **done** |
 | 6 | **Playable** — intro through the first battle, deterministic replay | **done** |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | **done** |
-| 8 | Windows, Android, web; launcher, packaging and updates | |
-| 9 | Mods — Lua runtime, schema registries, generated reference docs | |
+| 8 | **Linux** — packaging, launcher integration, updates | |
+| 9 | Display modes, widescreen, high refresh | |
 | 10 | Peer-to-peer link play | |
-| 11 | 64-bit migration, then macOS and iOS | |
-| 12 | Display modes, widescreen, high refresh | |
+| 11 | 64-bit migration | |
+| 12 | Mods — Lua runtime, schema registries, generated reference docs | |
+| 13 | Every other platform — Windows, web, then Android, macOS, iOS | |
 
 Two milestones matter more than the rest. **Phase 6** is when it becomes a game someone can play.
 **Phase 7** is when it becomes something we can legally hand to them.
+
+**Phases 8 to 13 were renumbered on 2026-08-15**, when Linux became the first shipping platform.
+The old phase 8 tried to reach every platform at once and is now phase 13; mods moved from 9 to 12,
+and display modes from 12 to 9. Anything written before that date uses the old numbers — the ADRs
+especially, which are superseded rather than edited. Read those references by what they name, not
+by the number they carry.
 
 ## Phase 0 — Foundations *(done)*
 
@@ -613,19 +620,25 @@ Measuring this needs the right instrument as much as the right mechanism. The sc
 "two matches" walked 64-byte windows and could not see an eight-byte table; per-symbol, the same
 binary had 987 of them.
 
-## Phase 8 — It travels
+## Phase 8 — It ships
 
-Windows and Android from the same SDL3 backend; web via Emscripten (`wasm32` is 32-bit, so no
-pointer work). Android needs touch controls, the first genuinely new UI in the project. The web
-target may hit the absolute-symbol-binding risk in ADR 0006 and need a pointer-indirection layer.
+**Linux, and only Linux.** The launcher is already a GNOME application — GTK4, libadwaita, Vala
+([ADR 0017](adr/0017-launcher-is-a-separate-program.md)) — so the platform this port can ship on
+today is the one it was written on. Packaging, launcher integration and the update pipeline land
+here, because Phase 7 is what made distribution possible at all.
 
-Launcher, packaging and update pipelines land here, because Phase 7 made distribution possible.
+Two facts shape the packaging, and neither is a detail. **The game is 32-bit and the launcher is
+64-bit**, so whatever format is chosen has to carry both — they cannot be one binary, and there is
+no `lib32-gtk4` to make them one. And **a sandboxed package moves the save directory**: under
+Flatpak, `~/.local/share/frlg-native` stops being where the player's saves live. That needs a
+migration decided in advance, not discovered by someone losing a playthrough.
 
-## Phase 9 — It mods
+Ends with something a stranger can install without being told how.
 
-Lua runtime, the schema table, registries, the loader, and reference docs generated from the
-schema ([ADR 0007](adr/0007-lua-mod-registries.md)). Render pipelines come with it, since they are
-the seam that makes an alternative renderer a mod rather than a fork.
+## Phase 9 — It gets better
+
+Display modes and LCD filters, widescreen, high-refresh interpolation. The hooks are designed in
+from Phase 3; this is where they are switched on.
 
 ## Phase 10 — It connects
 
@@ -635,10 +648,27 @@ fiber loop is a prerequisite. Desync fuzzing lands with it, not after.
 ## Phase 11 — It grows up
 
 The 64-bit migration: regenerate data into a native layout, flip the accessor to add the arena
-base, audit struct layouts and save serialisation. macOS and iOS follow immediately, being 64-bit
-only.
+base, audit struct layouts and save serialisation.
 
-## Phase 12 — It gets better
+Here rather than later for two reasons. It is the widest change left, and every phase that lands
+before it is more code to migrate. And it is what unblocks most of Phase 13 — Android has required
+64-bit for years, and macOS and iOS are 64-bit only.
 
-Display modes and LCD filters, widescreen, high-refresh interpolation. The hooks are designed in
-from Phase 3; this is where they are switched on.
+## Phase 12 — It mods
+
+Lua runtime, the schema table, registries, the loader, and reference docs generated from the
+schema ([ADR 0007](adr/0007-lua-mod-registries.md)). Render pipelines come with it, since they are
+the seam that makes an alternative renderer a mod rather than a fork.
+
+After the migration, so the mod ABI is designed once, against the pointer width it will keep.
+
+## Phase 13 — It travels
+
+Every other platform, once there is a shipping one to compare against. Windows and web need no
+pointer work — `wasm32` is 32-bit — but both need the POSIX dependency in `platform/agb/src/frame.c`
+moved behind `host.h` first. Android needs touch controls, the first genuinely new UI in the
+project. The web target may hit the absolute-symbol-binding risk in ADR 0006 and need a
+pointer-indirection layer.
+
+Deliberately last: what each platform needs, and how much of the Linux work is reusable, is a
+better question to ask with a shipped Linux build to answer it from.

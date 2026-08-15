@@ -11,7 +11,7 @@ If you already cloned without submodules: `git submodule update --init --recursi
 
 ## Dependencies
 
-The port builds **32-bit** until the Phase 8 migration ([ADR 0003](adr/0003-pointer-width.md)), so
+The port builds **32-bit** until the Phase 11 migration ([ADR 0003](adr/0003-pointer-width.md)), so
 every dependency is needed in its 32-bit form.
 
 | Need | Why | Arch package |

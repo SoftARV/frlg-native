@@ -1284,7 +1284,7 @@ handlers still run on the game thread's own stack.
 **Known layering debt.** `platform/agb/src/frame.c` calls `setitimer` and `sigaction` directly, so
 the AGB layer currently depends on POSIX — which [§2](#2-layer-model) says it must not. It builds
 everywhere POSIX exists, so nothing is blocked today, but Windows and the web target cannot work
-until the timer and the preemption primitive move behind `host.h`. Tracked for phase 8.
+until the timer and the preemption primitive move behind `host.h`. Tracked for phase 13.
 
 The main thread is the hardware side: it pumps events, writes the key register and presents the
 framebuffer. It never runs game code, so it races with nothing — and a real GBA updates its key
