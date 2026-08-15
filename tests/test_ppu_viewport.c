@@ -173,6 +173,41 @@ static void test_odd_sizes(void)
           "247x199 does not contain the native frame unchanged");
 }
 
+// The layer the dialogue box and the pause menu are drawn into is 256 pixels
+// wide, and the field's map layers are 512. Filling a wider viewport by wrapping
+// the narrow one drew the message box again at each edge -- which looked like a
+// deliberate tiled backdrop rather than a fault, and so went unreported for a
+// while.
+static void test_narrow_bg_is_not_tiled(void)
+{
+    const uint32_t *wide;
+    int ox;
+
+    TEST_CASE("a background narrower than the viewport is drawn once");
+
+    // The scene's background is 256 wide (BG size 0) and every tile is opaque,
+    // so anything outside the hardware's window is the wrap this guards against.
+    agb_ppu_set_viewport(AGB_PPU_MAX_W, AGB_PPU_MIN_H);
+    build_scene();
+    agb_ppu_render_frame();
+    wide = agb_ppu_framebuffer();
+    ox = (AGB_PPU_MAX_W - AGB_PPU_MIN_W) / 2;
+
+    for (int y = 0; y < AGB_PPU_MIN_H; y += 8)
+    {
+        CHECK(wide[y * AGB_PPU_MAX_W + (ox - 1)] == wide[0],
+              "row %d: the backdrop is not left of the hardware's window", y);
+        CHECK(wide[y * AGB_PPU_MAX_W + ox + AGB_PPU_MIN_W] == wide[0],
+              "row %d: the backdrop is not right of it", y);
+    }
+
+    // And the window itself still holds the background, so the check above is
+    // not passing because nothing was drawn at all.
+    render_native();
+    CHECK(contains_native(AGB_PPU_MAX_W, AGB_PPU_MIN_H) == 0,
+          "the hardware's own window did not survive the clip");
+}
+
 static void test_clamped_to_what_the_game_draws(void)
 {
     TEST_CASE("the viewport is clamped, not taken on trust");
@@ -196,6 +231,7 @@ int main(void)
     test_taller_contains_native();
     test_both_axes();
     test_odd_sizes();
+    test_narrow_bg_is_not_tiled();
     test_clamped_to_what_the_game_draws();
     agb_ppu_set_viewport(AGB_PPU_MIN_W, AGB_PPU_MIN_H);
     return test_report("ppu_viewport");

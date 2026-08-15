@@ -365,9 +365,30 @@ static void render_text_bg_line(int bg, int line)
     int height_mask = (size == 2 || size == 3) ? 0x1FF : 0xFF;
     int src_y = (mosaic_snap(line, mos_v) - view_oy() + vofs) & height_mask;
 
+    // A background smaller than the viewport is drawn once, where the hardware's
+    // screen is, instead of being tiled to fill it.
+    //
+    // The field widened its map layers to 512 pixels. The layer the dialogue
+    // box, the pause menu and the map-name card are drawn into is still 256,
+    // because none of them wants to be wider -- and wrapping it to fill a
+    // 448-pixel viewport draws the message box three times, once in the middle
+    // and once at each edge, which is what a wide overworld actually looked
+    // like.
+    //
+    // Anchoring it to the hardware's window is what a Game Boy Advance showed:
+    // its 240 pixels, in the middle, with the map either side of them.
+    bool draw_once_h = width_mask + 1 < screen_w;
+    bool draw_once_v = height_mask + 1 < screen_h;
+
+    if (draw_once_v && (line < view_oy() || line >= view_oy() + NATIVE_H))
+        return;
+
     for (int x = 0; x < screen_w; x++)
     {
         int src_x = (mosaic_snap(x, mos_h) - view_ox() + hofs) & width_mask;
+
+        if (draw_once_h && (x < view_ox() || x >= view_ox() + NATIVE_W))
+            continue;
         int map_x = src_x >> 3;
         int map_y = src_y >> 3;
         const uint8_t *block = screen + screen_block_offset(size, map_x, map_y);

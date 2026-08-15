@@ -736,6 +736,15 @@ plus BG2 affine, mode 2 is BG2 and BG3 affine — and a layer its mode does not 
 at all. An affine map is square, always 8bpp, and one byte per entry: a tile number with no flip
 bits and no palette bank.
 
+**A background smaller than the viewport is drawn once, where the hardware's screen is**, rather
+than wrapped to fill it. This is the one place the renderer does something the GBA's own wrapping
+does not, and it is what makes a wider viewport usable: the field widened its map layers to 512
+pixels, but the layer the dialogue box, the pause menu and the map-name card are drawn into is
+still 256, because none of them wants to be wider. Wrapping that layer across 448 pixels drew the
+message box three times — once in the middle, once at each edge — which reads as a deliberate tiled
+backdrop rather than as a fault. At the hardware's own size nothing is smaller than the viewport, so
+this changes nothing there.
+
 **Windows** resolve once per scanline into a per-pixel set of the layers allowed to draw there.
 The regions are tried in a fixed order — window 0, then window 1, then the object window, then
 everything outside all of them — and the first match owns the pixel, so an overlap belongs to the
