@@ -30,12 +30,16 @@ int agb_ppu_height(void);
 // the room left of the view is 128 - (W - 240) / 2, which is a metatile only up
 // to W = 464 -- at 480 it is half of one, and the column written for the right
 // edge spills eight pixels into the left of the screen. Vertically the offset is
-// two metatiles and a half, and that half is what decides the height: the fill
-// grid sits eight pixels off the scroll, so a view whose bottom edge does not
-// land on one of its lines cuts the rewritten row in half and shows the top of
-// it. 208 leaves exactly those eight pixels showing -- a strip of somewhere
-// else along the bottom, for the moment it takes the next step to cover it.
-// 192 ends on a line.
+// two metatiles and a half, and 192 is where the view ends on one of the fill
+// grid's own lines rather than between two of them.
+//
+// That last part is where the reasoning runs out. Ending on a line should leave
+// the rewritten row whole and off screen, and it does not: walking up still
+// draws about eight pixels of somewhere else along the bottom, for the one step
+// it takes to cover them. 240, 224, 208 and 192 have all been played or
+// measured; the strip shrinks with the ceiling and does not go away. So the
+// height is not the lever, and issue #12 holds what is known -- including that
+// the two detectors written for it both look for the wrong thing.
 //
 // Both were measured rather than derived -- a walk in each direction, looking
 // for a strip that fails to scroll with the rest of the frame. Raising either
