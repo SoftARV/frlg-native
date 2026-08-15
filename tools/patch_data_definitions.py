@@ -25,8 +25,12 @@ def cut_definition(text, symbol, byte_size=0):
     # type words, qualifiers and stars, in any order and any number -- `const u16
     # *const gLevelUpLearnsets[412]` needs the qualifier *after* the star, which
     # is the shape that catches a tidier pattern out.
+    # preproc emits file-scope definitions run together on one line, so a
+    # definition may begin right after the previous one's semicolon rather than
+    # at the start of a line. Relaxing the anchor is safe because nothing is
+    # rewritten unless the caller named the symbol.
     pattern = re.compile(
-        r"^([^\S\n]*)((?:[A-Za-z_][A-Za-z0-9_]*\s+|\*+\s*)+)"
+        r"(?:^|(?<=;))([^\S\n]*)((?:[A-Za-z_][A-Za-z0-9_]*\s+|\*+\s*)+)"
         # Dimensions optional: plenty of these are a single struct rather than
         # an array, and `extern const struct SpriteTemplate gFoo;` is the right
         # declaration for one.
@@ -116,6 +120,23 @@ def cut_tentative(text, symbol):
     return pattern.sub(replace, text)
 
 
+class _Span:
+    """A match-like span, for the anonymous-struct case found by scanning."""
+
+    def __init__(self, start, end, kind, dims):
+        self._start, self._end, self._kind, self._dims = start, end, kind, dims
+
+    def start(self):
+        return self._start
+
+    def end(self):
+        return self._end
+
+    def group(self, n):
+        # (whole, indent, kind, dims) -- the caller reads 1, 2 and 3.
+        return ("", "", self._kind, self._dims)[n]
+
+
 def point_at_cart(text, symbol, offset, byte_size=0):
     """Replace a static's definition with a pointer into the imported image.
 
@@ -159,19 +180,71 @@ def point_at_cart(text, symbol, offset, byte_size=0):
         return None
 
     pattern = re.compile(
-        r"^([^\S\n]*)((?:[A-Za-z_][A-Za-z0-9_]*[^\S\n]+|\*+[^\S\n]*)+)"
+        r"(?:^|(?<=;))([^\S\n]*)((?:[A-Za-z_][A-Za-z0-9_]*[^\S\n]+|\*+[^\S\n]*)+)"
         # The brace may sit on the next line, which several of these do.
         + re.escape(symbol) + r"[^\S\n]*((?:\[[^\]]*\])+)\s*=\s*\{",
         re.MULTILINE)
     match = pattern.search(text)
     if match is None:
-        return None
+        # An anonymous struct type -- `static const struct { ... } sFoo[] = {`.
+        # There is no type name to cast to, but none is needed: the declaration
+        # keeps the type text exactly as it stands and takes its value from a
+        # void pointer, which converts implicitly.
+        # The struct body has semicolons of its own, so this is found by
+        # locating `} sFoo[...] = {` and walking back to the brace that opens
+        # the body, then to the `static` in front of it.
+        # text.c writes the storage class after the struct body:
+        # `struct { ... } static const sKeypadIcons[] = {`.
+        head = re.search(r"\}[^\S\n]*((?:(?:static|const|volatile)[^\S\n]+)*)"
+                         + re.escape(symbol)
+                         + r"[^\S\n]*((?:\[[^\]]*\])+)\s*=\s*\{", text)
+        if head is None:
+            return None
+        depth, i = 0, head.start()
+        while i >= 0:
+            if text[i] == "}":
+                depth += 1
+            elif text[i] == "{":
+                depth -= 1
+                if depth == 0:
+                    break
+            i -= 1
+        if i < 0:
+            return None
+        # The declaration begins after the previous statement, not at the
+        # struct keyword: `static const struct { ... }` must be replaced whole,
+        # or its qualifiers are left stranded in front of the replacement.
+        kw = max(text.rfind("struct", 0, i), text.rfind("union", 0, i))
+        if kw == -1:
+            return None
+        stop = max(text.rfind(";", 0, kw), text.rfind("}", 0, kw),
+                   text.rfind("\n", 0, kw))
+        start = stop + 1
+        while start < kw and text[start] in " \t\n":
+            start += 1
+        # Whatever qualifiers followed the body belong in front of the type.
+        trailing = head.group(1).strip()
+        kind = text[start:head.start() + 1]
+        if trailing:
+            kind = trailing + " " + kind
+        match = _Span(start, head.end(), kind, head.group(2))
+        return _rewrite(text, match, symbol, offset, anonymous=True)
+    return _rewrite(text, match, symbol, offset, anonymous=False)
+
+
+def _rewrite(text, match, symbol, offset, anonymous):
 
     indent, kind, dims = match.group(1), match.group(2).strip(), match.group(3)
-    words = kind.split()
-    if words[0] != "static":
-        return None                      # not ours to rewrite
-    base = " ".join(words[1:])
+    if anonymous:
+        # The type text is kept verbatim -- it is the struct body -- and the
+        # pointer takes its value from a void pointer rather than a cast to a
+        # name that does not exist.
+        base = kind[len("static"):].strip() if kind.startswith("static") else kind.strip()
+    else:
+        words = kind.split()
+        if words[0] != "static":
+            return None                  # not ours to rewrite
+        base = " ".join(words[1:])
 
     at = text.index("{", match.end() - 1)
     depth, i, n = 0, at, len(text)
@@ -201,9 +274,10 @@ def point_at_cart(text, symbol, offset, byte_size=0):
                               f"({base} (*){inner})(agb_cart + {offset:#x});"
                             + text[end + 1:])
 
+                cast = "(const void *)" if anonymous else f"({base} *)"
                 return (text[:match.start()]
                         + f"{indent}static {base} *const {symbol} = "
-                          f"({base} *)(agb_cart + {offset:#x});"
+                          f"{cast}(agb_cart + {offset:#x});"
                         + text[end + 1:])
         i += 1
     return None
