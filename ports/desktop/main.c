@@ -216,6 +216,12 @@ static uint16_t trace_last_written = HOST_KEYS_RELEASED;
 static unsigned shot_first, shot_last, shot_step = 1;
 static const char *shot_dir;
 
+// FRLG_SHOT_FIELD=1 skips every frame that is not the overworld. Sampling a
+// recording at a fixed step lands on menus, fades and battles more often than on
+// the field, and a comparison of two builds that agree on a menu says nothing
+// about the field -- which is where the viewport is wide and the camera runs.
+// Four separate investigations were read off frames that turned out to be the
+// quest log before this existed.
 static void shot_range(uint32_t frame)
 {
     char path[512];
@@ -223,6 +229,8 @@ static void shot_range(uint32_t frame)
     if (!shot_dir || frame < shot_first || frame > shot_last)
         return;
     if (shot_step > 1 && (frame - shot_first) % shot_step != 0)
+        return;
+    if (getenv("FRLG_SHOT_FIELD") != NULL && !agb_port_field_active())
         return;
     copy_frame();
     snprintf(path, sizeof(path), "%s/f%u.ppm", shot_dir, frame);
