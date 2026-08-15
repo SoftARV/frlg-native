@@ -12,7 +12,7 @@
      u8 yPixelOffset;
      u8 xTileOffset;
      u8 yTileOffset;
-@@ -30,6 +33,16 @@
+@@ -30,6 +33,24 @@
  static void DrawMetatile(s32 a, const u16 *b, u16 c);
  static void CameraPanningCB_PanAhead(void);
  
@@ -21,6 +21,14 @@
 +// 0x400 entries further on, and a row is still 32 wide inside each. Writing it
 +// as though it were linear scatters every tile between the two, which draws a
 +// forest of duplicated columns with the player nowhere in it.
++// The buffer holds twice what the hardware's screen shows, and a centred
++// viewport reaches equally far both ways -- so it has to start left of the old
++// screen edge, not at it. Half the extra, in metatiles: the camera fills 32
++// where the screen shows 15, and the eight either side are what a wider window
++// sees. Without this the right half is drawn and the left half is whatever was
++// there before, until walking west happens to redraw it.
++#define VIEW_MARGIN 8
++
 +static u32 TilemapOffset(u32 x, u32 y)
 +{
 +    return (x >= 32 ? 0x400 : 0) + y * 32 + (x & 31);
@@ -29,7 +37,7 @@
  // IWRAM bss vars
  static struct FieldCameraOffset sFieldCameraOffset;
  static s16 sHorizontalCameraPan;
-@@ -54,7 +67,7 @@
+@@ -54,7 +75,7 @@
  static void tilemap_move_something(struct FieldCameraOffset *cameraOffset, u32 b, u32 c)
  {
      cameraOffset->xTileOffset += b;
@@ -38,7 +46,7 @@
      cameraOffset->yTileOffset += c;
      cameraOffset->yTileOffset %= 32;
  }
-@@ -62,6 +75,7 @@
+@@ -62,6 +83,7 @@
  static void coords8_add(struct FieldCameraOffset *cameraOffset, u32 b, u32 c)
  {
      cameraOffset->xPixelOffset += b;
@@ -46,7 +54,32 @@
      cameraOffset->yPixelOffset += c;
  }
  
-@@ -108,13 +122,13 @@
+@@ -73,7 +95,7 @@
+ void FieldUpdateBgTilemapScroll(void)
+ {
+     u32 r4, r5;
+-    r5 = sFieldCameraOffset.xPixelOffset + sHorizontalCameraPan;
++    r5 = sFieldCameraOffset.xPixelOffset + sHorizontalCameraPan + VIEW_MARGIN * 16;
+     r4 = sVerticalCameraPan + sFieldCameraOffset.yPixelOffset + 8;
+ 
+     SetGpuReg(REG_OFFSET_BG1HOFS, r5);
+@@ -86,13 +108,13 @@
+ 
+ void FieldCameraGetPixelOffsetAtGround(s16 *hofs_p, s16 *vofs_p)
+ {
+-    *hofs_p = sFieldCameraOffset.xPixelOffset + sHorizontalCameraPan;
++    *hofs_p = sFieldCameraOffset.xPixelOffset + sHorizontalCameraPan + VIEW_MARGIN * 16;
+     *vofs_p = sFieldCameraOffset.yPixelOffset + sVerticalCameraPan + 8;
+ }
+ 
+ void DrawWholeMapView(void)
+ {
+-    DrawWholeMapViewInternal(gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y, gMapHeader.mapLayout);
++    DrawWholeMapViewInternal(gSaveBlock1Ptr->pos.x - VIEW_MARGIN, gSaveBlock1Ptr->pos.y, gMapHeader.mapLayout);
+    // sFieldCameraOffset.copyBGToVRAM = TRUE;
+ }
+ 
+@@ -108,13 +130,13 @@
          temp = sFieldCameraOffset.yTileOffset + i;
          if (temp >= 32)
              temp -= 32;
@@ -65,7 +98,7 @@
          }
      }
  }
-@@ -143,13 +157,13 @@
+@@ -143,13 +165,13 @@
      temp = cameraOffset->yTileOffset + 28;
      if (temp >= 32)
          temp -= 32;
@@ -80,11 +113,11 @@
 -        DrawMetatileAt(mapLayout, r7 + temp, gSaveBlock1Ptr->pos.x + i / 2, gSaveBlock1Ptr->pos.y + 14);
 +        if (temp >= 64)
 +            temp -= 64;
-+        DrawMetatileAt(mapLayout, TilemapOffset(temp, r7), gSaveBlock1Ptr->pos.x + i / 2, gSaveBlock1Ptr->pos.y + 14);
++        DrawMetatileAt(mapLayout, TilemapOffset(temp, r7), gSaveBlock1Ptr->pos.x + i / 2 - VIEW_MARGIN, gSaveBlock1Ptr->pos.y + 14);
      }
  }
  
-@@ -157,14 +171,14 @@
+@@ -157,14 +179,14 @@
  {
      u8 i;
      u8 temp;
@@ -100,20 +133,20 @@
 -        DrawMetatileAt(mapLayout, r7 + temp, gSaveBlock1Ptr->pos.x + i / 2, gSaveBlock1Ptr->pos.y);
 +        if (temp >= 64)
 +            temp -= 64;
-+        DrawMetatileAt(mapLayout, TilemapOffset(temp, r7), gSaveBlock1Ptr->pos.x + i / 2, gSaveBlock1Ptr->pos.y);
++        DrawMetatileAt(mapLayout, TilemapOffset(temp, r7), gSaveBlock1Ptr->pos.x + i / 2 - VIEW_MARGIN, gSaveBlock1Ptr->pos.y);
      }
  }
  
-@@ -179,7 +193,7 @@
+@@ -179,7 +201,7 @@
          temp = cameraOffset->yTileOffset + i;
          if (temp >= 32)
              temp -= 32;
 -        DrawMetatileAt(mapLayout, temp * 32 + r6, gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y + i / 2);
-+        DrawMetatileAt(mapLayout, TilemapOffset(r6, temp), gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y + i / 2);
++        DrawMetatileAt(mapLayout, TilemapOffset(r6, temp), gSaveBlock1Ptr->pos.x - VIEW_MARGIN, gSaveBlock1Ptr->pos.y + i / 2);
      }
  }
  
-@@ -187,16 +201,16 @@
+@@ -187,16 +209,16 @@
  {
      u8 i;
      u8 temp;
@@ -130,13 +163,16 @@
          if (temp >= 32)
              temp -= 32;
 -        DrawMetatileAt(mapLayout, temp * 32 + r5, gSaveBlock1Ptr->pos.x + 14, gSaveBlock1Ptr->pos.y + i / 2);
-+        DrawMetatileAt(mapLayout, TilemapOffset(r5, temp), gSaveBlock1Ptr->pos.x + 30, gSaveBlock1Ptr->pos.y + i / 2);
++        DrawMetatileAt(mapLayout, TilemapOffset(r5, temp), gSaveBlock1Ptr->pos.x + 30 - VIEW_MARGIN, gSaveBlock1Ptr->pos.y + i / 2);
      }
  }
  
-@@ -310,11 +324,11 @@
+@@ -308,13 +330,13 @@
+ 
+ static s32 MapPosToBgTilemapOffset(struct FieldCameraOffset *cameraOffset, s32 x, s32 y)
  {
-     x -= gSaveBlock1Ptr->pos.x;
+-    x -= gSaveBlock1Ptr->pos.x;
++    x -= gSaveBlock1Ptr->pos.x - VIEW_MARGIN;
      x *= 2;
 -    if (x >= 32 || x < 0)
 +    if (x >= 64 || x < 0)
@@ -149,7 +185,7 @@
  
      y = (y - gSaveBlock1Ptr->pos.y) * 2;
      if (y >= 32 || y < 0)
-@@ -323,7 +337,7 @@
+@@ -323,7 +345,7 @@
      if (y >= 32)
          y -= 32;
  
