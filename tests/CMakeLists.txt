@@ -53,6 +53,16 @@ target_include_directories(test_options PRIVATE
 target_compile_definitions(test_options PRIVATE
     FRLG_TEST_OPTIONS_SAVE="${CMAKE_CURRENT_BINARY_DIR}/test_options.sav")
 
+# The first display stage. Needs the seam it registers into, so both are
+# compiled in and the test supplies present and log.
+frlg_add_test(test_filter_screen)
+target_sources(test_filter_screen PRIVATE
+    "${CMAKE_SOURCE_DIR}/platform/host/src/render.c"
+    "${CMAKE_SOURCE_DIR}/platform/host/src/filter_screen.c")
+target_include_directories(test_filter_screen PRIVATE
+    "${CMAKE_SOURCE_DIR}/platform/host/include")
+target_link_libraries(test_filter_screen PRIVATE m)
+
 # The mixer works on the game's own audio structures, so its test needs the
 # vendor headers -- by quote path only, as everywhere else.
 # The PSG test names the hardware registers, which live in the vendor headers.

@@ -31,6 +31,8 @@
 #include "agb/memmap.h"
 #include "agb/ppu.h"
 #include "host.h"
+#include "host_filters.h"
+#include "host_options.h"
 #include "host_render.h"
 #include "host_session.h"
 
@@ -321,6 +323,21 @@ static void load_save(void)
     // taken now or it is not the right copy. This is the step a tester is asked
     // to remember by hand today, and the one they forget.
     host_session_keep(path, "start.sav");
+
+    // Port options belong to the save, not the install: a display mode chosen
+    // while playing one file is not chosen for another. They live beside the
+    // save rather than in it, because SaveBlock2 is the cartridge's.
+    host_options_open(path);
+    {
+        const char *want = getenv("FRLG_SCREEN_FILTER");
+        int id = host_filter_screen_register();
+
+        // The environment still wins, as everywhere else: a recorded run must
+        // not depend on what somebody had switched on.
+        host_render_set_enabled(id, want != NULL
+                                    ? atoi(want) != 0
+                                    : host_option_get("screen-filter", 0) != 0);
+    }
 
     if (agb_flash_open(path))
         printf("frlg-native: save file %s\n", path);
