@@ -41,8 +41,10 @@
 // Where a report goes. The template asks for exactly what the bundle holds.
 #define FRLG_ISSUE_URL "https://github.com/SoftARV/frlg-native/issues/new?template=crash-or-glitch.yml"
 
-#define SCREEN_W 240
-#define SCREEN_H 160
+// The viewport, not the hardware: what the renderer is currently composing.
+// The buffer is sized for the largest it can be asked for.
+#define SCREEN_W agb_ppu_width()
+#define SCREEN_H agb_ppu_height()
 #define REG_OFF_KEYINPUT 0x130
 
 extern void AgbMain(void);
@@ -50,7 +52,7 @@ extern void AgbMain(void);
 static volatile sig_atomic_t game_done;
 static uint32_t frames_ran;
 static uint32_t frame_limit;
-static uint32_t framebuffer[SCREEN_W * SCREEN_H];
+static uint32_t framebuffer[AGB_PPU_MAX_W * AGB_PPU_MAX_H];
 
 // SIGUSR1 asks a running game where it is, which is how a hang is inspected
 // without stopping it. Faults are caught in crash.c, which has to do rather
@@ -937,7 +939,7 @@ int main(int argc, char **argv)
     sigaddset(&block, SIGALRM);
     pthread_sigmask(SIG_BLOCK, &block, NULL);
 
-    if (!host_video_open("frlg-native", SCREEN_W, SCREEN_H, 3))
+    if (!host_video_open("frlg-native", AGB_PPU_MIN_W, AGB_PPU_MIN_H, 3))
         return 1;
 
     // Before anything else can fail: a session that opens after the first
@@ -1004,6 +1006,18 @@ int main(int argc, char **argv)
         // the two do not write the register against each other.
         if (trace_out == NULL && trace_count == 0)
             *(volatile uint16_t *)(agb_mem.io + REG_OFF_KEYINPUT) = host_input_keys();
+
+        // How much world fits, at the zoom the player chose. The window is the
+        // question and the viewport is the answer; the renderer clamps it to
+        // what the game actually has drawn (ADR-less for now: agb/ppu.h says
+        // why 256 and not more).
+        {
+            int win_w = 0, win_h = 0, z = host_video_zoom();
+
+            host_video_window_size(&win_w, &win_h);
+            if (z > 0 && win_w > 0 && win_h > 0)
+                agb_ppu_set_viewport(win_w / z, win_h / z);
+        }
 
         copy_frame();
         // Through the pipeline rather than straight to the backend: with no

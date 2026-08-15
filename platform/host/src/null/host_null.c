@@ -19,6 +19,27 @@ void host_video_close(void)
 {
 }
 
+// Headless: there is no window, so the viewport never changes and the zoom is
+// nobody's business. Reported as the native size so a caller doing the same
+// arithmetic as the windowed one arrives at the same answer.
+int host_video_zoom(void)
+{
+    return 1;
+}
+
+void host_video_set_zoom(int zoom)
+{
+    (void)zoom;
+}
+
+void host_video_window_size(int *width, int *height)
+{
+    if (width)
+        *width = 240;
+    if (height)
+        *height = 160;
+}
+
 void host_video_present(const uint32_t *rgba, int width, int height)
 {
     (void)rgba;

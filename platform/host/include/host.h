@@ -25,6 +25,15 @@ bool host_video_open(const char *title, int width, int height, int scale);
 void host_video_close(void);
 void host_video_present(const uint32_t *rgba, int width, int height);
 
+// The size of one game pixel on screen. Independent of the window: a bigger
+// window shows more of the world at the same zoom, rather than the same amount
+// of world made larger.
+int host_video_zoom(void);
+void host_video_set_zoom(int zoom);
+
+// In real pixels, so the caller can work out how much world now fits.
+void host_video_window_size(int *width, int *height);
+
 // False once the user has asked to quit.
 bool host_pump_events(void);
 

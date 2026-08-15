@@ -19,6 +19,15 @@ static SDL_Renderer *renderer;
 static SDL_Texture *frame;
 static uint16_t keys = HOST_KEYS_RELEASED;
 static bool quit_requested;
+static bool fullscreen;
+
+// The size of one game pixel on screen, and what the texture currently holds.
+// Zoom is deliberately not derived from the window: that is the whole point of
+// the arrangement -- the window says how much world to draw, the zoom says how
+// big it is drawn.
+static int zoom = 3;
+static int texture_w;
+static int texture_h;
 
 static const struct
 {
@@ -131,8 +140,14 @@ bool host_video_open(const char *title, int width, int height, int scale)
     // Integer-friendly scaling with no filtering: the GBA's output is a pixel
     // grid, and smoothing it is a decision for a display mode, not a default.
     SDL_SetTextureScaleMode(frame, SDL_SCALEMODE_NEAREST);
-    SDL_SetRenderLogicalPresentation(renderer, width, height,
-                                     SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+
+    // No logical presentation. That is what made the picture stretch to fill
+    // the window: one fixed frame, magnified. Here the zoom is the size of a
+    // pixel and stays where it is put, and a bigger window asks the renderer
+    // for more of the world instead. The port reads the window and decides.
+    zoom = scale;
+    texture_w = width;
+    texture_h = height;
     return true;
 }
 
@@ -149,13 +164,68 @@ void host_video_close(void)
 
 void host_video_present(const uint32_t *rgba, int width, int height)
 {
-    if (!frame)
+    SDL_FRect dst;
+    int win_w = 0, win_h = 0;
+
+    if (!renderer)
         return;
 
+    // The viewport changed under us, so the texture has to follow it. Recreated
+    // rather than resized because SDL has no resize, and this happens once per
+    // window drag rather than once per frame.
+    if (width != texture_w || height != texture_h || frame == NULL)
+    {
+        if (frame)
+            SDL_DestroyTexture(frame);
+        frame = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_XRGB8888,
+                                  SDL_TEXTUREACCESS_STREAMING, width, height);
+        if (!frame)
+        {
+            host_log(SDL_GetError());
+            return;
+        }
+        SDL_SetTextureScaleMode(frame, SDL_SCALEMODE_NEAREST);
+        texture_w = width;
+        texture_h = height;
+    }
+
     SDL_UpdateTexture(frame, NULL, rgba, width * (int)sizeof(uint32_t));
+
+    SDL_GetWindowSizeInPixels(window, &win_w, &win_h);
+    // Centred, and on whole pixels: the picture is a pixel grid and half a
+    // pixel of offset is visible on every edge in it.
+    dst.w = (float)(width * zoom);
+    dst.h = (float)(height * zoom);
+    dst.x = (float)((win_w - width * zoom) / 2);
+    dst.y = (float)((win_h - height * zoom) / 2);
+
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
-    SDL_RenderTexture(renderer, frame, NULL, NULL);
+    SDL_RenderTexture(renderer, frame, NULL, &dst);
     SDL_RenderPresent(renderer);
+}
+
+int host_video_zoom(void)
+{
+    return zoom;
+}
+
+void host_video_set_zoom(int value)
+{
+    if (value >= 1 && value <= 8)
+        zoom = value;
+}
+
+void host_video_window_size(int *width, int *height)
+{
+    int w = 0, h = 0;
+
+    if (window)
+        SDL_GetWindowSizeInPixels(window, &w, &h);
+    if (width)
+        *width = w;
+    if (height)
+        *height = h;
 }
 
 bool host_pump_events(void)
@@ -180,6 +250,13 @@ bool host_pump_events(void)
             if (down && ev.key.scancode == SDL_SCANCODE_Q
                 && (ev.key.mod & SDL_KMOD_CTRL) != 0)
                 quit_requested = true;
+
+            if (down && ev.key.scancode == SDL_SCANCODE_F
+                && (ev.key.mod & SDL_KMOD_CTRL) != 0)
+            {
+                fullscreen = !fullscreen;
+                SDL_SetWindowFullscreen(window, fullscreen);
+            }
 
             for (int i = 0; i < KEY_MAP_COUNT; i++)
             {
