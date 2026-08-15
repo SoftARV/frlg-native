@@ -1,32 +1,62 @@
 --- a/src/overworld.c
 +++ b/src/overworld.c
-@@ -1308,7 +1308,7 @@
+@@ -1308,24 +1308,24 @@
      }, {
          .bg = 1,
          .charBaseIndex = 0,
 -        .mapBaseIndex = 29,
+-        .screenSize = 0,
 +        .mapBaseIndex = 26,   // 0xD000, 4 KB clear above it
-         .screenSize = 0,
++        .screenSize = 1,   // 64x32 tiles: twice as wide
          .paletteMode = 0,
          .priority = 1,
-@@ -1316,7 +1316,7 @@
+         .baseTile = 0x000
      }, {
          .bg = 2,
          .charBaseIndex = 0,
 -        .mapBaseIndex = 28,
+-        .screenSize = 0,
 +        .mapBaseIndex = 12,   // 0x6000, 4 KB clear above it
-         .screenSize = 0,
++        .screenSize = 1,   // 64x32 tiles: twice as wide
          .paletteMode = 0,
          .priority = 2,
-@@ -1324,7 +1324,7 @@
+         .baseTile = 0x000
      }, {
          .bg = 3,
          .charBaseIndex = 0,
 -        .mapBaseIndex = 30,
+-        .screenSize = 0,
 +        .mapBaseIndex = 14,   // 0x7000, 4 KB clear above it
-         .screenSize = 0,
++        .screenSize = 1,   // 64x32 tiles: twice as wide
          .paletteMode = 0,
          .priority = 3,
+         .baseTile = 0x000
+@@ -1341,9 +1341,9 @@
+     SetBgAttribute(1, BG_ATTR_MOSAIC, TRUE);
+     SetBgAttribute(2, BG_ATTR_MOSAIC, TRUE);
+     SetBgAttribute(3, BG_ATTR_MOSAIC, TRUE);
+-    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE);
+-    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE);
+-    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE);
++    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE * 2);
++    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE * 2);
++    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE * 2);
+     SetBgTilemapBuffer(1, gBGTilemapBuffers2);
+     SetBgTilemapBuffer(2, gBGTilemapBuffers1);
+     SetBgTilemapBuffer(3, gBGTilemapBuffers3);
+@@ -1359,9 +1359,9 @@
+     SetBgAttribute(1, BG_ATTR_MOSAIC, TRUE);
+     SetBgAttribute(2, BG_ATTR_MOSAIC, TRUE);
+     SetBgAttribute(3, BG_ATTR_MOSAIC, TRUE);
+-    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE);
+-    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE);
+-    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE);
++    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE * 2);
++    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE * 2);
++    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE * 2);
+     SetBgTilemapBuffer(1, gBGTilemapBuffers2);
+     SetBgTilemapBuffer(2, gBGTilemapBuffers1);
+     SetBgTilemapBuffer(3, gBGTilemapBuffers3);
 @@ -1472,14 +1472,22 @@
  }
  
