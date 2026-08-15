@@ -16,8 +16,21 @@
 #include "agb/memmap.h"
 #include "agb/ppu.h"
 
-#define SCREEN_W 240
-#define SCREEN_H 160
+// What the hardware itself is: the size of a bitmap-mode frame in VRAM, and the
+// floor for any viewport. The GBA is 240x160 and that does not change.
+#define NATIVE_W 240
+#define NATIVE_H 160
+
+// What this renderer will compose. The viewport is a window onto the same
+// backgrounds the game already draws; nothing here decides how much of the
+// world exists, only how much of it is asked for. Buffers are sized for the
+// largest viewport rather than reallocated, so a resize costs nothing and
+// cannot fail halfway.
+#define SCREEN_MAX_W 512
+#define SCREEN_MAX_H 512
+
+static int screen_w = NATIVE_W;
+static int screen_h = NATIVE_H;
 
 #define REG_DISPCNT 0x000
 #define REG_DISPSTAT 0x004
@@ -156,31 +169,31 @@ static const uint8_t obj_dimensions[4][4][2] = {
     {{0, 0}, {0, 0}, {0, 0}, {0, 0}}, // prohibited; zero height draws nothing
 };
 
-static uint32_t framebuffer[SCREEN_W * SCREEN_H];
+static uint32_t framebuffer[SCREEN_MAX_W * SCREEN_MAX_H];
 static uint32_t frame_serial;
 
 // One scanline of the object layer, resolved before any background is drawn.
 // Index 0 means no object claimed the pixel.
-static uint8_t obj_colour[SCREEN_W];
-static uint8_t obj_prio[SCREEN_W];
+static uint8_t obj_colour[SCREEN_MAX_W];
+static uint8_t obj_prio[SCREEN_MAX_W];
 
 // Objects in the window graphics mode contribute shape rather than colour, so
 // they land here instead, and become a region in the mask below.
-static uint8_t obj_window[SCREEN_W];
+static uint8_t obj_window[SCREEN_MAX_W];
 
 // Set where the object that won the pixel asked to be blended with whatever is
 // under it, whatever the blend registers otherwise select.
-static uint8_t obj_semi[SCREEN_W];
+static uint8_t obj_semi[SCREEN_MAX_W];
 
 // Which layers may draw at each pixel of the current scanline.
-static uint8_t window_mask[SCREEN_W];
+static uint8_t window_mask[SCREEN_MAX_W];
 
 // Blending needs the layer under the top one, so composition collects the two
 // frontmost contributors per pixel rather than stopping at the first. Anything
 // below them cannot affect the result.
-static uint16_t layer_colour[2][SCREEN_W];
-static uint8_t layer_id[2][SCREEN_W];
-static uint8_t layer_count[SCREEN_W];
+static uint16_t layer_colour[2][SCREEN_MAX_W];
+static uint8_t layer_id[2][SCREEN_MAX_W];
+static uint8_t layer_count[SCREEN_MAX_W];
 
 // Layers arrive front to back, so the first two to claim a pixel are the two
 // that matter and the rest are discarded.
@@ -193,14 +206,29 @@ static void deposit(int x, uint16_t colour, int id)
     layer_count[x] = (uint8_t)(slot + 1);
 }
 
+bool agb_ppu_set_viewport(int width, int height)
+{
+    int w = width < AGB_PPU_MIN_W ? AGB_PPU_MIN_W
+          : width > AGB_PPU_MAX_W ? AGB_PPU_MAX_W : width;
+    int h = height < AGB_PPU_MIN_H ? AGB_PPU_MIN_H
+          : height > AGB_PPU_MAX_H ? AGB_PPU_MAX_H : height;
+
+    if (w == screen_w && h == screen_h)
+        return false;
+
+    screen_w = w;
+    screen_h = h;
+    return true;
+}
+
 int agb_ppu_width(void)
 {
-    return SCREEN_W;
+    return screen_w;
 }
 
 int agb_ppu_height(void)
 {
-    return SCREEN_H;
+    return screen_h;
 }
 
 const uint32_t *agb_ppu_framebuffer(void)
@@ -323,7 +351,7 @@ static void render_text_bg_line(int bg, int line)
     int height_mask = (size == 2 || size == 3) ? 0x1FF : 0xFF;
     int src_y = (mosaic_snap(line, mos_v) + vofs) & height_mask;
 
-    for (int x = 0; x < SCREEN_W; x++)
+    for (int x = 0; x < screen_w; x++)
     {
         int src_x = (mosaic_snap(x, mos_h) + hofs) & width_mask;
         int map_x = src_x >> 3;
@@ -408,14 +436,14 @@ static void compute_window_mask(int line, uint16_t dispcnt)
     outside = winout & WINDOW_CONTROL_MASK;
     inside_obj = (winout >> 8) & WINDOW_CONTROL_MASK;
 
-    row0 = win0 && window_contains(io16(REG_WIN0V), line, SCREEN_H);
-    row1 = win1 && window_contains(io16(REG_WIN0V + 2), line, SCREEN_H);
+    row0 = win0 && window_contains(io16(REG_WIN0V), line, screen_h);
+    row1 = win1 && window_contains(io16(REG_WIN0V + 2), line, screen_h);
 
-    for (int x = 0; x < SCREEN_W; x++)
+    for (int x = 0; x < screen_w; x++)
     {
-        if (row0 && window_contains(io16(REG_WIN0H), x, SCREEN_W))
+        if (row0 && window_contains(io16(REG_WIN0H), x, screen_w))
             window_mask[x] = inside0;
-        else if (row1 && window_contains(io16(REG_WIN0H + 2), x, SCREEN_W))
+        else if (row1 && window_contains(io16(REG_WIN0H + 2), x, screen_w))
             window_mask[x] = inside1;
         else if (win_obj && obj_window[x])
             window_mask[x] = inside_obj;
@@ -451,8 +479,8 @@ static void render_bitmap_bg_line(int mode, int line)
     int16_t pc = (int16_t)io16(REG_AFFINE_BLOCK(BITMAP_BG) + 4);
     int mos_h = (control & BGCNT_MOSAIC) ? MOSAIC_BG_H(mosaic) : 1;
     int mos_v = (control & BGCNT_MOSAIC) ? MOSAIC_BG_V(mosaic) : 1;
-    int width = mode == 5 ? BITMAP_MODE5_W : SCREEN_W;
-    int height = mode == 5 ? BITMAP_MODE5_H : SCREEN_H;
+    int width = mode == 5 ? BITMAP_MODE5_W : NATIVE_W;
+    int height = mode == 5 ? BITMAP_MODE5_H : NATIVE_H;
     int paletted = mode == 4;
     // Mode 3's frame fills the region on its own, so it has no second one to
     // select between.
@@ -461,7 +489,7 @@ static void render_bitmap_bg_line(int mode, int line)
 
     affine_line_start(BITMAP_BG, line, mos_v, &base_x, &base_y);
 
-    for (int i = 0; i < SCREEN_W; i++)
+    for (int i = 0; i < screen_w; i++)
     {
         int across = mosaic_snap(i, mos_h);
         int tx = (base_x + (int32_t)pa * across) >> 8;
@@ -516,7 +544,7 @@ static void render_affine_bg_line(int bg, int line)
 
     affine_line_start(bg, line, mos_v, &base_x, &base_y);
 
-    for (int i = 0; i < SCREEN_W; i++)
+    for (int i = 0; i < screen_w; i++)
     {
         int across = mosaic_snap(i, mos_h);
         int tx = (base_x + (int32_t)pa * across) >> 8;
@@ -656,7 +684,7 @@ static void render_obj_line(int line)
             int tx, ty;
             int index;
 
-            if (sx < 0 || sx >= SCREEN_W)
+            if (sx < 0 || sx >= screen_w)
                 continue;
             // A window object is not competing for the pixel, so the occlusion
             // test does not apply to it.
@@ -702,7 +730,7 @@ static void render_obj_line(int line)
 
 static void blit_obj_line(int priority)
 {
-    for (int x = 0; x < SCREEN_W; x++)
+    for (int x = 0; x < screen_w; x++)
     {
         if (!obj_colour[x] || obj_prio[x] != priority || layer_count[x] >= 2)
             continue;
@@ -767,7 +795,7 @@ static uint16_t blend_brightness(uint16_t colour, int evy, int brighten)
 // is what hardware does with it.
 static void resolve_line(int line, uint16_t backdrop)
 {
-    uint32_t *out = framebuffer + line * SCREEN_W;
+    uint32_t *out = framebuffer + line * screen_w;
     uint16_t bldcnt = io16(REG_BLDCNT);
     uint16_t bldalpha = io16(REG_BLDALPHA);
     int effect = BLD_EFFECT(bldcnt);
@@ -777,7 +805,7 @@ static void resolve_line(int line, uint16_t backdrop)
     int evb = bld_coefficient(bldalpha, 8);
     int evy = bld_coefficient(io16(REG_BLDY), 0);
 
-    for (int x = 0; x < SCREEN_W; x++)
+    for (int x = 0; x < screen_w; x++)
     {
         int count = layer_count[x];
         uint16_t top = count > 0 ? layer_colour[0][x] : backdrop;
@@ -851,7 +879,7 @@ void agb_ppu_render_frame(void)
 {
     frame_serial++;
 
-    for (int line = 0; line < SCREEN_H; line++)
+    for (int line = 0; line < screen_h; line++)
     {
         // Read per scanline rather than per frame: a per-scanline effect may
         // have changed any of this from the previous line's H-blank.
@@ -864,9 +892,9 @@ void agb_ppu_render_frame(void)
 
         if (dispcnt & DISPCNT_FORCED_BLANK)
         {
-            uint32_t *blank = framebuffer + line * SCREEN_W;
+            uint32_t *blank = framebuffer + line * screen_w;
 
-            for (int x = 0; x < SCREEN_W; x++)
+            for (int x = 0; x < screen_w; x++)
                 blank[x] = 0x00FFFFFF;
             scanline_end();
             continue;
