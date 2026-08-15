@@ -76,10 +76,35 @@ DEFINITION = re.compile(
 
 INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.MULTILINE)
 
+# Symbols the cartridge must NOT supply, whatever the ROM holds at their address.
+#
+# Extraction is only correct when the cartridge's bytes are the bytes the code
+# expects. These are the cases where they are not, and they belong here rather
+# than in the generated list: an exclusion made by editing the output is undone
+# by the next regeneration, silently, and both of these were found by playing.
+#
+# By type, because the whole family is affected:
+NEVER_EXTRACT_TYPES = {
+    # Four bytes under both compilers, so no size check flags it -- but agbcc
+    # packs baseTile:10 across the two u16 storage units, at bits 14 to 23,
+    # where GCC starts a new unit at bit 16. charBaseIndex and mapBaseIndex
+    # decode correctly and baseTile is off by four, which draws screens with no
+    # background at all.
+    "BgTemplate": "agbcc packs its bitfields elsewhere",
+}
+
+# By name, because the port changed the shape of the thing:
+NEVER_EXTRACT_NAMES = {
+    # The port adds a tenth entry for its own pause-menu item. The cartridge's
+    # copy has nine, and binding to it reads past the end the moment the new
+    # entry is highlighted.
+    "sStartMenuDescPointers": "the port adds an entry the cartridge has no room for",
+}
+
 
 def scan(srcdir, also=frozenset()):
-    """symbol -> file that defines it, file -> includes, symbol -> unbounded?"""
-    defines, includes, unbounded = {}, {}, {}
+    """symbol -> file, file -> includes, symbol -> unbounded?, symbol -> type"""
+    defines, includes, unbounded, kinds = {}, {}, {}, {}
     for path in sorted(Path(srcdir).rglob("*")):
         if path.suffix not in (".c", ".h"):
             continue
@@ -98,7 +123,8 @@ def scan(srcdir, also=frozenset()):
             # The symbol is tagged with that size below.
             defines.setdefault(name, rel)
             unbounded.setdefault(name, dims.replace(" ", "") == "[]")
-    return defines, includes, unbounded
+            kinds.setdefault(name, kind)
+    return defines, includes, unbounded, kinds
 
 
 def owning_units(includes):
@@ -333,8 +359,23 @@ def main():
         # zero-sized alias cannot shrink a real symbol's range.
         if name not in extent or size > extent[name][1]:
             extent[name] = (address, size)
-    defines, includes, unbounded = scan(args.srcdir, also)
+    defines, includes, unbounded, kinds = scan(args.srcdir, also)
     owner = owning_units(includes)
+
+    for name, why in NEVER_EXTRACT_NAMES.items():
+        if name in defines:
+            skip.add(name)
+            print(f"never extracted: {name} -- {why}", file=sys.stderr)
+    for name, kind in kinds.items():
+        for type_name, why in NEVER_EXTRACT_TYPES.items():
+            if re.search(r"\b" + type_name + r"\b", kind):
+                skip.add(name)
+    held = sum(1 for n in kinds
+               if any(re.search(r"\b" + k + r"\b", kinds[n])
+                      for k in NEVER_EXTRACT_TYPES))
+    if held:
+        print(f"never extracted: {held} symbols of types the cartridge lays out "
+              f"differently", file=sys.stderr)
 
     unbindable = unbindable_sites(args.elf, args.rom) if args.rom else set()
 
