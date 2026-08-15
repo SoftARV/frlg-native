@@ -114,6 +114,35 @@ bool host_video_open(const char *title, int width, int height, int scale)
         host_log(line);
     }
 
+    // And down again if that does not fit on the display. A window larger than
+    // the screen opens with its title bar off the top on some compositors,
+    // where it cannot be dragged back -- so the default is chosen for a desk
+    // monitor and reduced here rather than being chosen for the smallest laptop
+    // anyone might have.
+    {
+        SDL_Rect usable;
+
+        if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable))
+        {
+            int fitted = scale;
+
+            while (fitted > 1
+               && (width * fitted > usable.w || height * fitted > usable.h))
+                fitted--;
+
+            if (fitted != scale)
+            {
+                char line[96];
+
+                snprintf(line, sizeof(line),
+                         "window scale %d does not fit %dx%d, using %d",
+                         scale, usable.w, usable.h, fitted);
+                host_log(line);
+                scale = fitted;
+            }
+        }
+    }
+
     if (!SDL_CreateWindowAndRenderer(title, width * scale, height * scale,
                                      SDL_WINDOW_RESIZABLE, &window, &renderer))
     {
