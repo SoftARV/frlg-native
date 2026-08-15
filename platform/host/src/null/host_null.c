@@ -22,6 +22,16 @@ void host_video_close(void)
 // Headless: there is no window, so the viewport never changes and the zoom is
 // nobody's business. Reported as the native size so a caller doing the same
 // arithmetic as the windowed one arrives at the same answer.
+bool host_video_fullscreen(void)
+{
+    return false;
+}
+
+void host_video_set_fullscreen(bool on)
+{
+    (void)on;
+}
+
 int host_video_zoom(void)
 {
     return 1;

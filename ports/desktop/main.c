@@ -342,6 +342,18 @@ static void load_save(void)
         host_render_set_enabled(id, want != NULL
                                     ? atoi(want) != 0
                                     : host_option_get("screen-filter", 0) != 0);
+
+        // The rest of what the port's own options screen writes. Applied here
+        // because the save is what they belong to, and this is where it is
+        // known -- before that there is no profile to have chosen anything.
+        {
+            int zoom = host_option_get("zoom", 0);
+
+            if (zoom > 0)
+                host_video_set_zoom(zoom);
+            if (host_option_get("fullscreen", 0))
+                host_video_set_fullscreen(true);
+        }
     }
 
     if (agb_flash_open(path))

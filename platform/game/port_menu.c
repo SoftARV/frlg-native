@@ -22,6 +22,7 @@
 #include "constants/songs.h"
 
 #include "host_options.h"
+#include "host.h"
 #include "host_render.h"
 
 // Ours rather than the option menu's: that one's colours are static to its own
@@ -76,28 +77,60 @@ static const struct WindowTemplate sWindows[] = {
     DUMMY_WIN_TEMPLATE,
 };
 
+// What a row is. A display stage toggles, the zoom counts up and down, and
+// fullscreen is a switch -- so a row carries what kind it is rather than the
+// screen inferring it from position.
+enum RowKind
+{
+    ROW_STAGE,
+    ROW_ZOOM,
+    ROW_FULLSCREEN,
+};
+
+struct Row
+{
+    u8 kind;
+    u8 stage;  // ROW_STAGE only
+};
+
 struct PortMenu
 {
-    u8 rows[MAX_ROWS];  // stage ids, in the order they are shown
+    struct Row rows[MAX_ROWS];
     u8 count;
     u8 cursor;
     u8 state;
 };
+
+#define ZOOM_MIN 1
+#define ZOOM_MAX 6
 
 static EWRAM_DATA struct PortMenu *sMenu = NULL;
 static EWRAM_DATA u8 *sTilemap = NULL;
 
 static void Task_PortMenu(u8 taskId);
 
+static void AddRow(u8 kind, u8 stage)
+{
+    if (sMenu->count >= MAX_ROWS)
+        return;
+    sMenu->rows[sMenu->count].kind = kind;
+    sMenu->rows[sMenu->count].stage = stage;
+    sMenu->count++;
+}
+
 static void CollectRows(void)
 {
     int id;
 
     sMenu->count = 0;
-    for (id = 0; id < host_render_count() && sMenu->count < MAX_ROWS; id++)
+    AddRow(ROW_ZOOM, 0);
+    AddRow(ROW_FULLSCREEN, 0);
+    // Whatever registered itself, rather than a list written here: a display
+    // stage added later appears without this screen knowing about it.
+    for (id = 0; id < host_render_count(); id++)
     {
         if (host_render_name(id) != NULL)
-            sMenu->rows[sMenu->count++] = id;
+            AddRow(ROW_STAGE, (u8)id);
     }
 }
 
@@ -145,12 +178,38 @@ static void DrawRows(void)
     for (i = 0; i < sMenu->count; i++)
     {
         u8 y = 20 + i * ROW_HEIGHT;
-        int id = sMenu->rows[i];
+        const struct Row *row = &sMenu->rows[i];
 
-        PrintAscii(0, host_render_name(id), 16, y, 1);
-        AddTextPrinterParameterized3(0, FONT_NORMAL, 168, y, sTextColour,
-                                     TEXT_SKIP_DRAW,
-                                     host_render_is_enabled(id) ? sOn : sOff);
+        switch (row->kind)
+        {
+        case ROW_ZOOM:
+        {
+            u8 value[4];
+
+            PrintAscii(0, "zoom", 16, y, 1);
+            // One digit and a multiplication sign: the zoom is small by
+            // construction and a number is clearer than a bar.
+            value[0] = CHAR_0 + (u8)host_video_zoom();
+            value[1] = CHAR_MULT_SIGN;
+            value[2] = EOS;
+            AddTextPrinterParameterized3(0, FONT_NORMAL, 168, y, sTextColour,
+                                         TEXT_SKIP_DRAW, value);
+            break;
+        }
+        case ROW_FULLSCREEN:
+            PrintAscii(0, "fullscreen", 16, y, 1);
+            AddTextPrinterParameterized3(0, FONT_NORMAL, 168, y, sTextColour,
+                                         TEXT_SKIP_DRAW,
+                                         host_video_fullscreen() ? sOn : sOff);
+            break;
+        default:
+            PrintAscii(0, host_render_name(row->stage), 16, y, 1);
+            AddTextPrinterParameterized3(0, FONT_NORMAL, 168, y, sTextColour,
+                                         TEXT_SKIP_DRAW,
+                                         host_render_is_enabled(row->stage)
+                                             ? sOn : sOff);
+            break;
+        }
     }
 
     AddTextPrinterParameterized3(0, FONT_NORMAL, 8, 20 + MAX_ROWS * ROW_HEIGHT,
@@ -170,22 +229,41 @@ static void DrawRows(void)
     CopyWindowToVram(0, COPYWIN_GFX);
 }
 
-static void Toggle(void)
+// `step` is +1 or -1: A toggles, Left and Right nudge. For a switch the two are
+// the same thing, and for the zoom they are not.
+static void Adjust(int step)
 {
-    int id;
+    const struct Row *row;
 
     if (sMenu->count == 0)
         return;
 
-    id = sMenu->rows[sMenu->cursor];
-    if (host_render_is_retired(id))
-        return;
+    row = &sMenu->rows[sMenu->cursor];
+    switch (row->kind)
+    {
+    case ROW_ZOOM:
+    {
+        int zoom = host_video_zoom() + step;
 
-    host_render_set_enabled(id, !host_render_is_enabled(id));
-
-    // Written under a key of the stage's own name, so the file says what it
-    // means and a stage that goes away does not take another's setting with it.
-    host_option_set("screen-filter", host_render_is_enabled(id));
+        if (zoom < ZOOM_MIN)
+            zoom = ZOOM_MAX;
+        else if (zoom > ZOOM_MAX)
+            zoom = ZOOM_MIN;
+        host_video_set_zoom(zoom);
+        host_option_set("zoom", zoom);
+        break;
+    }
+    case ROW_FULLSCREEN:
+        host_video_set_fullscreen(!host_video_fullscreen());
+        host_option_set("fullscreen", host_video_fullscreen());
+        break;
+    default:
+        if (host_render_is_retired(row->stage))
+            return;
+        host_render_set_enabled(row->stage, !host_render_is_enabled(row->stage));
+        host_option_set("screen-filter", host_render_is_enabled(row->stage));
+        break;
+    }
     host_options_flush();
 }
 
@@ -218,9 +296,15 @@ static void Task_PortMenu(u8 taskId)
         PlaySE(SE_SELECT);
         DrawRows();
     }
-    else if (JOY_NEW(A_BUTTON) || JOY_NEW(DPAD_LEFT) || JOY_NEW(DPAD_RIGHT))
+    else if (JOY_NEW(DPAD_LEFT))
     {
-        Toggle();
+        Adjust(-1);
+        PlaySE(SE_SELECT);
+        DrawRows();
+    }
+    else if (JOY_NEW(A_BUTTON) || JOY_NEW(DPAD_RIGHT))
+    {
+        Adjust(+1);
         PlaySE(SE_SELECT);
         DrawRows();
     }

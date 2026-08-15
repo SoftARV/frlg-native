@@ -205,6 +205,18 @@ void host_video_present(const uint32_t *rgba, int width, int height)
     SDL_RenderPresent(renderer);
 }
 
+bool host_video_fullscreen(void)
+{
+    return fullscreen;
+}
+
+void host_video_set_fullscreen(bool on)
+{
+    fullscreen = on;
+    if (window)
+        SDL_SetWindowFullscreen(window, on);
+}
+
 int host_video_zoom(void)
 {
     return zoom;

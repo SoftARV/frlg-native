@@ -31,6 +31,9 @@ void host_video_present(const uint32_t *rgba, int width, int height);
 int host_video_zoom(void);
 void host_video_set_zoom(int zoom);
 
+bool host_video_fullscreen(void);
+void host_video_set_fullscreen(bool on);
+
 // In real pixels, so the caller can work out how much world now fits.
 void host_video_window_size(int *width, int *height);
 
