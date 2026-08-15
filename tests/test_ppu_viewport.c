@@ -145,8 +145,11 @@ static void test_taller_contains_native(void)
 
     // The axis the object fault was on: a sprite's row came from the viewport's
     // scanline rather than the hardware's, so this is the case that failed.
-    CHECK(contains_native(240, 256) == 0,
-          "240x256 does not contain the native frame unchanged");
+    // Taken from the ceiling rather than written out, so that a change to it is
+    // a change to what this covers rather than a test that quietly stops
+    // reaching the tallest viewport there is.
+    CHECK(contains_native(AGB_PPU_MIN_W, AGB_PPU_MAX_H) == 0,
+          "240x%d does not contain the native frame unchanged", AGB_PPU_MAX_H);
 }
 
 static void test_both_axes(void)
@@ -154,8 +157,9 @@ static void test_both_axes(void)
     TEST_CASE("wider and taller at once");
     render_native();
 
-    CHECK(contains_native(256, 256) == 0,
-          "256x256 does not contain the native frame unchanged");
+    CHECK(contains_native(AGB_PPU_MAX_W, AGB_PPU_MAX_H) == 0,
+          "%dx%d does not contain the native frame unchanged",
+          AGB_PPU_MAX_W, AGB_PPU_MAX_H);
 }
 
 static void test_odd_sizes(void)

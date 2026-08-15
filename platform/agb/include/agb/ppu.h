@@ -11,16 +11,23 @@ int agb_ppu_height(void);
 
 // The viewport is a window onto the backgrounds the game already draws, so the
 // ceiling is not this renderer's to choose: it is however much map the field
-// keeps drawn. That is 64x32 tiles now -- 512x256 pixels -- since the map
-// layers were widened and the camera taught to fill them. Asking for more shows
-// the opposite edge wrapped round, not more of the world.
+// keeps drawn. That is 64x32 tiles -- 512x256 pixels -- since the map layers
+// were widened and the camera taught to fill them.
+//
+// The window that scrolls over those 512x256 is smaller than they are, because
+// it is centred on a camera that keeps its own sub-metatile offset: the field
+// scrolls up to a metatile before the buffer shifts under it, and the view has
+// to stay inside the drawn area at both ends of that. What is left after paying
+// for it either side is 496x240. Asking for more shows the opposite edge
+// wrapped round, not more of the world -- silently, and only while walking,
+// which is what made it worth writing down here.
 //
 // The floor is the hardware's own size, because showing less than a Game Boy
 // Advance did would hide things the game put on screen.
 #define AGB_PPU_MIN_W 240
 #define AGB_PPU_MIN_H 160
-#define AGB_PPU_MAX_W 512
-#define AGB_PPU_MAX_H 256
+#define AGB_PPU_MAX_W 496
+#define AGB_PPU_MAX_H 240
 
 // Clamped to the range above. Returns true if the viewport is now different
 // from what it was, which is the caller's cue to resize anything it keeps in
