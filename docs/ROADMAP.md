@@ -15,7 +15,7 @@ Update the status column when a milestone lands.
 | 4 | Audio — the m4a mixer in C | **done** |
 | 5 | Saves — flash backed by a host file | **done** |
 | 6 | **Playable** — intro through the first battle, deterministic replay | **done** |
-| 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | |
+| 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | **done** |
 | 8 | Windows, Android, web; launcher, packaging and updates | |
 | 9 | Mods — Lua runtime, schema registries, generated reference docs | |
 | 10 | Peer-to-peer link play | |
@@ -587,18 +587,31 @@ not have to still exist months later.
 The first-boot flow belongs to the launcher, which owns import and launch and has the seams it needs:
 `--describe`, `--import`, `--forget`, `--options` and `--set-option`.
 
-**What is not done is the thing the phase is named for.** The binary still compiles in the game data
-it is supposed to read from the player's ROM. Symbol binding only ever reached symbols the linker
-reported *unresolved*, which is the data from `data/*.s`; everything the decompilation defines in C —
-species, moves, learnsets, and the graphics incbinned from C — resolves locally and is compiled in.
-46 of 194 high-entropy ROM chunks are present in the binary, in `.rodata`.
+**The thing the phase is named for is now done too.** Symbol binding used to reach only what the
+linker reported *unresolved* — the data from `data/*.s` — while everything the decompilation defines
+in C resolved locally and was compiled in, 46 of 194 high-entropy ROM chunks among it. That was ADR
+0006's *developer* data path, the one it says is never distributed, and nothing announced we were
+still on it: a symbol bound to the cart region *and* defined locally does not fail the link, the
+definition just wins. [Issue #11](https://github.com/SoftARV/frlg-native/issues/11) carried it.
 
-That is ADR 0006's *developer* data path, the one it says is never distributed, and nothing announced
-that we were still on it. [Issue #11](https://github.com/SoftARV/frlg-native/issues/11) carries it,
-including why "it links" cannot be the test: a symbol bound to the cart region *and* defined locally
-does not fail the link, the definition just wins.
+The data now leaves at link time rather than by rewriting source ([ADR 0020](adr/0020-data-by-linker.md)),
+which reaches the statics the old mechanism could not. What remains in `.rodata` is 1010 bytes across
+39 symbols, and none of it is the cartridge's:
 
-Ends with a binary containing no game data. Until this lands, nothing can be distributed to anyone.
+| bytes | what | why it stays |
+| --- | --- | --- |
+| 512 | `gCrc16Table` | the standard CRC-16 table our own code computes |
+| ~456 | 42 `BgTemplate` tables | agbcc packs `baseTile:10` across two `u16` units; the cartridge's bytes decode wrong under our compiler, so ours are the correct ones to hold |
+| 34 | two `nibble` tables | ours |
+| 8 | `CSWTCH.230` | a switch table GCC generated, whose bytes coincide |
+
+The `BgTemplate` row is the one to read twice, because it is the case where extracting *more* would be
+the defect: the tables are four bytes in both worlds, so no size check flags them, and a build that
+binds them draws screens with no background at all. Found by playing, not by any instrument here.
+
+Measuring this needs the right instrument as much as the right mechanism. The scan that reported
+"two matches" walked 64-byte windows and could not see an eight-byte table; per-symbol, the same
+binary had 987 of them.
 
 ## Phase 8 — It travels
 
