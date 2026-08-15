@@ -62,7 +62,10 @@ WATCHED = {
     "src/battle_controllers.c": "patched: null tolerance",
     "src/trade_scene.c": "patched: null tolerance",
     "src/teachy_tv.c": "patched: null tolerance",
-    "src/start_menu.c": "patched: the port's pause-menu entry",
+    # Not patched today -- the pause-menu entry was reverted, and it is
+    # due to be forked instead. Watched ahead of that, so a move upstream
+    # is known before the fork rather than after it.
+    "src/start_menu.c": "to be forked: the port's pause menu",
 }
 
 

@@ -180,10 +180,6 @@ set(FRLG_STRIP_WAITS "${CMAKE_SOURCE_DIR}/tools/strip_hardware_waits.py")
 # correct because upstream's linker script places them adjacently. Nothing does
 # that here, so the fill runs off the end. See tools/patch_layout_assumptions.py.
 set(FRLG_GAME_PATCH_LAYOUT load_save.c battle_anim_normal.c)
-
-# The pause-menu entry that reaches the port's own options screen. ADR 0022.
-set(FRLG_GAME_PATCH_PORTMENU start_menu.c)
-set(FRLG_PATCH_PORTMENU "${CMAKE_SOURCE_DIR}/tools/patch_port_menu.py")
 set(FRLG_PATCH_LAYOUT "${CMAKE_SOURCE_DIR}/tools/patch_layout_assumptions.py")
 
 # The GBA has no MMU, so upstream may read through a null pointer and get
@@ -306,8 +302,7 @@ function(frlg_preprocess_game rel out_var)
     endif()
     foreach(pair "FRLG_GAME_STRIP_WAITS;${FRLG_STRIP_WAITS}"
                  "FRLG_GAME_PATCH_LAYOUT;${FRLG_PATCH_LAYOUT}"
-                 "FRLG_GAME_PATCH_NULL;${FRLG_PATCH_NULL}"
-                 "FRLG_GAME_PATCH_PORTMENU;${FRLG_PATCH_PORTMENU}")
+                 "FRLG_GAME_PATCH_NULL;${FRLG_PATCH_NULL}")
         list(GET pair 0 list_name)
         list(GET pair 1 script)
         if(base IN_LIST ${list_name})
@@ -326,42 +321,6 @@ function(frlg_preprocess_game rel out_var)
         DEPENDS "${FRLG_VENDOR_DIR}/${rel}" "${FRLG_PREPROC}" ${FRLG_PRELUDE_DEPS}
                 ${extra_deps}
         COMMENT "preproc ${rel}"
-        VERBATIM)
-
-    set(${out_var} "${c}" PARENT_SCOPE)
-endfunction()
-
-# The port's own game-layer sources (ADR 0022). Same treatment as an upstream
-# one -- the game's headers, the game's prelude, and preproc -- because that is
-# what the code has to compile against and because the port's UI strings need
-# the game's text encoding: `_("PORT")` becomes bytes only if preproc sees it.
-#
-# Separate from the function above because that one names its input relative to
-# the vendor tree and these live outside it. Everything else is deliberately the
-# same, including the working directory, which is what makes charmap.txt and
-# `-iquote include` resolve.
-function(frlg_preprocess_port_game abs out_var)
-    get_filename_component(name "${abs}" NAME_WE)
-    set(stage_dir "${CMAKE_CURRENT_BINARY_DIR}/pp")
-    set(i "${stage_dir}/${name}.i")
-    set(c "${stage_dir}/${name}.c")
-
-    add_custom_command(
-        OUTPUT "${c}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${stage_dir}"
-        # The host headers are added here and nowhere else: these sources may
-        # call downward past platform/agb (ADR 0022), and an upstream source
-        # never should.
-        COMMAND "${CMAKE_C_COMPILER}" ${FRLG_GAME_CPPFLAGS}
-                -I "${CMAKE_SOURCE_DIR}/platform/host/include" "${abs}" -o "${i}"
-        COMMAND sh -c "'${FRLG_PREPROC}' '${i}' charmap.txt > '${c}'"
-        # The same widening the upstream sources get: this code names the game's
-        # structs, so it has to agree with them about how big they are.
-        COMMAND "${CMAKE_COMMAND}" -E env python3 "${FRLG_PATCH_STRUCTS}" "${c}"
-        WORKING_DIRECTORY "${FRLG_VENDOR_DIR}"
-        DEPENDS "${abs}" "${FRLG_PREPROC}" "${FRLG_PATCH_STRUCTS}"
-                ${FRLG_PRELUDE_DEPS}
-        COMMENT "preproc port ${name}.c"
         VERBATIM)
 
     set(${out_var} "${c}" PARENT_SCOPE)

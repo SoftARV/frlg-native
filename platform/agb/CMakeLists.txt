@@ -36,14 +36,6 @@ endforeach()
 list(LENGTH game_pp_sources game_source_count)
 message(STATUS "frlg-native: ${game_source_count} game sources through preproc")
 
-# The port's own game-layer sources, through the same preproc as the upstream
-# ones so their strings get the game's text encoding. ADR 0022.
-file(GLOB frlg_port_game_sources "${CMAKE_SOURCE_DIR}/platform/game/*.c")
-foreach(src ${frlg_port_game_sources})
-    frlg_preprocess_port_game("${src}" pp)
-    list(APPEND game_pp_sources "${pp}")
-endforeach()
-
 add_library(game STATIC ${game_pp_sources})
 
 # Already preprocessed; -x cpp-output stops cpp running over them a second time.
