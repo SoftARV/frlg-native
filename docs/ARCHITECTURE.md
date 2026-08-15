@@ -210,13 +210,14 @@ into two groups, and every one describes hardware rather than game logic.
 | --- | --- | --- |
 | `script.c` | `svc 2` (HALT) | **built** — the halt becomes `VBlankIntrWait`, which is what it meant; the pointer accessor is a 64-bit concern ([§12](#12-pointer-width)) |
 
-**Four classes of edit are made in the preprocessed copy** rather than by overriding a whole
+**Six classes of edit are made in the preprocessed copy** rather than by overriding a whole
 file for a line. Each has its own script, each match is exact, and each fails the build when its
 target is absent, so a submodule bump is reported rather than silently changing what compiles:
 
 | Script | Class | Files |
 | --- | --- | --- |
 | `destatic.py` | a static the linker must be able to replace ([ADR 0020](adr/0020-data-by-linker.md)) | every source with extracted statics |
+| `hoist_static.py` | a static declared inside a function, which only a move to file scope can replace ([ADR 0020](adr/0020-data-by-linker.md)) | `string_util.c`, `event_object_movement.c`, `pokemon_storage_system_data.c`, `trainer_fan_club.c` |
 | `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `main.c`, `script.c` |
 | `patch_layout_assumptions.py` | assumes upstream's linker script, or where it put a variable | `load_save.c`, `battle_anim_normal.c` |
 | `patch_struct_layout.py` | is laid out differently by the cartridge's compiler | every game source |

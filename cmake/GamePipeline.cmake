@@ -249,6 +249,18 @@ function(frlg_preprocess_game rel out_var)
     list(APPEND extra_deps "${FRLG_PATCH_STRUCTS}")
 
     if(FRLG_GAME_DATA_FROM_ROM)
+        # Not inside the symbol-list loop below: a file can have a table to lift
+        # without defining any extracted symbol of its own, and nesting this
+        # there skipped it without saying so -- trainer_fan_club.c kept both its
+        # copies while the bindings for them were written and left unreferenced.
+        foreach(h ${FRLG_HOIST_STATICS})
+            string(REGEX MATCH "^([^=]+)=([^=]+)=([^#]+)#(.*)$" _ "${h}")
+            if(CMAKE_MATCH_1 STREQUAL base)
+                list(APPEND post COMMAND "${CMAKE_COMMAND}" -E env python3
+                     "${FRLG_HOIST}" "${c}" "${CMAKE_MATCH_2}=${CMAKE_MATCH_3}")
+                list(APPEND extra_deps "${FRLG_HOIST}")
+            endif()
+        endforeach()
         foreach(entry ${FRLG_GAME_DATA_SYMBOLS})
             string(REGEX MATCH "^([^=]+)=(.*)$" _ "${entry}")
             if(CMAKE_MATCH_1 STREQUAL base)
@@ -265,15 +277,6 @@ function(frlg_preprocess_game rel out_var)
                          "${FRLG_CUT_DATA}" "${c}" ${to_cut})
                     list(APPEND extra_deps "${FRLG_CUT_DATA}")
                 endif()
-                foreach(h ${FRLG_HOIST_STATICS})
-                    string(REGEX MATCH "^([^=]+)=([^=]+)=([^#]+)#(.*)$" _ "${h}")
-                    if(CMAKE_MATCH_1 STREQUAL base)
-                        list(APPEND post COMMAND "${CMAKE_COMMAND}" -E env python3
-                             "${FRLG_HOIST}" "${c}"
-                             "${CMAKE_MATCH_2}=${CMAKE_MATCH_3}")
-                        list(APPEND extra_deps "${FRLG_HOIST}")
-                    endif()
-                endforeach()
                 if(to_destatic)
                     list(APPEND post COMMAND "${CMAKE_COMMAND}" -E env python3
                          "${FRLG_DESTATIC}" "${c}" ${to_destatic})
