@@ -55,15 +55,30 @@ set(FRLG_HOIST "${CMAKE_SOURCE_DIR}/tools/hoist_static.py")
 
 # Statics declared inside a function. `static` there means storage, not linkage,
 # so destatic cannot touch them -- the declaration has to move out to file scope
-# instead, under a name of its own. Five tables, and the list is written by hand
-# because there is no generator that knows which function each belongs to.
-# ADR 0020.
+# instead, under a name of its own. The list is written by hand because there is
+# no generator that knows which function each belongs to. ADR 0020.
+#
+# Addresses come from the linker map (tools/resolve_by_map.py), never from
+# matching bytes: an eight-byte animation is `{ANIMCMD_FRAME(n, 5), ANIMCMD_END}`
+# in dozens of places, so content matching binds whichever copy it meets first.
+# sAnim_Cursor_Fist was bound that way to 0x260104, a coincidence 1.1 MB from
+# where it lives.
+#
+# Two entries may name the same symbol: each hoist renames the first definition
+# still called that, so the entries are consumed in the order they appear here
+# and must be listed in the order the definitions appear in the file.
 set(FRLG_HOIST_STATICS
     "string_util.c=lengths=frlg_string_util_lengths#0x231ea8"
     "event_object_movement.c=jumpLandingFlags=frlg_eom_jumpLandingFlags#0x3a7044"
     "event_object_movement.c=bikeTireTracks_Transitions=frlg_eom_bikeTireTracks#0x3a70ac"
+    "pokemon_storage_system_data.c=sOamData_Cursor=frlg_pss_sOamData_Cursor#0x3d34c8"
+    "pokemon_storage_system_data.c=sOamData_CursorShadow=frlg_pss_sOamData_CursorShadow#0x3d34d0"
     "pokemon_storage_system_data.c=sAnim_Cursor_Bouncing=frlg_pss_sAnim_Cursor_Bouncing#0x3d34d8"
-    "pokemon_storage_system_data.c=sAnim_Cursor_Fist=frlg_pss_sAnim_Cursor_Fist#0x260104")
+    "pokemon_storage_system_data.c=sAnim_Cursor_Still=frlg_pss_sAnim_Cursor_Still#0x3d34e4"
+    "pokemon_storage_system_data.c=sAnim_Cursor_Open=frlg_pss_sAnim_Cursor_Open#0x3d34ec"
+    "pokemon_storage_system_data.c=sAnim_Cursor_Fist=frlg_pss_sAnim_Cursor_Fist#0x3d34f4"
+    "trainer_fan_club.c=sFanClubMemberIds=frlg_tfc_sFanClubMemberIds_gain#0x456938"
+    "trainer_fan_club.c=sFanClubMemberIds=frlg_tfc_sFanClubMemberIds_lose#0x456940")
 # Read at link time too, from another directory's scope.
 set(FRLG_HOIST_STATICS "${FRLG_HOIST_STATICS}" CACHE INTERNAL "hoisted statics")
 
