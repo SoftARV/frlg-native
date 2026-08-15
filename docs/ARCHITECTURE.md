@@ -1330,6 +1330,23 @@ Packaging is per-platform and lives under `ports/`. Release pipelines are built 
 retrofitted — shipping a binary is only possible at all because we ship no game data ([§5](#5-game-data)),
 so distribution is a first-class concern from the start.
 
+**Linux ships as one Flatpak carrying both binaries**, `ports/desktop/flatpak/`. The launcher is
+64-bit on `org.gnome.Platform`; the game is 32-bit and gets its libraries from
+`org.freedesktop.Platform.Compat.i386`, which the *application* opts into — no runtime declares that
+extension point, which is what lets the two live in one app. Three things are not obvious and are
+load-bearing ([spike 0011](spikes/0011-flatpak-32-bit.md)):
+
+| | why |
+| --- | --- |
+| `--allow=multiarch` | without it seccomp rejects the 32-bit syscall ABI; the game dies on SIGSYS with stdout unflushed, so it fails silently |
+| a wrapper invoking `ld-linux.so.2` | the binary hard-codes `/lib/ld-linux.so.2`, which the sandbox does not have, and `execve` then returns ENOENT for a file that is present |
+| `FRLG_GAME_BIN` | the launcher's other two lookups are a development tree and a sibling path, neither of which exists in a sandbox |
+
+The game is **installed, not built**, by the manifest: its build needs `agbcc`, an `arm-none-eabi`
+toolchain and a byte-matching reference build to generate the manifest from. That is a constraint on
+where it can be built, not only on how — it is the open question for any store that builds from
+source on its own infrastructure.
+
 ## 10. Ports
 
 Each directory under `ports/` holds only what is irreducibly platform-specific: the entry point,

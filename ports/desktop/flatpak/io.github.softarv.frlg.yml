@@ -1,0 +1,58 @@
+# The Linux package: launcher and game in one app, two architectures.
+#
+# The launcher is 64-bit GTK4 on the GNOME runtime; the game is 32-bit SDL3
+# (ADR 0003, ADR 0017). They cannot be one binary, so the app carries both and
+# the launcher runs the game. See spike 0011 for why each unusual line is here.
+app-id: io.github.softarv.frlg
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: frlg-launcher
+
+# The 32-bit libraries the game links. No runtime declares this extension point;
+# the application opts in, which is what lets the launcher stay on the GNOME
+# runtime while the game gets its i386 libraries from the freedesktop one.
+add-extensions:
+  org.freedesktop.Platform.Compat.i386:
+    directory: lib/i386-linux-gnu
+    version: '25.08'
+    add-ld-path: .
+    no-autodownload: false
+    autodelete: false
+
+finish-args:
+  # Without this the sandbox's seccomp filter rejects the 32-bit syscall ABI and
+  # the game dies on SIGSYS before printing a line -- it presents as silence.
+  - --allow=multiarch
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --socket=pulseaudio
+  # The launcher looks here first, ahead of its development-tree guesses.
+  - --env=FRLG_GAME_BIN=/app/bin/frlg-native
+
+modules:
+  # The game is not built here. Its build needs agbcc, an arm-none-eabi
+  # toolchain and a byte-matching reference build to generate the manifest from
+  # -- none of which belong in an application manifest. It is built by CMake
+  # first (the `rom-play` configuration: retail data path, data read from the
+  # player's ROM) and installed as a binary.
+  - name: frlg-native
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 frlg-native /app/lib/frlg/frlg-native
+      - install -Dm755 frlg-native-wrapper.sh /app/bin/frlg-native
+      # add-extensions mounts over this, so it has to exist in the app first.
+      - mkdir -p /app/lib/i386-linux-gnu
+    sources:
+      - type: file
+        path: ../../../build/rom-play/ports/desktop/frlg-native
+      - type: file
+        path: frlg-native-wrapper.sh
+
+  - name: frlg-launcher
+    buildsystem: meson
+    sources:
+      - type: dir
+        path: ../../../launcher
