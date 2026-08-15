@@ -30,6 +30,9 @@ static const u8 sTextColour[3] = {
     TEXT_COLOR_TRANSPARENT, TEXT_COLOR_DARK_GRAY, TEXT_COLOR_LIGHT_GRAY,
 };
 
+// STD_WINDOW_PALETTE_NUM in new_menu_helpers.c, which is static to it.
+#define STD_FRAME_PALETTE 14
+
 #define ROW_HEIGHT 16
 #define MAX_ROWS 6
 
@@ -67,7 +70,7 @@ static const struct WindowTemplate sWindows[] = {
         .tilemapTop = 1,
         .width = 28,
         .height = 17,
-        .paletteNum = 15,
+        .paletteNum = STD_FRAME_PALETTE,
         .baseBlock = 16,
     },
     DUMMY_WIN_TEMPLATE,
@@ -260,12 +263,13 @@ static void CB2_PortMenu(void)
     case 3:
         InitWindows(sWindows);
         DeactivateAllTextPrinters();
-        LoadStdWindowGfxOnBg(0, 1, BG_PLTT_ID(15));
-        LoadPalette(GetTextWindowPalette(1), BG_PLTT_ID(15), PLTT_SIZE_4BPP);
+        LoadStdWindowFrameGfx();
         break;
     case 4:
-        FillBgTilemapBufferRect(0, 0, 0, 0, 32, 32, 15);
-        PutWindowTilemap(0);
+        // Palette 14 to match the frame's own, so the border and what is inside
+        // it are not drawn from two different sets of colours.
+        FillBgTilemapBufferRect(0, 0, 0, 0, 32, 32, STD_FRAME_PALETTE);
+        DrawStdWindowFrame(0, FALSE);
         CopyBgTilemapBufferToVram(0);
         break;
     case 5:
