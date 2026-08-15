@@ -42,6 +42,17 @@ target_sources(test_render PRIVATE
 target_include_directories(test_render PRIVATE
     "${CMAKE_SOURCE_DIR}/platform/host/include")
 
+# Per-save options. Writes a file, so it gets a path inside the build directory
+# for the same reason test_flash does: two suites running at once must not share
+# one.
+frlg_add_test(test_options)
+target_sources(test_options PRIVATE
+    "${CMAKE_SOURCE_DIR}/platform/host/src/options.c")
+target_include_directories(test_options PRIVATE
+    "${CMAKE_SOURCE_DIR}/platform/host/include")
+target_compile_definitions(test_options PRIVATE
+    FRLG_TEST_OPTIONS_SAVE="${CMAKE_CURRENT_BINARY_DIR}/test_options.sav")
+
 # The mixer works on the game's own audio structures, so its test needs the
 # vendor headers -- by quote path only, as everywhere else.
 # The PSG test names the hardware registers, which live in the vendor headers.

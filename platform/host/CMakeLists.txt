@@ -3,7 +3,7 @@ target_include_directories(host PUBLIC include)
 
 # Backend-independent: the headless build records what the windowed one does, so
 # the whole session path can be exercised without a display.
-target_sources(host PRIVATE src/session.c src/bundle.c src/settings.c src/render.c)
+target_sources(host PRIVATE src/session.c src/bundle.c src/settings.c src/render.c src/options.c)
 find_package(Threads REQUIRED)
 target_link_libraries(host PUBLIC Threads::Threads)
 
