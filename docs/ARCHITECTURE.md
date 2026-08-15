@@ -216,6 +216,7 @@ target is absent, so a submodule bump is reported rather than silently changing 
 
 | Script | Class | Files |
 | --- | --- | --- |
+| `destatic.py` | a static the linker must be able to replace ([ADR 0020](adr/0020-data-by-linker.md)) | every source with extracted statics |
 | `strip_hardware_waits.py` | reaches hardware no host has | `m4a.c`, `main.c`, `script.c` |
 | `patch_layout_assumptions.py` | assumes upstream's linker script, or where it put a variable | `load_save.c`, `battle_anim_normal.c` |
 | `patch_struct_layout.py` | is laid out differently by the cartridge's compiler | every game source |

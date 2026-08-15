@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Remove a data definition from a preprocessed source, leaving its declaration.
+"""Remove a global data definition from a preprocessed source.
+
+Globals only. A static cannot be declared away -- nothing can bind to a name
+with internal linkage -- so those lose the `static` keyword instead and are
+replaced by the linker; see tools/destatic.py and ADR 0020. This file used to
+carry a `point_at_cart` that rewrote a static into a pointer into the cart, and
+every shape of C it had to understand was a bug waiting to be found: the type,
+the braces, the inner array dimensions, `sizeof`, anonymous structs, a storage
+class written after the struct body. None of that is needed to delete a keyword.
 
 ADR 0006 says the game's data comes from the player's ROM. Whole files of data
 are simply not compiled (FRLG_GAME_DATA_ONLY), but most of the tables share a
@@ -120,169 +128,6 @@ def cut_tentative(text, symbol):
     return pattern.sub(replace, text)
 
 
-class _Span:
-    """A match-like span, for the anonymous-struct case found by scanning."""
-
-    def __init__(self, start, end, kind, dims):
-        self._start, self._end, self._kind, self._dims = start, end, kind, dims
-
-    def start(self):
-        return self._start
-
-    def end(self):
-        return self._end
-
-    def group(self, n):
-        # (whole, indent, kind, dims) -- the caller reads 1, 2 and 3.
-        return ("", "", self._kind, self._dims)[n]
-
-
-def point_at_cart(text, symbol, offset, byte_size=0):
-    """Replace a static's definition with a pointer into the imported image.
-
-    A file-scope static has no name another translation unit can bind to, so it
-    cannot be declared away like a global -- and statics are where most of the
-    game's data still lives. What it can be is a pointer: the bytes are already
-    in the cart image at a known offset, so
-
-        static const struct Foo sBar[] = { ... };
-
-    becomes
-
-        static const struct Foo *const sBar = (const struct Foo *)(agb_cart + 0x1234);
-
-    Indexing, `&sBar[0]` and passing it along all still compile and mean the same
-    thing. `sizeof` does not: it silently becomes the size of a pointer, so
-    ARRAY_COUNT would quietly compute the wrong number. That is refused here
-    rather than guarded at run time, because a wrong count is exactly the kind of
-    fault that looks like something else entirely.
-    """
-    # `sizeof(sBar)` on a pointer is four, so ARRAY_COUNT would quietly compute
-    # the wrong number -- and ARRAY_COUNT is where most of these appear, since
-    # the macro expands to sizeof(x) / sizeof((x)[0]) before this ever runs.
-    #
-    # Given the symbol's real size, the whole-array sizeof is replaced with that
-    # literal and ARRAY_COUNT keeps working: the divisor `sizeof((sBar)[0])` is
-    # the element type either way, and its text does not match this pattern.
-    # Without a size there is nothing honest to substitute, so it is still
-    # refused -- a wrong count is exactly the fault that looks like another one.
-    whole_sizeof = re.compile(r"sizeof\s*\(\s*" + re.escape(symbol) + r"\s*\)")
-    if whole_sizeof.search(text):
-        if not byte_size:
-            return None
-        text = whole_sizeof.sub(f"({byte_size}u)", text)
-
-    # A forward declaration of the same static -- `static const T sFoo[];`
-    # ahead of its definition -- would contradict the pointer this becomes, and
-    # the compiler reports it against the declaration rather than here.
-    if re.search(r"^[^\S\n]*static[^\S\n][^;{=\n]*\b" + re.escape(symbol)
-                 + r"[^\S\n]*(?:\[[^\]]*\])*[^\S\n]*;", text, re.MULTILINE):
-        return None
-
-    pattern = re.compile(
-        r"(?:^|(?<=;))([^\S\n]*)((?:[A-Za-z_][A-Za-z0-9_]*[^\S\n]+|\*+[^\S\n]*)+)"
-        # The brace may sit on the next line, which several of these do.
-        + re.escape(symbol) + r"[^\S\n]*((?:\[[^\]]*\])+)\s*=\s*\{",
-        re.MULTILINE)
-    match = pattern.search(text)
-    if match is None:
-        # An anonymous struct type -- `static const struct { ... } sFoo[] = {`.
-        # There is no type name to cast to, but none is needed: the declaration
-        # keeps the type text exactly as it stands and takes its value from a
-        # void pointer, which converts implicitly.
-        # The struct body has semicolons of its own, so this is found by
-        # locating `} sFoo[...] = {` and walking back to the brace that opens
-        # the body, then to the `static` in front of it.
-        # text.c writes the storage class after the struct body:
-        # `struct { ... } static const sKeypadIcons[] = {`.
-        head = re.search(r"\}[^\S\n]*((?:(?:static|const|volatile)[^\S\n]+)*)"
-                         + re.escape(symbol)
-                         + r"[^\S\n]*((?:\[[^\]]*\])+)\s*=\s*\{", text)
-        if head is None:
-            return None
-        depth, i = 0, head.start()
-        while i >= 0:
-            if text[i] == "}":
-                depth += 1
-            elif text[i] == "{":
-                depth -= 1
-                if depth == 0:
-                    break
-            i -= 1
-        if i < 0:
-            return None
-        # The declaration begins after the previous statement, not at the
-        # struct keyword: `static const struct { ... }` must be replaced whole,
-        # or its qualifiers are left stranded in front of the replacement.
-        kw = max(text.rfind("struct", 0, i), text.rfind("union", 0, i))
-        if kw == -1:
-            return None
-        stop = max(text.rfind(";", 0, kw), text.rfind("}", 0, kw),
-                   text.rfind("\n", 0, kw))
-        start = stop + 1
-        while start < kw and text[start] in " \t\n":
-            start += 1
-        # Whatever qualifiers followed the body belong in front of the type.
-        trailing = head.group(1).strip()
-        kind = text[start:head.start() + 1]
-        if trailing:
-            kind = trailing + " " + kind
-        match = _Span(start, head.end(), kind, head.group(2))
-        return _rewrite(text, match, symbol, offset, anonymous=True)
-    return _rewrite(text, match, symbol, offset, anonymous=False)
-
-
-def _rewrite(text, match, symbol, offset, anonymous):
-
-    indent, kind, dims = match.group(1), match.group(2).strip(), match.group(3)
-    if anonymous:
-        # The type text is kept verbatim -- it is the struct body -- and the
-        # pointer takes its value from a void pointer rather than a cast to a
-        # name that does not exist.
-        base = kind[len("static"):].strip() if kind.startswith("static") else kind.strip()
-    else:
-        words = kind.split()
-        if words[0] != "static":
-            return None                  # not ours to rewrite
-        base = " ".join(words[1:])
-
-    at = text.index("{", match.end() - 1)
-    depth, i, n = 0, at, len(text)
-    while i < n:
-        c = text[i]
-        if c == '"' or c == "'":
-            quote = c
-            i += 1
-            while i < n and text[i] != quote:
-                i += 2 if text[i] == "\\" else 1
-        elif c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                end = text.find(";", i)
-                if end == -1:
-                    return None
-                # Only the outermost dimension is the one being replaced by a
-                # pointer. `sFoo[][3]` indexed as sFoo[a][b] must stay a pointer
-                # *to an array of 3*, or the inner subscript has nothing to
-                # apply to -- which the compiler reports somewhere else entirely.
-                inner = "".join(re.findall(r"\[[^\]]*\]", dims)[1:])
-                if inner:
-                    return (text[:match.start()]
-                            + f"{indent}static {base} (*const {symbol}){inner} = "
-                              f"({base} (*){inner})(agb_cart + {offset:#x});"
-                            + text[end + 1:])
-
-                cast = "(const void *)" if anonymous else f"({base} *)"
-                return (text[:match.start()]
-                        + f"{indent}static {base} *const {symbol} = "
-                          f"{cast}(agb_cart + {offset:#x});"
-                        + text[end + 1:])
-        i += 1
-    return None
-
-
 def main():
     if len(sys.argv) < 3:
         sys.exit("usage: patch_data_definitions.py FILE SYMBOL [SYMBOL...]")
@@ -295,21 +140,6 @@ def main():
     # makes the caller rebuild once per symbol, and there are thousands.
     refused = []
     for symbol in symbols:
-        # `name#offset` is a static, which becomes a pointer into the cart
-        # rather than a declaration -- nothing can bind to a static's name.
-        if "#" in symbol:
-            name, _, offset_text = symbol.partition("#")
-            # `name#offset@size` carries the symbol's size as well, which is what
-            # lets a whole-array sizeof survive the rewrite.
-            offset_text, _, size_text = offset_text.partition("@")
-            pointed = point_at_cart(text, name, int(offset_text, 0),
-                                    int(size_text) if size_text else 0)
-            if pointed is None:
-                refused.append(name)
-            else:
-                text = pointed
-            continue
-
         byte_size = 0
         name = symbol
         if "@" in symbol:

@@ -49,6 +49,8 @@ set(FRLG_GAME_CPPFLAGS
 # sequencer's own routines, which this port replaces, and the copy in the ROM
 # names the cartridge's. That one stays compiled.
 set(FRLG_CUT_DATA "${CMAKE_SOURCE_DIR}/tools/patch_data_definitions.py")
+set(FRLG_DESTATIC "${CMAKE_SOURCE_DIR}/tools/destatic.py")
+set(FRLG_SPLIT_SYMBOLS "${CMAKE_SOURCE_DIR}/tools/split_data_symbols.py")
 
 set(FRLG_GAME_DATA_ONLY
     graphics.c
@@ -101,8 +103,12 @@ endif()
 option(FRLG_GAME_DATA_STATICS "Extract file-scope statics from the ROM as well" ON)
 if(FRLG_GAME_DATA_STATICS)
     include("${CMAKE_CURRENT_LIST_DIR}/game_data_symbols_statics.cmake")
+    set(FRLG_SYMBOL_LIST "${CMAKE_CURRENT_LIST_DIR}/game_data_symbols_statics.cmake"
+        CACHE INTERNAL "the extraction list in force")
 else()
     include("${CMAKE_CURRENT_LIST_DIR}/game_data_symbols.cmake")
+    set(FRLG_SYMBOL_LIST "${CMAKE_CURRENT_LIST_DIR}/game_data_symbols.cmake"
+        CACHE INTERNAL "the extraction list in force")
 endif()
 
 set(FRLG_GAME_EXCLUDED
@@ -231,10 +237,24 @@ function(frlg_preprocess_game rel out_var)
         foreach(entry ${FRLG_GAME_DATA_SYMBOLS})
             string(REGEX MATCH "^([^=]+)=(.*)$" _ "${entry}")
             if(CMAKE_MATCH_1 STREQUAL base)
-                string(REPLACE "," ";" wanted "${CMAKE_MATCH_2}")
-                list(APPEND post COMMAND "${CMAKE_COMMAND}" -E env python3
-                     "${FRLG_CUT_DATA}" "${c}" ${wanted})
-                list(APPEND extra_deps "${FRLG_CUT_DATA}")
+                # Globals are cut from the source; statics only lose the
+                # `static` keyword and are replaced by the linker. ADR 0020.
+                execute_process(COMMAND python3 "${FRLG_SPLIT_SYMBOLS}"
+                                "${FRLG_SYMBOL_LIST}" "${base}" --cut
+                                OUTPUT_VARIABLE to_cut)
+                execute_process(COMMAND python3 "${FRLG_SPLIT_SYMBOLS}"
+                                "${FRLG_SYMBOL_LIST}" "${base}" --destatic
+                                OUTPUT_VARIABLE to_destatic)
+                if(to_cut)
+                    list(APPEND post COMMAND "${CMAKE_COMMAND}" -E env python3
+                         "${FRLG_CUT_DATA}" "${c}" ${to_cut})
+                    list(APPEND extra_deps "${FRLG_CUT_DATA}")
+                endif()
+                if(to_destatic)
+                    list(APPEND post COMMAND "${CMAKE_COMMAND}" -E env python3
+                         "${FRLG_DESTATIC}" "${c}" ${to_destatic})
+                    list(APPEND extra_deps "${FRLG_DESTATIC}")
+                endif()
             endif()
         endforeach()
     endif()

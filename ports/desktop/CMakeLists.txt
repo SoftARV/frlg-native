@@ -54,6 +54,20 @@ target_include_directories(cartreloc PRIVATE "${CMAKE_SOURCE_DIR}/platform/agb/i
 
 set(bindings "${CMAKE_CURRENT_BINARY_DIR}/bindings.rsp")
 
+# Statics are not cut from the source -- they keep their definition and lose
+# only `static`, so nothing reports them unbound. Their bindings are generated
+# from the extraction list instead, and --gc-sections drops the definitions the
+# linker has just overridden. See ADR 0020.
+set(static_bindings "${CMAKE_CURRENT_BINARY_DIR}/statics.rsp")
+add_custom_command(
+    OUTPUT "${static_bindings}"
+    COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/split_data_symbols.py"
+            "${FRLG_SYMBOL_LIST}" --defsyms "${static_bindings}"
+    DEPENDS "${CMAKE_SOURCE_DIR}/tools/split_data_symbols.py" "${FRLG_SYMBOL_LIST}"
+    COMMENT "static cart bindings"
+    VERBATIM)
+add_custom_target(statics-rsp DEPENDS "${static_bindings}")
+
 # --whole-archive pulls every game object in regardless, so the trial link needs
 # no real entry point. Using the actual main.c would drag host and pthread into
 # the unresolved list and bind them as if they were missing game routines.
@@ -141,5 +155,7 @@ set(FRLG_SOUND_DEFSYMS -Wl,--defsym,gNumMusicPlayers=4 -Wl,--defsym,gMaxLines=0)
 # has overridden a definition, nothing references the section it lived in.
 # Symbols reached only through the cart's own relocated pointers stay alive
 # because agb_relocations.c names each of them.
-target_link_options(frlg-native PRIVATE "@${bindings}" -rdynamic -no-pie
-                    -Wl,--gc-sections ${FRLG_SOUND_DEFSYMS})
+target_link_options(frlg-native PRIVATE "@${bindings}" "@${static_bindings}"
+                    -rdynamic -no-pie -Wl,--gc-sections ${FRLG_SOUND_DEFSYMS})
+add_dependencies(frlg-native statics-rsp)
+set_property(TARGET frlg-native APPEND PROPERTY LINK_DEPENDS "${static_bindings}")
