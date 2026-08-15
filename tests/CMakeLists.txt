@@ -33,6 +33,11 @@ frlg_add_test(test_ppu_mosaic)
 frlg_add_test(test_ppu_bitmap)
 frlg_add_test(test_ppu_scanline_irq)
 
+# A wider viewport must show more, never different. The fault this guards
+# against renders every layer correctly and only gets their relationship wrong,
+# which looks plausible on screen and is obvious under comparison.
+frlg_add_test(test_ppu_viewport)
+
 # The seam is compiled in rather than linked from the host archive: the test
 # supplies its own present and log, which is the only way to see what a stage
 # did and what a failing one was blamed for.
