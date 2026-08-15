@@ -137,4 +137,9 @@ set(FRLG_SOUND_DEFSYMS -Wl,--defsym,gNumMusicPlayers=4 -Wl,--defsym,gMaxLines=0)
 # defines an ABSOLUTE address, which a position-independent executable does not
 # rebase when the loader moves the image -- so every bound symbol would point at
 # unmapped memory. This is the absolute-symbol-binding risk ADR 0006 records.
-target_link_options(frlg-native PRIVATE "@${bindings}" -rdynamic -no-pie ${FRLG_SOUND_DEFSYMS})
+# --gc-sections is what actually removes the game data: once a --defsym binding
+# has overridden a definition, nothing references the section it lived in.
+# Symbols reached only through the cart's own relocated pointers stay alive
+# because agb_relocations.c names each of them.
+target_link_options(frlg-native PRIVATE "@${bindings}" -rdynamic -no-pie
+                    -Wl,--gc-sections ${FRLG_SOUND_DEFSYMS})

@@ -39,5 +39,10 @@ message(STATUS "frlg-native: ${game_source_count} game sources through preproc")
 add_library(game STATIC ${game_pp_sources})
 
 # Already preprocessed; -x cpp-output stops cpp running over them a second time.
-target_compile_options(game PRIVATE -x cpp-output)
+#
+# -fdata-sections puts every variable in a section of its own, which is what
+# lets the linker drop the ones the cart supplies: a --defsym binding overrides
+# the object's definition, and the section it defined is then unreferenced.
+# See docs/adr/0020-data-by-linker.md.
+target_compile_options(game PRIVATE -x cpp-output -fdata-sections -ffunction-sections)
 target_link_libraries(game PRIVATE agb)
