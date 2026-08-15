@@ -1012,11 +1012,22 @@ int main(int argc, char **argv)
         // what the game actually has drawn (ADR-less for now: agb/ppu.h says
         // why 256 and not more).
         {
+            const char *want = getenv("FRLG_VIEW");
             int win_w = 0, win_h = 0, z = host_video_zoom();
+            int vw = 0, vh = 0;
 
-            host_video_window_size(&win_w, &win_h);
-            if (z > 0 && win_w > 0 && win_h > 0)
-                agb_ppu_set_viewport(win_w / z, win_h / z);
+            // The environment wins here as everywhere else, and it is what lets
+            // a headless run compose something other than the native size.
+            if (want != NULL && sscanf(want, "%dx%d", &vw, &vh) == 2)
+            {
+                agb_ppu_set_viewport(vw, vh);
+            }
+            else
+            {
+                host_video_window_size(&win_w, &win_h);
+                if (z > 0 && win_w > 0 && win_h > 0)
+                    agb_ppu_set_viewport(win_w / z, win_h / z);
+            }
         }
 
         copy_frame();

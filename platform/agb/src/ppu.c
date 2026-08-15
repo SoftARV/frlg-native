@@ -32,6 +32,20 @@
 static int screen_w = NATIVE_W;
 static int screen_h = NATIVE_H;
 
+// A viewport wider than the hardware is centred on it, so the extra comes from
+// every side rather than accumulating at the right and the bottom. Everything
+// the game positions in the hardware's own coordinates -- scroll offsets, object
+// positions, window edges -- is shifted by this to land where it always did.
+static int view_ox(void)
+{
+    return (screen_w - NATIVE_W) / 2;
+}
+
+static int view_oy(void)
+{
+    return (screen_h - NATIVE_H) / 2;
+}
+
 #define REG_DISPCNT 0x000
 #define REG_DISPSTAT 0x004
 #define REG_VCOUNT 0x006
@@ -349,11 +363,11 @@ static void render_text_bg_line(int bg, int line)
     int mos_v = (control & BGCNT_MOSAIC) ? MOSAIC_BG_V(mosaic) : 1;
     int width_mask = (size == 1 || size == 3) ? 0x1FF : 0xFF;
     int height_mask = (size == 2 || size == 3) ? 0x1FF : 0xFF;
-    int src_y = (mosaic_snap(line, mos_v) + vofs) & height_mask;
+    int src_y = (mosaic_snap(line, mos_v) - view_oy() + vofs) & height_mask;
 
     for (int x = 0; x < screen_w; x++)
     {
-        int src_x = (mosaic_snap(x, mos_h) + hofs) & width_mask;
+        int src_x = (mosaic_snap(x, mos_h) - view_ox() + hofs) & width_mask;
         int map_x = src_x >> 3;
         int map_y = src_y >> 3;
         const uint8_t *block = screen + screen_block_offset(size, map_x, map_y);
@@ -436,14 +450,14 @@ static void compute_window_mask(int line, uint16_t dispcnt)
     outside = winout & WINDOW_CONTROL_MASK;
     inside_obj = (winout >> 8) & WINDOW_CONTROL_MASK;
 
-    row0 = win0 && window_contains(io16(REG_WIN0V), line, screen_h);
-    row1 = win1 && window_contains(io16(REG_WIN0V + 2), line, screen_h);
+    row0 = win0 && window_contains(io16(REG_WIN0V), line - view_oy(), NATIVE_H);
+    row1 = win1 && window_contains(io16(REG_WIN0V + 2), line - view_oy(), NATIVE_H);
 
     for (int x = 0; x < screen_w; x++)
     {
-        if (row0 && window_contains(io16(REG_WIN0H), x, screen_w))
+        if (row0 && window_contains(io16(REG_WIN0H), x - view_ox(), NATIVE_W))
             window_mask[x] = inside0;
-        else if (row1 && window_contains(io16(REG_WIN0H + 2), x, screen_w))
+        else if (row1 && window_contains(io16(REG_WIN0H + 2), x - view_ox(), NATIVE_W))
             window_mask[x] = inside1;
         else if (win_obj && obj_window[x])
             window_mask[x] = inside_obj;
@@ -679,7 +693,7 @@ static void render_obj_line(int line)
 
         for (int col = 0; col < box_w; col++)
         {
-            int sx = x + col;
+            int sx = x + col + view_ox();
             int across = mosaic_snap(col, mos_h);
             int tx, ty;
             int index;
