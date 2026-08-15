@@ -1427,6 +1427,23 @@ stops looking like a Game Boy Advance. An enhancement that cannot be switched of
 **Display pipelines.** LCD filters, colour modes and shader effects attach above the framebuffer as
 post-process stages — the same seam mods use to own a display mode.
 
+**The seam exists**, `platform/host/src/render.c` behind `host_render.h`, built before its first
+consumer so that filters are stages from the start rather than special cases retrofitted into one.
+It is at the bottom of the stack because the dependency rule is downward: the mod layer *owns*
+pipelines but cannot be called into, so it registers stages and the presenter runs them. A port
+calls `host_render_present` where it used to call `host_video_present`.
+
+Both of §8's rules are enforced here rather than left to each stage. A stage that returns false is
+**retired and switched off**, named in the log, and the frame is rolled back to what that stage was
+handed — which is why there are two buffers and not one: a stage can fail halfway through writing,
+and half a transformation is not a fallback. A stage whose `available` says no this frame is skipped
+and *not* retired, so a pipeline that cannot run headless costs nothing when it cannot run.
+
+With nothing registered it copies nothing: the cost is one pass over an eight-slot table. And
+because screenshots and the golden harness read `agb_ppu_framebuffer()` directly, upstream of all of
+this, **no stage can change what a recorded run is compared against** — the enhancement and the
+oracle cannot collide.
+
 **Widescreen and higher internal resolution.** The renderer is resolution-parametric
 ([§6.3](#63-ppu)). Game logic still believes the screen is 240×160 and is not touched; the extra
 area is background and object overdraw. Anything the game positions in screen space — UI,

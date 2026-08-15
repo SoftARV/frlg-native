@@ -31,6 +31,7 @@
 #include "agb/memmap.h"
 #include "agb/ppu.h"
 #include "host.h"
+#include "host_render.h"
 #include "host_session.h"
 
 #include "crash.h"
@@ -988,7 +989,9 @@ int main(int argc, char **argv)
             *(volatile uint16_t *)(agb_mem.io + REG_OFF_KEYINPUT) = host_input_keys();
 
         copy_frame();
-        host_video_present(framebuffer, SCREEN_W, SCREEN_H);
+        // Through the pipeline rather than straight to the backend: with no
+        // stage registered this is the same call with one branch in front.
+        host_render_present(framebuffer, SCREEN_W, SCREEN_H);
 
         // Stall detection by frame progress rather than CPU time: it means the
         // same thing windowed or headless, and it can point at the stuck thread.

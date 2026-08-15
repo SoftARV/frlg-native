@@ -33,6 +33,15 @@ frlg_add_test(test_ppu_mosaic)
 frlg_add_test(test_ppu_bitmap)
 frlg_add_test(test_ppu_scanline_irq)
 
+# The seam is compiled in rather than linked from the host archive: the test
+# supplies its own present and log, which is the only way to see what a stage
+# did and what a failing one was blamed for.
+frlg_add_test(test_render)
+target_sources(test_render PRIVATE
+    "${CMAKE_SOURCE_DIR}/platform/host/src/render.c")
+target_include_directories(test_render PRIVATE
+    "${CMAKE_SOURCE_DIR}/platform/host/include")
+
 # The mixer works on the game's own audio structures, so its test needs the
 # vendor headers -- by quote path only, as everywhere else.
 # The PSG test names the hardware registers, which live in the vendor headers.
