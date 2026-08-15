@@ -98,7 +98,35 @@
          }
      }
  }
-@@ -143,13 +165,13 @@
+@@ -122,6 +144,27 @@
+ static void RedrawMapSlicesForCameraUpdate(struct FieldCameraOffset *cameraOffset, int x, int y)
+ {
+     const struct MapLayout *mapLayout = gMapHeader.mapLayout;
++    static s16 sLastPosX = -30000;
++    s16 posX = gSaveBlock1Ptr->pos.x;
++
++    // Walking onto a connected map re-bases the camera's coordinates -- one
++    // step west of x=0 lands at x=47 of the map joined there -- without any
++    // full redraw, because the slice redraws keep pulling through the
++    // connection. That works while the buffer reaches only as far as the screen
++    // does. It holds eight metatiles more than that now, and those columns are
++    // never the leading edge, so after a crossing they keep what the *old* map
++    // put there: grass drawn as trees, for as long as it takes to walk back.
++    //
++    // A jump of more than a step is a crossing. Redraw everything rather than
++    // work out which columns the new coordinates invalidated.
++    if (sLastPosX != -30000 && (posX - sLastPosX > 1 || sLastPosX - posX > 1))
++    {
++        sLastPosX = posX;
++        DrawWholeMapView();
++        cameraOffset->copyBGToVRAM = TRUE;
++        return;
++    }
++    sLastPosX = posX;
+ 
+     if (x > 0)
+         RedrawMapSliceWest(cameraOffset, mapLayout);
+@@ -143,13 +186,13 @@
      temp = cameraOffset->yTileOffset + 28;
      if (temp >= 32)
          temp -= 32;
@@ -117,7 +145,7 @@
      }
  }
  
-@@ -157,14 +179,14 @@
+@@ -157,14 +200,14 @@
  {
      u8 i;
      u8 temp;
@@ -137,7 +165,7 @@
      }
  }
  
-@@ -179,7 +201,7 @@
+@@ -179,7 +222,7 @@
          temp = cameraOffset->yTileOffset + i;
          if (temp >= 32)
              temp -= 32;
@@ -146,7 +174,7 @@
      }
  }
  
-@@ -187,16 +209,20 @@
+@@ -187,16 +230,20 @@
  {
      u8 i;
      u8 temp;
@@ -171,7 +199,7 @@
      }
  }
  
-@@ -308,13 +334,13 @@
+@@ -308,13 +355,13 @@
  
  static s32 MapPosToBgTilemapOffset(struct FieldCameraOffset *cameraOffset, s32 x, s32 y)
  {
@@ -189,7 +217,7 @@
  
      y = (y - gSaveBlock1Ptr->pos.y) * 2;
      if (y >= 32 || y < 0)
-@@ -323,7 +349,7 @@
+@@ -323,7 +370,7 @@
      if (y >= 32)
          y -= 32;
  
