@@ -96,12 +96,27 @@ Flatpak over an existing setup re-imports their ROM and does not find their save
 That needs a decision, not a discovery: migrate on first run, or grant `--filesystem` access to the
 old path, or both. It is independent of everything else here and is the part that touches players.
 
-## What is still open
+**Decided** in [ADR 0021](../adr/0021-linux-ships-as-a-flatpak.md): documented rather than automated.
+Only someone who played from a build tree before installing has anything to move, and the save format
+is the cartridge's either way, so moving it is a file copy. The README's "where your data lives" table
+is where a player is told.
+
+## What was still open
+
+Written when the spike closed. Two of the three have been answered since, and saying which keeps this
+page from reading as a list of things nobody did.
 
 - **Build inside the sandbox or ship a prebuilt binary.** Both are possible; this spike shipped a
-  prebuilt one.
+  prebuilt one. **Settled:** prebuilt, per [ADR 0021](../adr/0021-linux-ships-as-a-flatpak.md) — the
+  game's build needs agbcc, an `arm-none-eabi` toolchain and a byte-matching reference build to
+  generate its manifest from, none of which belong in an application manifest. It is also why
+  Flathub, which builds submissions on its own infrastructure, is not reachable yet.
 - **The launcher.** Only the game was packaged here. The two-binary, two-runtime arrangement is
   sound in principle — the launcher's GNOME runtime can mount `Compat.i386` for the game — but it
-  has not been built.
+  has not been built. **Built, and it works.**
+  `ports/desktop/flatpak/io.github.softarv.frlg.yml` carries both: the launcher as a meson module,
+  the game installed as a binary behind `frlg-native-wrapper.sh`, which invokes the i386 loader by
+  path for the reason this spike found.
 - **Audio under the sandbox.** The run reported 773 starved and 8295 dropped audio frames, expected
-  with a dummy driver under lockstep, but not yet checked with a real one.
+  with a dummy driver under lockstep, but not yet checked with a real one. **Still open** — those
+  numbers are evidence of the dummy driver and of nothing else.

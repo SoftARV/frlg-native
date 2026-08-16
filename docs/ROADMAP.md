@@ -16,8 +16,8 @@ Update the status column when a milestone lands.
 | 5 | Saves — flash backed by a host file | **done** |
 | 6 | **Playable** — intro through the first battle, deterministic replay | **done** |
 | 7 | **Shippable** — ROM importer, generated manifest, no data in the binary | **done** |
-| 8 | **Linux** — packaging, launcher integration, updates | |
-| 9 | Display modes, widescreen, high refresh | |
+| 8 | **Linux** — packaging, launcher integration, updates | in progress |
+| 9 | Display modes, widescreen, high refresh | in progress |
 | 10 | Peer-to-peer link play | |
 | 11 | 64-bit migration | |
 | 12 | Mods — Lua runtime, schema registries, generated reference docs | |
@@ -635,10 +635,28 @@ migration decided in advance, not discovered by someone losing a playthrough.
 
 Ends with something a stranger can install without being told how.
 
+**Where it is.** The package is built and installs: one Flatpak carrying the 64-bit launcher and the
+32-bit game, with both hard problems solved — the seccomp filter that rejects the 32-bit syscall ABI,
+and the 32-bit graphics driver the sandbox has no runtime for
+([spike 0011](spikes/0011-flatpak-32-bit.md), [ADR 0021](adr/0021-linux-ships-as-a-flatpak.md)).
+
+What is missing is the last word of the sentence above: there is no channel a stranger could install
+*from*. `frlg-origin` is a local unsigned remote, the README's getting-started path is still
+build-from-source, and while nothing is reachable there is nothing for the update pipeline to update
+— which is most of Phase 8's remaining weight, and the decision the rest waits on. Issue #10 is the
+launcher's half of it. Audio inside the sandbox has still only been measured under a dummy driver.
+
 ## Phase 9 — It gets better
 
 Display modes and LCD filters, widescreen, high-refresh interpolation. The hooks are designed in
 from Phase 3; this is where they are switched on.
+
+**Where it is.** The window scales the hardware's frame to fill it, keeping its shape, which is what
+`main` does today. Widescreen proper — a field that draws *more map* rather than a bigger picture of
+the same map — is `spike/beyond-the-hardware` and PR #14, in draft. It reaches 464x360 by reading
+backgrounds and object positions from the game's own state instead of from VRAM and OAM. The width
+stops there: past it the outer columns smear vertically, with the cause still unfound. None of it is
+on `main`, deliberately, and the branch's own ADR and spikes carry the detail.
 
 ## Phase 10 — It connects
 
