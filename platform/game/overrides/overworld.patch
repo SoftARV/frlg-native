@@ -1,12 +1,17 @@
 --- a/src/overworld.c
 +++ b/src/overworld.c
-@@ -1308,24 +1308,24 @@
+@@ -1308,24 +1308,29 @@
      }, {
          .bg = 1,
          .charBaseIndex = 0,
 -        .mapBaseIndex = 29,
 -        .screenSize = 0,
-+        .mapBaseIndex = 26,   // 0xD000, 4 KB clear above it
++        // 0xC000. The field's tilesets fill 0x0000-0x7FFF exactly -- 640
++        // primary tiles and 384 secondary, thirty-two bytes each -- and BG0
++        // takes 0x8000 for its own. What is left is 0xC000 up to BG0's map
++        // at 0xF800, which is where upstream keeps these three and where
++        // they have to stay: at twice the width they are 4 KB apiece.
++        .mapBaseIndex = 24,
 +        .screenSize = 1,   // 64x32 tiles: twice as wide
          .paletteMode = 0,
          .priority = 1,
@@ -16,7 +21,7 @@
          .charBaseIndex = 0,
 -        .mapBaseIndex = 28,
 -        .screenSize = 0,
-+        .mapBaseIndex = 12,   // 0x6000, 4 KB clear above it
++        .mapBaseIndex = 26,   // 0xD000
 +        .screenSize = 1,   // 64x32 tiles: twice as wide
          .paletteMode = 0,
          .priority = 2,
@@ -26,12 +31,12 @@
          .charBaseIndex = 0,
 -        .mapBaseIndex = 30,
 -        .screenSize = 0,
-+        .mapBaseIndex = 14,   // 0x7000, 4 KB clear above it
++        .mapBaseIndex = 28,   // 0xE000
 +        .screenSize = 1,   // 64x32 tiles: twice as wide
          .paletteMode = 0,
          .priority = 3,
          .baseTile = 0x000
-@@ -1341,9 +1341,9 @@
+@@ -1341,9 +1346,9 @@
      SetBgAttribute(1, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(2, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(3, BG_ATTR_MOSAIC, TRUE);
@@ -44,7 +49,7 @@
      SetBgTilemapBuffer(1, gBGTilemapBuffers2);
      SetBgTilemapBuffer(2, gBGTilemapBuffers1);
      SetBgTilemapBuffer(3, gBGTilemapBuffers3);
-@@ -1359,9 +1359,9 @@
+@@ -1359,9 +1364,9 @@
      SetBgAttribute(1, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(2, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(3, BG_ATTR_MOSAIC, TRUE);
@@ -57,7 +62,7 @@
      SetBgTilemapBuffer(1, gBGTilemapBuffers2);
      SetBgTilemapBuffer(2, gBGTilemapBuffers1);
      SetBgTilemapBuffer(3, gBGTilemapBuffers3);
-@@ -1472,14 +1472,22 @@
+@@ -1472,14 +1477,22 @@
  }
  
  // This CB2 is used when starting
