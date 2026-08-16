@@ -862,6 +862,20 @@ because one during real work would mean the run depended on wall-clock time afte
 ([ADR 0014](adr/0014-lockstep-stall-watchdog.md)). `FRLG_LOCKSTEP=pace` additionally waits out the
 frame period, which is what makes the clock playable — and so what a recorded trace is made on.
 
+**Memory is read on the game's thread, or not at all.** `agb_frame_set_composed` hands the port a
+callback the instant `agb_ppu_render_frame` returns, and the memory dumps — `FRLG_VRAM_DUMP`,
+`FRLG_PLTT_DUMP`, `FRLG_OAM_DUMP`, `FRLG_IO_DUMP` — run there. The same reasoning as the key source
+above, in reverse: the game writes VRAM, palette and registers from its own thread, so a presenting
+thread that reads them samples whatever moment it caught. That is not a picture of the frame. Two
+runs of one recording, stopped at the same frame, once agreed pixel for pixel while disagreeing about
+VRAM — the framebuffer is composed on the game's thread and was sound, the dump beside it was not.
+
+This matters more than a debugging convenience, because a dump taken the wrong way has already been
+believed: the map layers were moved to char blocks 12 and 14 on the strength of a VRAM dump that said
+they were free, and they were not — the secondary tileset spills there, which drew tiles through the
+walls and NPCs of every interior with that tileset. A frame-precise reader is the instrument that
+question needed.
+
 ### 6.6 BIOS
 
 `libagbsyscall.s` becomes C. The arithmetic entry points (`Div`, `Sqrt`, `ArcTan2`, `BgAffineSet`,

@@ -54,4 +54,17 @@ uint32_t agb_frame_watchdog_ticks(void);
 // in lockstep.
 void agb_frame_idle(void);
 
+// Called on the game's thread the instant the frame is composed, for a port that
+// wants to read memory belonging to the picture it just drew.
+//
+// Same reason as the key source above, and the same trap in reverse: the game
+// writes VRAM, palette and registers from its own thread, so a presenting thread
+// that reads them gets whatever moment it happened to catch. That is not a
+// sample of the frame -- two runs of the same recording reaching the same frame
+// disagreed about VRAM while agreeing pixel for pixel about the picture, which
+// is how this was found. A reader that must correspond to the frame reads here.
+//
+// It is handed the frame number, so a dump can name what it holds.
+void agb_frame_set_composed(void (*fn)(uint32_t frame));
+
 #endif // GUARD_AGB_FRAME_H

@@ -236,6 +236,44 @@ static void shot_range(uint32_t frame)
     write_ppm(path);
 }
 
+// Memory the picture was drawn from, each written to its own file and
+// overwritten every frame, so a file holds whatever the last frame held. Run to
+// a frame limit to choose which frame that is.
+//
+// Called on the game thread the instant the frame is composed, which is the only
+// place these correspond to a frame at all. Read from the presenting thread they
+// do not: two runs of one recording, stopped at the same frame, agreed pixel for
+// pixel and disagreed about VRAM. Anything concluded from a dump taken there is
+// worth nothing, and one thing was -- see docs/ARCHITECTURE.md.
+//
+// VRAM costs a 96 KB write a frame. These are for answering a question, not for
+// leaving on.
+static void dump_one(const char *var, const void *src, size_t size)
+{
+    const char *path = getenv(var);
+    FILE *fh;
+
+    if (path == NULL)
+        return;
+
+    fh = fopen(path, "wb");
+    if (fh == NULL)
+        return;
+
+    fwrite(src, 1, size, fh);
+    fclose(fh);
+}
+
+static void frame_composed(uint32_t frame)
+{
+    (void)frame;
+
+    dump_one("FRLG_VRAM_DUMP", agb_mem.vram, sizeof(agb_mem.vram));
+    dump_one("FRLG_PLTT_DUMP", agb_mem.pltt, sizeof(agb_mem.pltt));
+    dump_one("FRLG_OAM_DUMP", agb_mem.oam, sizeof(agb_mem.oam));
+    dump_one("FRLG_IO_DUMP", agb_mem.io, sizeof(agb_mem.io));
+}
+
 // Called by the frame driver, on the game thread, once a frame.
 static uint16_t replay_keys(uint32_t frame)
 {
@@ -1014,6 +1052,8 @@ int main(int argc, char **argv)
         }
     }
 
+    agb_frame_set_composed(frame_composed);
+
     printf("frlg-native: starting, frame limit %u\n", frame_limit);
     if (pthread_create(&game, NULL, game_thread, NULL) != 0)
     {
@@ -1048,28 +1088,6 @@ int main(int argc, char **argv)
                 agb_ppu_set_viewport(vw, vh);
             else
                 agb_ppu_set_viewport(AGB_PPU_MIN_W, AGB_PPU_MIN_H);
-        }
-
-        // FRLG_VRAM_DUMP writes video memory to a file, overwritten each frame,
-        // so the file holds whatever was there last. Widescreen needs somewhere
-        // to put larger tilemaps, and where VRAM is free is a question about
-        // what the game does rather than what its constants say -- the region
-        // the arithmetic suggested turned out to be occupied and one nobody had
-        // named was empty. Costs a 96 KB write per frame and is for answering
-        // that kind of question, not for leaving on.
-        {
-            const char *dump = getenv("FRLG_VRAM_DUMP");
-
-            if (dump != NULL)
-            {
-                FILE *fh = fopen(dump, "wb");
-
-                if (fh != NULL)
-                {
-                    fwrite(agb_mem.vram, 1, sizeof(agb_mem.vram), fh);
-                    fclose(fh);
-                }
-            }
         }
 
         copy_frame();

@@ -121,6 +121,13 @@ static void agb_reset_io(void)
 
 static uint16_t (*agb_key_source)(uint32_t frame);
 
+static void (*agb_composed)(uint32_t frame);
+
+void agb_frame_set_composed(void (*fn)(uint32_t frame))
+{
+    agb_composed = fn;
+}
+
 void agb_frame_set_key_source(uint16_t (*source)(uint32_t frame))
 {
     agb_key_source = source;
@@ -182,6 +189,11 @@ static void agb_frame_advance(void)
     // Composed after the handler, so the register writes and DMA copies it
     // just performed are on screen this frame rather than the next.
     agb_ppu_render_frame();
+
+    // Before VCOUNT is cleared and the game is let go, so what a reader sees is
+    // the memory the frame above was drawn from.
+    if (agb_composed != NULL)
+        agb_composed((uint32_t)agb_frames);
 
     *(volatile uint16_t *)(agb_mem.io + REG_OFF_VCOUNT) = 0;
     agb_in_irq = 0;
