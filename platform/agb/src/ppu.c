@@ -672,9 +672,6 @@ static void render_obj_line(int line)
         if (py >= box_h || tile < min_tile)
             continue;
 
-        if (x >= 0x100)
-            x -= 0x200;
-
         // Mosaic works in the object's own space, so it is applied to the
         // object-relative coordinate before a flip turns it around.
         py = mosaic_snap(py, mos_v);
@@ -695,8 +692,20 @@ static void render_obj_line(int line)
 
         for (int col = 0; col < box_w; col++)
         {
-            int sx = x + col + view_ox();
+            // An object's X is nine bits and the hardware wraps them at 512, so
+            // a sprite placed near the end of that range comes back round to
+            // the left of the screen. Done per column, as the hardware does it,
+            // rather than by deciding once per object whether its X "is
+            // negative" -- that decision is a guess, and it is a free one only
+            // while the viewport is the hardware's 240, where everything from
+            // 240 to 511 is invisible either way. A wider one collects the
+            // bill: an X between 256 and the left margin belongs in the right
+            // of the picture and is read as off the left edge instead.
+            int sx = ((x + col) & 0x1FF) + view_ox();
             int across = mosaic_snap(col, mos_h);
+
+            if (sx >= screen_w)
+                sx -= 0x200;
             int tx, ty;
             int index;
 
