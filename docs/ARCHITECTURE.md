@@ -1270,9 +1270,28 @@ decorates. Installing a 32-bit libdecor removes the need for that, and the log l
 used.
 
 The two drivers also disagree about what a window size *means* — Wayland takes logical pixels and
-scales them itself, X11 takes real ones — so the display's content scale is folded into the request.
-On a panel asking for 200% that is the difference between a comfortable window and a postage stamp.
-`FRLG_SCALE` overrides it.
+scales them itself, X11 takes real ones — so the same zoom fills more of a 200% panel under one than
+under the other. The display's content scale is deliberately *not* folded into the request: doing
+that turned a 6 into a 12, a zoom nobody asked for and one digit too wide for the row that shows it.
+`FRLG_SCALE` overrides the setting, and a zoom whose window would not fit the display is reduced
+until it does, because a window taller than the screen opens with its title bar out of reach on some
+compositors.
+
+**The picture fills the window.** Zoom is the size the window *opens* at, counted in whole game
+screens; `host_video_set_zoom` resizes the window rather than resizing a pixel. After that the frame
+is scaled to whatever the window is, centred, keeping its 3:2 shape, so whichever axis has room to
+spare is the one that gets the bars. The scale is fractional on purpose — stopping at whole multiples
+leaves most of a step of the window unused on any display whose height is not a multiple of 160,
+which is most of them. One consequence to know about: at a fractional scale a nearest-neighbour
+sample makes some game pixels a screen pixel wider than others, which is visible on text if you look
+for it. The arithmetic is `host_video_fit_rect` in `platform/host/src/video_fit.c`, kept out of the
+backend so `tests/test_video_fit.c` can pin it without opening a window.
+
+The viewport behind it stays at the hardware's 240×160. An earlier arrangement grew the viewport with
+the window, so a bigger window asked for more *world* rather than a bigger picture; that needs a field
+camera which draws past the hardware's frame, and it is being worked out on the
+`spike/beyond-the-hardware` branch instead. `FRLG_VIEW` still composes at another size for headless
+work, and the fit is told the source size rather than assuming it.
 
 `host.h` is the whole porting surface. A new platform implements it and nothing else:
 

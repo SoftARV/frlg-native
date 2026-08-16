@@ -58,6 +58,15 @@ target_include_directories(test_options PRIVATE
 target_compile_definitions(test_options PRIVATE
     FRLG_TEST_OPTIONS_SAVE="${CMAKE_CURRENT_BINARY_DIR}/test_options.sav")
 
+# Where the picture lands inside a window that is not its shape. Backend-free
+# on purpose: the arithmetic is the part worth pinning, and pinning it does not
+# need a window.
+frlg_add_test(test_video_fit)
+target_sources(test_video_fit PRIVATE
+    "${CMAKE_SOURCE_DIR}/platform/host/src/video_fit.c")
+target_include_directories(test_video_fit PRIVATE
+    "${CMAKE_SOURCE_DIR}/platform/host/include")
+
 # The first display stage. Needs the seam it registers into, so both are
 # compiled in and the test supplies present and log.
 frlg_add_test(test_filter_screen)

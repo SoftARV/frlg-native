@@ -1034,34 +1034,20 @@ int main(int argc, char **argv)
         if (trace_out == NULL && trace_count == 0)
             *(volatile uint16_t *)(agb_mem.io + REG_OFF_KEYINPUT) = host_input_keys();
 
-        // How much world fits, at the zoom the player chose. The window is the
-        // question and the viewport is the answer; the renderer clamps it to
-        // what the game actually has drawn (ADR-less for now: agb/ppu.h says
-        // why 256 and not more).
+        // The viewport is the hardware's frame, and the window scales it rather
+        // than asking for more of it. Asking for more is a question for the
+        // field camera, not for this loop, and it is being answered on the
+        // spike/beyond-the-hardware branch.
         {
             const char *want = getenv("FRLG_VIEW");
-            int win_w = 0, win_h = 0, z = host_video_zoom();
             int vw = 0, vh = 0;
 
             // The environment wins here as everywhere else, and it is what lets
             // a headless run compose something other than the native size.
             if (want != NULL && sscanf(want, "%dx%d", &vw, &vh) == 2)
-            {
                 agb_ppu_set_viewport(vw, vh);
-            }
-            else if (!agb_port_field_active())
-            {
-                // Menus, battles and the like are drawn for the hardware's
-                // size; past that edge there is nothing of theirs to show. They
-                // keep it, and the window letterboxes them.
-                agb_ppu_set_viewport(AGB_PPU_MIN_W, AGB_PPU_MIN_H);
-            }
             else
-            {
-                host_video_window_size(&win_w, &win_h);
-                if (z > 0 && win_w > 0 && win_h > 0)
-                    agb_ppu_set_viewport(win_w / z, win_h / z);
-            }
+                agb_ppu_set_viewport(AGB_PPU_MIN_W, AGB_PPU_MIN_H);
         }
 
         // FRLG_VRAM_DUMP writes video memory to a file, overwritten each frame,

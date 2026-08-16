@@ -25,17 +25,14 @@ bool host_video_open(const char *title, int width, int height, int scale);
 void host_video_close(void);
 void host_video_present(const uint32_t *rgba, int width, int height);
 
-// The size of one game pixel on screen. Independent of the window: a bigger
-// window shows more of the world at the same zoom, rather than the same amount
-// of world made larger.
+// The window's size, counted in whole game screens: setting it resizes the
+// window. It is a starting size and not a fixed size for a pixel, because the
+// picture is scaled to fill whatever the window is, keeping its shape.
 int host_video_zoom(void);
 void host_video_set_zoom(int zoom);
 
 bool host_video_fullscreen(void);
 void host_video_set_fullscreen(bool on);
-
-// In real pixels, so the caller can work out how much world now fits.
-void host_video_window_size(int *width, int *height);
 
 // False once the user has asked to quit.
 bool host_pump_events(void);

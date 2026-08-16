@@ -8,6 +8,7 @@
 
 #include "host.h"
 #include "host_settings.h"
+#include "host_video_fit.h"
 
 // Drift between the game's frame pacing and the sound card's clock has to show
 // up somewhere; these are where it does.
@@ -47,6 +48,21 @@ static const struct
 };
 
 #define KEY_MAP_COUNT ((int)(sizeof(key_map) / sizeof(key_map[0])))
+
+// A window larger than the display opens with its title bar off the top on some
+// compositors, where it cannot be dragged back.
+static int zoom_that_fits(int want, int width, int height)
+{
+    SDL_Rect usable;
+
+    if (!SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable))
+        return want;
+
+    while (want > 1 && (width * want > usable.w || height * want > usable.h))
+        want--;
+
+    return want;
+}
 
 // A window with no way to close it is no use for testing, and that is what
 // Wayland gives a build that cannot load libdecor: the compositor draws no
@@ -119,37 +135,14 @@ bool host_video_open(const char *title, int width, int height, int scale)
         if (scale > 9)
             scale = 9;
 
-        snprintf(line, sizeof(line), "zoom %d (one game pixel is %d on screen)",
-                 scale, scale);
+        // And down again if that does not fit on the display, which is why the
+        // default is chosen for a desk monitor rather than for the smallest
+        // laptop anyone owns.
+        scale = zoom_that_fits(scale, width, height);
+
+        snprintf(line, sizeof(line), "zoom %d (window opens at %dx%d)",
+                 scale, width * scale, height * scale);
         host_log(line);
-    }
-
-    // And down again if that does not fit on the display. A window larger than
-    // the screen opens with its title bar off the top on some compositors,
-    // where it cannot be dragged back -- so the default is chosen for a desk
-    // monitor and reduced here rather than for the smallest laptop anyone owns.
-    {
-        SDL_Rect usable;
-
-        if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable))
-        {
-            int fitted = scale;
-
-            while (fitted > 1
-               && (width * fitted > usable.w || height * fitted > usable.h))
-                fitted--;
-
-            if (fitted != scale)
-            {
-                char line[96];
-
-                snprintf(line, sizeof(line),
-                         "zoom %d does not fit %dx%d, using %d",
-                         scale, usable.w, usable.h, fitted);
-                host_log(line);
-                scale = fitted;
-            }
-        }
     }
 
     if (!SDL_CreateWindowAndRenderer(title, width * scale, height * scale,
@@ -179,10 +172,10 @@ bool host_video_open(const char *title, int width, int height, int scale)
     // grid, and smoothing it is a decision for a display mode, not a default.
     SDL_SetTextureScaleMode(frame, SDL_SCALEMODE_NEAREST);
 
-    // No logical presentation. That is what made the picture stretch to fill
-    // the window: one fixed frame, magnified. Here the zoom is the size of a
-    // pixel and stays where it is put, and a bigger window asks the renderer
-    // for more of the world instead. The port reads the window and decides.
+    // The zoom is the size the window opens at, and nothing more: the picture
+    // is scaled to whatever the window is now. There is no more world to show
+    // past the hardware's frame, so a window with room to spare spends it on
+    // the frame rather than on black.
     zoom = scale;
     texture_w = width;
     texture_h = height;
@@ -230,12 +223,19 @@ void host_video_present(const uint32_t *rgba, int width, int height)
     SDL_UpdateTexture(frame, NULL, rgba, width * (int)sizeof(uint32_t));
 
     SDL_GetWindowSizeInPixels(window, &win_w, &win_h);
-    // Centred, and on whole pixels: the picture is a pixel grid and half a
-    // pixel of offset is visible on every edge in it.
-    dst.w = (float)(width * zoom);
-    dst.h = (float)(height * zoom);
-    dst.x = (float)((win_w - width * zoom) / 2);
-    dst.y = (float)((win_h - height * zoom) / 2);
+
+    // Fractional rather than whole multiples, because stopping at a whole one
+    // leaves most of a step of the window unused on any display whose size is
+    // not a multiple of the game's.
+    {
+        struct host_video_fit fit
+            = host_video_fit_rect(win_w, win_h, width, height);
+
+        dst.x = fit.x;
+        dst.y = fit.y;
+        dst.w = fit.w;
+        dst.h = fit.h;
+    }
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -264,20 +264,19 @@ void host_video_set_zoom(int value)
 {
     // Nine because the options screen prints one digit, and the window's own
     // scale is clamped to the same range so the two cannot disagree.
-    if (value >= 1 && value <= 9)
-        zoom = value;
-}
+    if (value < 1 || value > 9)
+        return;
 
-void host_video_window_size(int *width, int *height)
-{
-    int w = 0, h = 0;
+    zoom = value;
 
-    if (window)
-        SDL_GetWindowSizeInPixels(window, &w, &h);
-    if (width)
-        *width = w;
-    if (height)
-        *height = h;
+    // Resizing the window is the whole of what the setting does now. Skipped in
+    // fullscreen, where the window has no size of its own to set and the
+    // picture is already filling the display.
+    if (window && !fullscreen && texture_w > 0 && texture_h > 0)
+    {
+        zoom = zoom_that_fits(zoom, texture_w, texture_h);
+        SDL_SetWindowSize(window, texture_w * zoom, texture_h * zoom);
+    }
 }
 
 bool host_pump_events(void)
