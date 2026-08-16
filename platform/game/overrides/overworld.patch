@@ -1,32 +1,5 @@
 --- a/src/overworld.c
 +++ b/src/overworld.c
-@@ -1308,7 +1308,7 @@
-     }, {
-         .bg = 1,
-         .charBaseIndex = 0,
--        .mapBaseIndex = 29,
-+        .mapBaseIndex = 26,   // 0xD000, 4 KB clear above it
-         .screenSize = 0,
-         .paletteMode = 0,
-         .priority = 1,
-@@ -1316,7 +1316,7 @@
-     }, {
-         .bg = 2,
-         .charBaseIndex = 0,
--        .mapBaseIndex = 28,
-+        .mapBaseIndex = 12,   // 0x6000, 4 KB clear above it
-         .screenSize = 0,
-         .paletteMode = 0,
-         .priority = 2,
-@@ -1324,7 +1324,7 @@
-     }, {
-         .bg = 3,
-         .charBaseIndex = 0,
--        .mapBaseIndex = 30,
-+        .mapBaseIndex = 14,   // 0x7000, 4 KB clear above it
-         .screenSize = 0,
-         .paletteMode = 0,
-         .priority = 3,
 @@ -1472,14 +1472,22 @@
  }
  
