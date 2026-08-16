@@ -9,54 +9,35 @@
 int agb_ppu_width(void);
 int agb_ppu_height(void);
 
-// The viewport is a window onto the backgrounds the game already draws, so the
-// ceiling is not this renderer's to choose: it is however much map the field
-// keeps drawn. That is 64x32 tiles -- 512x256 pixels -- since the map layers
-// were widened and the camera taught to fill them.
+// The viewport is a window onto the backgrounds the field draws, so the ceiling
+// is not this renderer's to choose: it is however much map is kept drawn. That
+// is 64x64 tiles, 512x512 pixels, read straight out of the game's own buffer
+// rather than from VRAM at one of the four sizes a register can name (ADR 0024).
 //
-// The window that scrolls over those 512x256 is smaller than they are, and by
-// more than the arithmetic of "512 minus the scroll" suggests.
+// The window that scrolls over it is smaller, because the camera does not redraw
+// the map as it moves -- it rotates. The row leaving one edge is the row
+// rewritten for the other, so at every metatile step one row and one column hold
+// the far side's new content, and the view has to be small enough that both are
+// off screen while it happens. Otherwise a strip of the map ahead appears at the
+// edge behind: that was "walking left or down leaves artifacts at the edge", and
+// it was issue 12's eight pixels along the bottom, which the second half of the
+// buffer's height put out of reach.
 //
-// The camera does not redraw the map as it moves. It rotates: the row leaving
-// one edge is the row rewritten for the other, so at every metatile step one
-// row and one column of the buffer briefly hold the *far* side's new content.
-// The view has to be small enough that those two are off screen when it
-// happens, or a strip of the map ahead appears at the edge behind -- which is
-// what "walking left or down leaves artifacts at the edge" was.
+// Across, the buffer is 512 and the camera's scroll offset decides where the
+// spare room sits: 128 - (W - 240) / 2 is a whole metatile only up to W = 464.
 //
-// So the view has to leave a whole metatile spare on *each* side of both axes,
-// and where that spare sits is fixed by the camera's scroll offsets rather than
-// being split evenly. Horizontally the offset is 8 metatiles (VIEW_SCROLL_X):
-// the room left of the view is 128 - (W - 240) / 2, which is a metatile only up
-// to W = 464 -- at 480 it is half of one, and the column written for the right
-// edge spills eight pixels into the left of the screen. Vertically the offset is
-// two metatiles and a half, and 192 is where the view ends on one of the fill
-// grid's own lines rather than between two of them.
+// Down, the buffer has room to spare and the ceiling is somewhere else entirely.
+// **An object's Y is eight bits.** Everything the hardware can place vertically
+// lives in 256 pixels, and objects must exist below the view before they are
+// seen -- the field spawns them nine metatiles past the player, which reaches
+// 248. A view of 240 puts its own top edge 256 pixels above that, which is the
+// same place: NPCs standing below the screen were drawn along the top of it, and
+// walking towards them made them vanish, because that moved them out of the
+// aliasing and not into view.
 //
-// That last part is where the reasoning runs out. Ending on a line should leave
-// the rewritten row whole and off screen, and it does not: walking up still
-// draws about eight pixels of somewhere else along the bottom, for the one step
-// it takes to cover them. 240, 224, 208 and 192 have all been played or
-// measured; the strip shrinks with the ceiling and does not go away. So the
-// height is not the lever, and issue #12 holds what is known -- including that
-// the two detectors written for it both look for the wrong thing.
-//
-// Both were measured rather than derived -- a walk in each direction, looking
-// for a strip that fails to scroll with the rest of the frame. Raising either
-// brings the artifact back at that edge only, and only while walking.
-//
-// **The height does not go up by making the map layers taller.** 64x64 tiles
-// would give the camera twice the rows and put the rewritten one well out of
-// sight, and there is nowhere to put them: the field's tilesets fill 0x0000 to
-// 0x7FFF exactly, BG0 takes 0x8000 for its own tiles and 0xF800 for its map, and
-// the 14 KB left between them holds three 4 KB layers but not three of 8 KB.
-//
-// Behind that is a wall no amount of VRAM moves. An object's Y is eight bits, so
-// everything the hardware can place vertically lives in 256 pixels, and a view
-// taller than that draws the same NPC twice. Allowing for where objects have to
-// sit before they are seen, the real ceiling on this axis is somewhere near 240
-// -- 48 pixels above where it is now, for a change that touches the camera, the
-// tilemaps, both wrap points and the VRAM map.
+// 192 is where that stays small. Lifting it means giving the renderer the
+// position the game computed instead of the eight bits that survived OAM, which
+// is the next step of ADR 0024 and what the width is waiting on too.
 //
 // The floor is the hardware's own size, because showing less than a Game Boy
 // Advance did would hide things the game put on screen.

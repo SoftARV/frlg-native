@@ -46,51 +46,55 @@
          .paletteMode = 0,
          .priority = 3,
          .baseTile = 0x000
-@@ -1341,12 +1349,18 @@
+@@ -1341,12 +1349,20 @@
      SetBgAttribute(1, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(2, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(3, BG_ATTR_MOSAIC, TRUE);
 -    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE);
 -    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE);
 -    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE);
-+    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE * 2);
-+    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE * 2);
-+    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE * 2);
++    // 64x64 tiles: four times a hardware screen block, 8 KB apiece. The heap is
++    // 112 KB and this is the only thing in it that grew.
++    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE * 4);
++    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE * 4);
++    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE * 4);
      SetBgTilemapBuffer(1, gBGTilemapBuffers2);
      SetBgTilemapBuffer(2, gBGTilemapBuffers1);
      SetBgTilemapBuffer(3, gBGTilemapBuffers3);
 +    // And hand the same three to the renderer, which reads them where they are
 +    // instead of the copy the hardware would need in VRAM (ADR 0024). The size
 +    // is the buffer's own from here on, not one of the four a register can say.
-+    agb_ppu_set_bg_source(1, gBGTilemapBuffers2, 64, 32);
-+    agb_ppu_set_bg_source(2, gBGTilemapBuffers1, 64, 32);
-+    agb_ppu_set_bg_source(3, gBGTilemapBuffers3, 64, 32);
++    agb_ppu_set_bg_source(1, gBGTilemapBuffers2, 64, 64);
++    agb_ppu_set_bg_source(2, gBGTilemapBuffers1, 64, 64);
++    agb_ppu_set_bg_source(3, gBGTilemapBuffers3, 64, 64);
      InitStandardTextBoxWindows();
      InitTextBoxGfxAndPrinters();
      InitFieldMessageBox();
-@@ -1359,12 +1373,18 @@
+@@ -1359,12 +1375,20 @@
      SetBgAttribute(1, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(2, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(3, BG_ATTR_MOSAIC, TRUE);
 -    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE);
 -    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE);
 -    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE);
-+    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE * 2);
-+    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE * 2);
-+    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE * 2);
++    // 64x64 tiles: four times a hardware screen block, 8 KB apiece. The heap is
++    // 112 KB and this is the only thing in it that grew.
++    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE * 4);
++    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE * 4);
++    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE * 4);
      SetBgTilemapBuffer(1, gBGTilemapBuffers2);
      SetBgTilemapBuffer(2, gBGTilemapBuffers1);
      SetBgTilemapBuffer(3, gBGTilemapBuffers3);
 +    // And hand the same three to the renderer, which reads them where they are
 +    // instead of the copy the hardware would need in VRAM (ADR 0024). The size
 +    // is the buffer's own from here on, not one of the four a register can say.
-+    agb_ppu_set_bg_source(1, gBGTilemapBuffers2, 64, 32);
-+    agb_ppu_set_bg_source(2, gBGTilemapBuffers1, 64, 32);
-+    agb_ppu_set_bg_source(3, gBGTilemapBuffers3, 64, 32);
++    agb_ppu_set_bg_source(1, gBGTilemapBuffers2, 64, 64);
++    agb_ppu_set_bg_source(2, gBGTilemapBuffers1, 64, 64);
++    agb_ppu_set_bg_source(3, gBGTilemapBuffers3, 64, 64);
      InitStandardTextBoxWindows();
      InitTextBoxGfxAndPrinters();
      InitFieldMessageBox();
-@@ -1372,6 +1392,10 @@
+@@ -1372,6 +1396,10 @@
  
  void CleanupOverworldWindowsAndTilemaps(void)
  {
@@ -101,7 +105,7 @@
      FreeAllOverworldWindowBuffers();
      Free(gBGTilemapBuffers3);
      Free(gBGTilemapBuffers1);
-@@ -1472,14 +1496,22 @@
+@@ -1472,14 +1500,22 @@
  }
  
  // This CB2 is used when starting
