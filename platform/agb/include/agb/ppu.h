@@ -33,11 +33,10 @@ int agb_ppu_height(void);
 // given the position the game computed now (ADR 0024), so there is nothing left
 // to come round.
 //
-// 240 rather than the 400 the buffer would allow, because two things still wrap
-// at 256: an object drawn from several OAM entries, which takes its base from
-// the truncated value, and any screen that writes OAM itself. Neither is common
-// in the field and both are visible only past this, so this is where the next
-// evidence has to come from rather than the next derivation.
+// 240 rather than the 400 the buffer would allow, because what is left unhooked
+// still wraps at 256: a screen that writes OAM itself rather than going through
+// the sprite engine. The field does not, so this is where the next evidence has
+// to come from rather than the next derivation.
 //
 // The floor is the hardware's own size, because showing less than a Game Boy
 // Advance did would hide things the game put on screen.
@@ -69,8 +68,7 @@ void agb_ppu_set_bg_source(int bg, const void *tilemap, int width, int height);
 //
 // By OAM slot, and cleared every time the sprite engine rebuilds the buffer. A
 // slot with nothing set is placed from OAM and wraps as the hardware does, which
-// is what every screen but the field gets, and what an object drawn from several
-// OAM entries still gets.
+// is what a screen writing OAM itself gets.
 void agb_ppu_set_object_position(int slot, int x, int y);
 void agb_ppu_clear_object_positions(void);
 

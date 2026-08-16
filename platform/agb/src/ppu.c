@@ -699,9 +699,8 @@ static int obj_texel(uint32_t offset, int is_256, int tx, int palette)
 // it computes these as a signed pair and hands them over to be cut.
 //
 // Indexed by OAM slot, and only for the slots the sprite engine filled this
-// frame. Anything else -- a screen writing OAM directly, an object drawn from
-// several entries -- has no entry here and is placed from the nine and eight
-// bits, wrapping as the hardware does.
+// frame. A screen that writes OAM itself has no entry here and is placed from
+// the nine and eight bits, wrapping as the hardware does.
 static struct
 {
     int16_t x;

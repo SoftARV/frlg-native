@@ -62,6 +62,12 @@ number rather than against a register.
 its map through the buffer, so this is about the port's own tools: the VRAM dump no longer shows the
 map layers, and the golden harness sees no change because it captures frames rather than memory.
 
+**An object's position is recorded on both routes out of the sprite engine.** One that becomes a
+single OAM entry, and one that becomes several — which every field object event does, because they
+all set `SUBSPRITES_IGNORE_PRIORITY`. That was assumed to be the rare case and is the only case that
+matters here; the second route works its base out from the already-truncated coordinate, so it needs
+the untruncated one handed to it separately.
+
 **It is per background, and opt-in.** A background with no override is read from VRAM exactly as
 before, at one of the four sizes, with the hardware's wrapping. Every screen that is not the field
 keeps the machine it had, which is what keeps the blast radius to the field and the tests honest.

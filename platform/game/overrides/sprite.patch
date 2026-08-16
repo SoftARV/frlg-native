@@ -20,18 +20,17 @@
      while (i < MAX_SPRITES)
      {
          struct Sprite *sprite = &gSprites[gSpriteOrder[i]];
-@@ -1657,6 +1665,19 @@
+@@ -1657,6 +1665,18 @@
      if (!sprite->subspriteTables || sprite->subspriteMode == SUBSPRITES_OFF)
      {
          gMain.oamBuffer[*oamIndex] = sprite->oam;
 +        // The same sum UpdateOamCoords made, kept whole. That one assigns it to
 +        // a nine-bit field and an eight-bit one; this is what it was before.
 +        //
-+        // Only for an object that is one OAM entry, which is every NPC and every
-+        // item on the ground. One drawn from several entries takes its base from
-+        // the truncated oam.x below, so its parts would have to be worked out
-+        // again from here -- and it is a rarity in the field, so it keeps the
-+        // hardware's wrapping until something needs otherwise.
++        // For an object that is one OAM entry. Every field object event is not:
++        // they set SUBSPRITES_IGNORE_PRIORITY, so NPCs, items and signs all go
++        // the other way, and that path needs the same thing done from a base it
++        // works out for itself.
 +        agb_ppu_set_object_position(*oamIndex,
 +            sprite->x + sprite->x2 + sprite->centerToCornerVecX
 +                + (sprite->coordOffsetEnabled ? gSpriteCoordOffsetX : 0),
@@ -40,3 +39,37 @@
          (*oamIndex)++;
          return 0;
      }
+@@ -1692,6 +1712,8 @@
+         u8 hFlip;
+         u8 vFlip;
+         u8 i;
++        s16 trueBaseX;
++        s16 trueBaseY;
+ 
+         tileNum = oam->tileNum;
+         subspriteCount = subspriteTable->subspriteCount;
+@@ -1700,6 +1722,16 @@
+         baseX = oam->x - sprite->centerToCornerVecX;
+         baseY = oam->y - sprite->centerToCornerVecY;
+ 
++        // The same base before OAM cut it down: oam->x is this sum assigned to
++        // nine bits and oam->y to eight, so subtracting the corner vector from
++        // them gets back the game's own value only while it fits. Every object
++        // event in the field comes through here, so this is where the wider view
++        // gets its positions from.
++        trueBaseX = sprite->x + sprite->x2
++                  + (sprite->coordOffsetEnabled ? gSpriteCoordOffsetX : 0);
++        trueBaseY = sprite->y + sprite->y2
++                  + (sprite->coordOffsetEnabled ? gSpriteCoordOffsetY : 0);
++
+         for (i = 0; i < subspriteCount; i++, (*oamIndex)++)
+         {
+             u16 x;
+@@ -1735,6 +1767,7 @@
+             destOam[i].x = (s16)baseX + (s16)x;
+             destOam[i].y = baseY + y;
+             destOam[i].tileNum = tileNum + subspriteTable->subsprites[i].tileOffset;
++            agb_ppu_set_object_position(*oamIndex, trueBaseX + (s16)x, trueBaseY + (s16)y);
+ 
+             if (sprite->subspriteMode != SUBSPRITES_IGNORE_PRIORITY)
+                 destOam[i].priority = subspriteTable->subsprites[i].priority;
