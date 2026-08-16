@@ -36,6 +36,30 @@ static int screen_h = NATIVE_H;
 // every side rather than accumulating at the right and the bottom. Everything
 // the game positions in the hardware's own coordinates -- scroll offsets, object
 // positions, window edges -- is shifted by this to land where it always did.
+// A background the game hands over directly, instead of one read from VRAM.
+// ADR 0024: the four sizes and the two-block layout are a register's limits, not
+// the game's, and the game already keeps its map in a plain array.
+static struct
+{
+    const uint8_t *tilemap;
+    int width;
+    int height;
+} bg_source[4];
+
+void agb_ppu_set_bg_source(int bg, const void *tilemap, int width, int height)
+{
+    if (bg < 0 || bg > 3)
+        return;
+    if (tilemap == NULL || width <= 0 || height <= 0)
+    {
+        bg_source[bg].tilemap = NULL;
+        return;
+    }
+    bg_source[bg].tilemap = tilemap;
+    bg_source[bg].width = width;
+    bg_source[bg].height = height;
+}
+
 static int view_ox(void)
 {
     return (screen_w - NATIVE_W) / 2;
@@ -361,8 +385,15 @@ static void render_text_bg_line(int bg, int line)
     uint16_t mosaic = io16(REG_MOSAIC);
     int mos_h = (control & BGCNT_MOSAIC) ? MOSAIC_BG_H(mosaic) : 1;
     int mos_v = (control & BGCNT_MOSAIC) ? MOSAIC_BG_V(mosaic) : 1;
-    int width_mask = (size == 1 || size == 3) ? 0x1FF : 0xFF;
-    int height_mask = (size == 2 || size == 3) ? 0x1FF : 0xFF;
+    // A handed-over background is as big as it says it is, and wraps there; one
+    // read from VRAM is one of the register's four sizes. Both wrap by masking,
+    // so the buffer's dimensions have to be powers of two -- which costs
+    // nothing, since the field's are chosen rather than given.
+    const uint8_t *source = bg_source[bg].tilemap;
+    int width_mask = source ? bg_source[bg].width * 8 - 1
+                            : ((size == 1 || size == 3) ? 0x1FF : 0xFF);
+    int height_mask = source ? bg_source[bg].height * 8 - 1
+                             : ((size == 2 || size == 3) ? 0x1FF : 0xFF);
     int src_y = (mosaic_snap(line, mos_v) - view_oy() + vofs) & height_mask;
 
     // A background smaller than the viewport is drawn once, where the hardware's
@@ -391,9 +422,21 @@ static void render_text_bg_line(int bg, int line)
             continue;
         int map_x = src_x >> 3;
         int map_y = src_y >> 3;
-        const uint8_t *block = screen + screen_block_offset(size, map_x, map_y);
-        int entry_index = ((map_y & 31) * 32 + (map_x & 31)) * 2;
-        uint16_t entry = (uint16_t)(block[entry_index] | (block[entry_index + 1] << 8));
+        const uint8_t *block;
+        int entry_index;
+        uint16_t entry;
+
+        if (source != NULL)
+        {
+            block = source;
+            entry_index = (map_y * bg_source[bg].width + map_x) * 2;
+        }
+        else
+        {
+            block = screen + screen_block_offset(size, map_x, map_y);
+            entry_index = ((map_y & 31) * 32 + (map_x & 31)) * 2;
+        }
+        entry = (uint16_t)(block[entry_index] | (block[entry_index + 1] << 8));
 
         int px = src_x & 7;
         int py = src_y & 7;

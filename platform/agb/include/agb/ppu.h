@@ -65,6 +65,22 @@ int agb_ppu_height(void);
 #define AGB_PPU_MAX_W 464
 #define AGB_PPU_MAX_H 192
 
+// Read a background from the game's own tilemap buffer instead of from VRAM.
+//
+// A text background is one of four sizes because two bits in a register say so.
+// The game does not think in those two bits: it builds its map into a plain
+// array in its own heap and copies it into the shape the hardware wants. Given
+// the array, this renderer can read it at whatever size it actually is, and the
+// copy -- and the four sizes, and the two-block layout a 64-tile-wide map has to
+// be written in -- stop applying. See ADR 0024.
+//
+// `tilemap` is entries of two bytes, row-major, `width` by `height` tiles, and
+// wraps on both axes like the hardware's own. It must outlive the frames it is
+// used for. NULL puts the background back on VRAM, which is where every one of
+// them starts: this is opt-in, per background, so a screen that has not asked
+// for it keeps exactly the machine it had.
+void agb_ppu_set_bg_source(int bg, const void *tilemap, int width, int height);
+
 // Clamped to the range above. Returns true if the viewport is now different
 // from what it was, which is the caller's cue to resize anything it keeps in
 // step with it.

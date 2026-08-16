@@ -33,6 +33,11 @@ frlg_add_test(test_ppu_mosaic)
 frlg_add_test(test_ppu_bitmap)
 frlg_add_test(test_ppu_scanline_irq)
 
+# A background read from the game's own buffer rather than from VRAM. Handing
+# over a copy of what VRAM holds must change nothing, which is what makes it safe
+# to switch on for one background and not the others.
+frlg_add_test(test_ppu_bg_source)
+
 # A wider viewport must show more, never different. The fault this guards
 # against renders every layer correctly and only gets their relationship wrong,
 # which looks plausible on screen and is obvious under comparison.
