@@ -68,6 +68,7 @@ WATCHED = {
     "src/start_menu.c": "diff-patched: scrolling list and the port's entry",
     "src/field_camera.c": "diff-patched: the map buffer is wider, centred on the player, and reads through map connections",
     "src/event_object_movement.c": "diff-patched: object events spawn as far out as the view reaches",
+    "src/bg.c": "diff-patched: a background handed to the renderer is forgotten when the screen changes",
 }
 
 

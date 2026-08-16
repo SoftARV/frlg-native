@@ -1,0 +1,26 @@
+--- a/src/bg.c
++++ b/src/bg.c
+@@ -339,11 +339,23 @@
+     return 0;
+ }
+ 
++// platform/agb/src/ppu.c: read this background from the game's own buffer.
++extern void agb_ppu_set_bg_source(int bg, const void *tilemap, int width, int height);
++
+ void ResetBgsAndClearDma3BusyFlags(bool32 enableWindowTileAutoAlloc)
+ {
+     int i;
+     ResetBgs();
+ 
++    // Every screen starts here, and a background handed to the renderer belongs
++    // to the screen that handed it over -- the buffer is in the heap and will be
++    // freed. Forgetting them here is what stops the next screen rendering from
++    // one that has been (ADR 0024). The field sets its own again straight after.
++    for (i = 0; i < 4; i++)
++    {
++        agb_ppu_set_bg_source(i, NULL, 0, 0);
++    }
++
+     for (i = 0; i < 4; i++)
+     {
+         sDmaBusyBitfield[i] = 0;

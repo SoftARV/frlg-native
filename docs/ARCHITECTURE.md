@@ -212,8 +212,9 @@ changes, not pret's file.
 | Diff | Applies to | Reason |
 | --- | --- | --- |
 | `start_menu.patch` | `src/start_menu.c` | the pause menu scrolls, so the port can add an entry to a tile budget that is already exactly full |
-| `overworld.patch` | `src/overworld.c` | the field's map layers are 64 tiles wide, and the field tells the port when it is on screen |
+| `overworld.patch` | `src/overworld.c` | the field's map layers are 64 tiles wide, handed to the renderer directly, and the field tells the port when it is on screen |
 | `field_camera.patch` | `src/field_camera.c` | the camera fills those layers, centres them on the player, and reads through a map connection for what the buffer does not hold |
+| `bg.patch` | `src/bg.c` | a background handed to the renderer is forgotten when the screen that owns it goes away |
 | `event_object_movement.patch` | `src/event_object_movement.c` | object events spawn as far out as the view reaches, in a second pass so the nearer ones still get the slots |
 
 Two things about a patched source that are silent rather than loud, both found by them happening:

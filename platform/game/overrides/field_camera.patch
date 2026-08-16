@@ -12,15 +12,10 @@
      u8 yPixelOffset;
      u8 xTileOffset;
      u8 yTileOffset;
-@@ -30,6 +33,36 @@
+@@ -30,6 +33,45 @@
  static void DrawMetatile(s32 a, const u16 *b, u16 c);
  static void CameraPanningCB_PanAhead(void);
  
-+// A 64-tile-wide background is two 32x32 screen blocks side by side, not one
-+// 64-wide array: a tile with x below 32 is in the first block, the rest are
-+// 0x400 entries further on, and a row is still 32 wide inside each. Writing it
-+// as though it were linear scatters every tile between the two, which draws a
-+// forest of duplicated columns with the player nowhere in it.
 +// The buffer holds 32x16 metatiles where the hardware's screen shows 15x10, and
 +// a centred viewport reaches equally far both ways -- so the player belongs in
 +// the middle of it rather than at the corner upstream drew from.
@@ -41,15 +36,29 @@
 +#define VIEW_SCROLL_X (8 * 16)
 +#define VIEW_SCROLL_Y (2 * 16 + 8)
 +
++// How wide the map buffer is, in tiles, and it is a plain row-major array of
++// that width.
++//
++// A 64-tile-wide *background* is not: the hardware reads it as two 32x32 screen
++// blocks side by side, so a tile with x below 32 is in the first block and the
++// rest are 0x400 entries further on, with rows still 32 wide inside each. This
++// used to be written that way, and writing it as though it were linear scattered
++// every tile between the two blocks -- a forest of duplicated columns with the
++// player nowhere in it.
++//
++// The renderer reads this buffer directly now (ADR 0024), so the shape is ours
++// to choose and the obvious one is available.
++#define TILEMAP_W 64
++
 +static u32 TilemapOffset(u32 x, u32 y)
 +{
-+    return (x >= 32 ? 0x400 : 0) + y * 32 + (x & 31);
++    return y * TILEMAP_W + x;
 +}
 +
  // IWRAM bss vars
  static struct FieldCameraOffset sFieldCameraOffset;
  static s16 sHorizontalCameraPan;
-@@ -54,7 +87,7 @@
+@@ -54,7 +96,7 @@
  static void tilemap_move_something(struct FieldCameraOffset *cameraOffset, u32 b, u32 c)
  {
      cameraOffset->xTileOffset += b;
@@ -58,7 +67,7 @@
      cameraOffset->yTileOffset += c;
      cameraOffset->yTileOffset %= 32;
  }
-@@ -62,6 +95,7 @@
+@@ -62,6 +104,7 @@
  static void coords8_add(struct FieldCameraOffset *cameraOffset, u32 b, u32 c)
  {
      cameraOffset->xPixelOffset += b;
@@ -66,7 +75,7 @@
      cameraOffset->yPixelOffset += c;
  }
  
-@@ -73,8 +107,8 @@
+@@ -73,8 +116,8 @@
  void FieldUpdateBgTilemapScroll(void)
  {
      u32 r4, r5;
@@ -77,7 +86,7 @@
  
      SetGpuReg(REG_OFFSET_BG1HOFS, r5);
      SetGpuReg(REG_OFFSET_BG1VOFS, r4);
-@@ -86,13 +120,14 @@
+@@ -86,13 +129,14 @@
  
  void FieldCameraGetPixelOffsetAtGround(s16 *hofs_p, s16 *vofs_p)
  {
@@ -95,7 +104,7 @@
     // sFieldCameraOffset.copyBGToVRAM = TRUE;
  }
  
-@@ -108,13 +143,13 @@
+@@ -108,13 +152,13 @@
          temp = sFieldCameraOffset.yTileOffset + i;
          if (temp >= 32)
              temp -= 32;
@@ -114,7 +123,7 @@
          }
      }
  }
-@@ -122,6 +157,33 @@
+@@ -122,6 +166,33 @@
  static void RedrawMapSlicesForCameraUpdate(struct FieldCameraOffset *cameraOffset, int x, int y)
  {
      const struct MapLayout *mapLayout = gMapHeader.mapLayout;
@@ -148,7 +157,7 @@
  
      if (x > 0)
          RedrawMapSliceWest(cameraOffset, mapLayout);
-@@ -140,16 +202,19 @@
+@@ -140,16 +211,19 @@
      u8 temp;
      u32 r7;
  
@@ -174,7 +183,7 @@
      }
  }
  
-@@ -157,14 +222,15 @@
+@@ -157,14 +231,15 @@
  {
      u8 i;
      u8 temp;
@@ -195,7 +204,7 @@
      }
  }
  
-@@ -179,7 +245,8 @@
+@@ -179,7 +254,8 @@
          temp = cameraOffset->yTileOffset + i;
          if (temp >= 32)
              temp -= 32;
@@ -205,7 +214,7 @@
      }
  }
  
-@@ -187,16 +254,21 @@
+@@ -187,16 +263,21 @@
  {
      u8 i;
      u8 temp;
@@ -231,7 +240,7 @@
      }
  }
  
-@@ -222,11 +294,93 @@
+@@ -222,11 +303,93 @@
      }
  }
  
@@ -325,7 +334,84 @@
      if (metatileId > NUM_METATILES_TOTAL)
          metatileId = 0;
      if (metatileId < NUM_METATILES_IN_PRIMARY)
-@@ -308,22 +462,22 @@
+@@ -247,58 +410,58 @@
+         // Draw metatile's bottom layer to the bottom background layer.
+         gBGTilemapBuffers3[offset] = tiles[0];
+         gBGTilemapBuffers3[offset + 1] = tiles[1];
+-        gBGTilemapBuffers3[offset + 0x20] = tiles[2];
+-        gBGTilemapBuffers3[offset + 0x21] = tiles[3];
++        gBGTilemapBuffers3[offset + TILEMAP_W] = tiles[2];
++        gBGTilemapBuffers3[offset + TILEMAP_W + 1] = tiles[3];
+ 
+         // Draw transparent tiles to the middle background layer.
+         gBGTilemapBuffers1[offset] = 0;
+         gBGTilemapBuffers1[offset + 1] = 0;
+-        gBGTilemapBuffers1[offset + 0x20] = 0;
+-        gBGTilemapBuffers1[offset + 0x21] = 0;
++        gBGTilemapBuffers1[offset + TILEMAP_W] = 0;
++        gBGTilemapBuffers1[offset + TILEMAP_W + 1] = 0;
+ 
+         // Draw metatile's top layer to the top background layer.
+         gBGTilemapBuffers2[offset] = tiles[4];
+         gBGTilemapBuffers2[offset + 1] = tiles[5];
+-        gBGTilemapBuffers2[offset + 0x20] = tiles[6];
+-        gBGTilemapBuffers2[offset + 0x21] = tiles[7];
++        gBGTilemapBuffers2[offset + TILEMAP_W] = tiles[6];
++        gBGTilemapBuffers2[offset + TILEMAP_W + 1] = tiles[7];
+         break;
+     case METATILE_LAYER_TYPE_COVERED:
+         // Draw metatile's bottom layer to the bottom background layer.
+         gBGTilemapBuffers3[offset] = tiles[0];
+         gBGTilemapBuffers3[offset + 1] = tiles[1];
+-        gBGTilemapBuffers3[offset + 0x20] = tiles[2];
+-        gBGTilemapBuffers3[offset + 0x21] = tiles[3];
++        gBGTilemapBuffers3[offset + TILEMAP_W] = tiles[2];
++        gBGTilemapBuffers3[offset + TILEMAP_W + 1] = tiles[3];
+ 
+         // Draw metatile's top layer to the middle background layer.
+         gBGTilemapBuffers1[offset] = tiles[4];
+         gBGTilemapBuffers1[offset + 1] = tiles[5];
+-        gBGTilemapBuffers1[offset + 0x20] = tiles[6];
+-        gBGTilemapBuffers1[offset + 0x21] = tiles[7];
++        gBGTilemapBuffers1[offset + TILEMAP_W] = tiles[6];
++        gBGTilemapBuffers1[offset + TILEMAP_W + 1] = tiles[7];
+ 
+         // Draw transparent tiles to the top background layer.
+         gBGTilemapBuffers2[offset] = 0;
+         gBGTilemapBuffers2[offset + 1] = 0;
+-        gBGTilemapBuffers2[offset + 0x20] = 0;
+-        gBGTilemapBuffers2[offset + 0x21] = 0;
++        gBGTilemapBuffers2[offset + TILEMAP_W] = 0;
++        gBGTilemapBuffers2[offset + TILEMAP_W + 1] = 0;
+         break;
+     case METATILE_LAYER_TYPE_NORMAL:
+         // Draw garbage to the bottom background layer.
+         gBGTilemapBuffers3[offset] = 0x3014;
+         gBGTilemapBuffers3[offset + 1] = 0x3014;
+-        gBGTilemapBuffers3[offset + 0x20] = 0x3014;
+-        gBGTilemapBuffers3[offset + 0x21] = 0x3014;
++        gBGTilemapBuffers3[offset + TILEMAP_W] = 0x3014;
++        gBGTilemapBuffers3[offset + TILEMAP_W + 1] = 0x3014;
+ 
+         // Draw metatile's bottom layer to the middle background layer.
+         gBGTilemapBuffers1[offset] = tiles[0];
+         gBGTilemapBuffers1[offset + 1] = tiles[1];
+-        gBGTilemapBuffers1[offset + 0x20] = tiles[2];
+-        gBGTilemapBuffers1[offset + 0x21] = tiles[3];
++        gBGTilemapBuffers1[offset + TILEMAP_W] = tiles[2];
++        gBGTilemapBuffers1[offset + TILEMAP_W + 1] = tiles[3];
+ 
+         // Draw metatile's top layer to the top background layer, which covers object event sprites.
+         gBGTilemapBuffers2[offset] = tiles[4];
+         gBGTilemapBuffers2[offset + 1] = tiles[5];
+-        gBGTilemapBuffers2[offset + 0x20] = tiles[6];
+-        gBGTilemapBuffers2[offset + 0x21] = tiles[7];
++        gBGTilemapBuffers2[offset + TILEMAP_W] = tiles[6];
++        gBGTilemapBuffers2[offset + TILEMAP_W + 1] = tiles[7];
+         break;
+     }
+     ScheduleBgCopyTilemapToVram(1);
+@@ -308,22 +471,22 @@
  
  static s32 MapPosToBgTilemapOffset(struct FieldCameraOffset *cameraOffset, s32 x, s32 y)
  {

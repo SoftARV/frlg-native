@@ -1,6 +1,16 @@
 --- a/src/overworld.c
 +++ b/src/overworld.c
-@@ -1308,24 +1308,29 @@
+@@ -111,6 +111,9 @@
+ 
+ EWRAM_DATA struct LinkPlayerObjectEvent gLinkPlayerObjectEvents[4] = {};
+ 
++// platform/agb/src/ppu.c: read this background from the game's own buffer.
++extern void agb_ppu_set_bg_source(int bg, const void *tilemap, int width, int height);
++
+ COMMON_DATA u16 *gBGTilemapBuffers1 = NULL;
+ COMMON_DATA u16 *gBGTilemapBuffers2 = NULL;
+ COMMON_DATA u16 *gBGTilemapBuffers3 = NULL;
+@@ -1308,24 +1311,29 @@
      }, {
          .bg = 1,
          .charBaseIndex = 0,
@@ -36,7 +46,7 @@
          .paletteMode = 0,
          .priority = 3,
          .baseTile = 0x000
-@@ -1341,9 +1346,9 @@
+@@ -1341,12 +1349,18 @@
      SetBgAttribute(1, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(2, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(3, BG_ATTR_MOSAIC, TRUE);
@@ -49,7 +59,16 @@
      SetBgTilemapBuffer(1, gBGTilemapBuffers2);
      SetBgTilemapBuffer(2, gBGTilemapBuffers1);
      SetBgTilemapBuffer(3, gBGTilemapBuffers3);
-@@ -1359,9 +1364,9 @@
++    // And hand the same three to the renderer, which reads them where they are
++    // instead of the copy the hardware would need in VRAM (ADR 0024). The size
++    // is the buffer's own from here on, not one of the four a register can say.
++    agb_ppu_set_bg_source(1, gBGTilemapBuffers2, 64, 32);
++    agb_ppu_set_bg_source(2, gBGTilemapBuffers1, 64, 32);
++    agb_ppu_set_bg_source(3, gBGTilemapBuffers3, 64, 32);
+     InitStandardTextBoxWindows();
+     InitTextBoxGfxAndPrinters();
+     InitFieldMessageBox();
+@@ -1359,12 +1373,18 @@
      SetBgAttribute(1, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(2, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(3, BG_ATTR_MOSAIC, TRUE);
@@ -62,7 +81,27 @@
      SetBgTilemapBuffer(1, gBGTilemapBuffers2);
      SetBgTilemapBuffer(2, gBGTilemapBuffers1);
      SetBgTilemapBuffer(3, gBGTilemapBuffers3);
-@@ -1472,14 +1477,22 @@
++    // And hand the same three to the renderer, which reads them where they are
++    // instead of the copy the hardware would need in VRAM (ADR 0024). The size
++    // is the buffer's own from here on, not one of the four a register can say.
++    agb_ppu_set_bg_source(1, gBGTilemapBuffers2, 64, 32);
++    agb_ppu_set_bg_source(2, gBGTilemapBuffers1, 64, 32);
++    agb_ppu_set_bg_source(3, gBGTilemapBuffers3, 64, 32);
+     InitStandardTextBoxWindows();
+     InitTextBoxGfxAndPrinters();
+     InitFieldMessageBox();
+@@ -1372,6 +1392,10 @@
+ 
+ void CleanupOverworldWindowsAndTilemaps(void)
+ {
++    // Before the free, not after: the renderer is holding these three.
++    agb_ppu_set_bg_source(1, NULL, 0, 0);
++    agb_ppu_set_bg_source(2, NULL, 0, 0);
++    agb_ppu_set_bg_source(3, NULL, 0, 0);
+     FreeAllOverworldWindowBuffers();
+     Free(gBGTilemapBuffers3);
+     Free(gBGTilemapBuffers1);
+@@ -1472,14 +1496,22 @@
  }
  
  // This CB2 is used when starting
