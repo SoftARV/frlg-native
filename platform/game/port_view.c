@@ -19,27 +19,26 @@
 #include "agb/ppu.h"
 
 // How much further than the hardware's screen the field view reaches, in
-// metatiles, on each side.
+// pixels, on each side. Zero at 240x160.
 //
-// Object events spawn in a window around the player, and upstream sizes that
-// window to the screen it had. A wider one shows ground the game has not spawned
-// anything on, so an NPC standing there does not exist until the player walks
-// close enough, and then appears out of nothing a few tiles inside the edge.
+// Two things in the game are sized to the screen it had, and an NPC standing
+// where a wider one can see them needs both:
 //
-// Zero at 240x160, which is what leaves upstream's window exactly as it was.
-u8 agb_port_view_margin_x(void)
+//   - the window object events *spawn* in, so that somebody out there exists at
+//     all rather than coming into being as the player walks up;
+//   - the test that decides an object is *off screen* and hides its sprite,
+//     which is the one that made the first look like it had done nothing.
+//
+// Pixels rather than metatiles because the second wants pixels; the first
+// divides.
+u16 agb_port_view_margin_x(void)
 {
-    int extra = (agb_ppu_width() - AGB_PPU_MIN_W) / 2;
-
-    // Rounded up: half a metatile of view still shows whoever stands in it.
-    return (u8)((extra + 15) / 16);
+    return (u16)((agb_ppu_width() - AGB_PPU_MIN_W) / 2);
 }
 
-u8 agb_port_view_margin_y(void)
+u16 agb_port_view_margin_y(void)
 {
-    int extra = (agb_ppu_height() - AGB_PPU_MIN_H) / 2;
-
-    return (u8)((extra + 15) / 16);
+    return (u16)((agb_ppu_height() - AGB_PPU_MIN_H) / 2);
 }
 
 // Two frames of grace. The field's callback runs once per frame, so one frame
