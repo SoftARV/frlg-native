@@ -44,7 +44,22 @@ static struct
     const uint8_t *tilemap;
     int width;
     int height;
+    int scroll_x;
+    int scroll_y;
 } bg_source[4];
+
+// Wrapping a background whose size is not a power of two. The coordinate is
+// never more than one period out -- the scroll is inside the buffer and the view
+// is smaller than it -- so this stays a pair of conditions rather than becoming
+// a division in the innermost loop there is.
+static int wrap_to(int value, int period)
+{
+    while (value < 0)
+        value += period;
+    while (value >= period)
+        value -= period;
+    return value;
+}
 
 void agb_ppu_set_bg_source(int bg, const void *tilemap, int width, int height)
 {
@@ -58,6 +73,24 @@ void agb_ppu_set_bg_source(int bg, const void *tilemap, int width, int height)
     bg_source[bg].tilemap = tilemap;
     bg_source[bg].width = width;
     bg_source[bg].height = height;
+    bg_source[bg].scroll_x = 0;
+    bg_source[bg].scroll_y = 0;
+}
+
+// The scroll for a handed-over background, which the register cannot hold.
+//
+// BGxHOFS is nine bits, because a background it was written for is at most 512
+// pixels across. This one is 640, so the value the camera computes comes back
+// out of the register as something 512 smaller -- the same truncation as an
+// object's position, in the same shape, wanting the same answer: ask the game
+// rather than reconstruct it. A background read from VRAM still uses the
+// register, which is the only thing that describes it.
+void agb_ppu_set_bg_scroll(int bg, int x, int y)
+{
+    if (bg < 0 || bg > 3)
+        return;
+    bg_source[bg].scroll_x = x;
+    bg_source[bg].scroll_y = y;
 }
 
 static int view_ox(void)
@@ -375,8 +408,10 @@ static int screen_block_offset(int size, int map_x, int map_y)
 static void render_text_bg_line(int bg, int line)
 {
     uint16_t control = io16(REG_BG0CNT + bg * 2);
-    int hofs = io16(REG_BG0HOFS + bg * 4) & 0x1FF;
-    int vofs = io16(REG_BG0HOFS + bg * 4 + 2) & 0x1FF;
+    int hofs = bg_source[bg].tilemap ? bg_source[bg].scroll_x
+                                     : (io16(REG_BG0HOFS + bg * 4) & 0x1FF);
+    int vofs = bg_source[bg].tilemap ? bg_source[bg].scroll_y
+                                     : (io16(REG_BG0HOFS + bg * 4 + 2) & 0x1FF);
     int size = BGCNT_SIZE(control);
     int is_256 = (control & BGCNT_256_COLOUR) != 0;
     const uint8_t *chars = agb_mem.vram + BGCNT_CHAR_BASE(control) * CHAR_BLOCK_SIZE;
@@ -385,16 +420,22 @@ static void render_text_bg_line(int bg, int line)
     uint16_t mosaic = io16(REG_MOSAIC);
     int mos_h = (control & BGCNT_MOSAIC) ? MOSAIC_BG_H(mosaic) : 1;
     int mos_v = (control & BGCNT_MOSAIC) ? MOSAIC_BG_V(mosaic) : 1;
-    // A handed-over background is as big as it says it is, and wraps there; one
-    // read from VRAM is one of the register's four sizes. Both wrap by masking,
-    // so the buffer's dimensions have to be powers of two -- which costs
-    // nothing, since the field's are chosen rather than given.
+    // A handed-over background is as big as it says it is and wraps there; one
+    // read from VRAM is one of the register's four sizes and wraps by masking.
+    // Masking is why the sizes are powers of two, and a buffer that is ours to
+    // shape need not be: 576 pixels of view wants 40 metatiles of map behind it,
+    // which is 640 and not a power of anything.
     const uint8_t *source = bg_source[bg].tilemap;
-    int width_mask = source ? bg_source[bg].width * 8 - 1
-                            : ((size == 1 || size == 3) ? 0x1FF : 0xFF);
-    int height_mask = source ? bg_source[bg].height * 8 - 1
-                             : ((size == 2 || size == 3) ? 0x1FF : 0xFF);
-    int src_y = (mosaic_snap(line, mos_v) - view_oy() + vofs) & height_mask;
+    int width_mask = (size == 1 || size == 3) ? 0x1FF : 0xFF;
+    int height_mask = (size == 2 || size == 3) ? 0x1FF : 0xFF;
+    int source_w = source ? bg_source[bg].width * 8 : 0;
+    int source_h = source ? bg_source[bg].height * 8 : 0;
+    int src_y = mosaic_snap(line, mos_v) - view_oy() + vofs;
+
+    if (source)
+        src_y = wrap_to(src_y, source_h);
+    else
+        src_y &= height_mask;
 
     // A background smaller than the viewport is drawn once, where the hardware's
     // screen is, instead of being tiled to fill it.
@@ -408,15 +449,20 @@ static void render_text_bg_line(int bg, int line)
     //
     // Anchoring it to the hardware's window is what a Game Boy Advance showed:
     // its 240 pixels, in the middle, with the map either side of them.
-    bool draw_once_h = width_mask + 1 < screen_w;
-    bool draw_once_v = height_mask + 1 < screen_h;
+    bool draw_once_h = (source ? source_w : width_mask + 1) < screen_w;
+    bool draw_once_v = (source ? source_h : height_mask + 1) < screen_h;
 
     if (draw_once_v && (line < view_oy() || line >= view_oy() + NATIVE_H))
         return;
 
     for (int x = 0; x < screen_w; x++)
     {
-        int src_x = (mosaic_snap(x, mos_h) - view_ox() + hofs) & width_mask;
+        int src_x = mosaic_snap(x, mos_h) - view_ox() + hofs;
+
+        if (source)
+            src_x = wrap_to(src_x, source_w);
+        else
+            src_x &= width_mask;
 
         if (draw_once_h && (x < view_ox() || x >= view_ox() + NATIVE_W))
             continue;

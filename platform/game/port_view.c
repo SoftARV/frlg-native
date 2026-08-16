@@ -49,17 +49,14 @@ u16 agb_port_view_margin_y(void)
 // what the wider view adds on top of that, and it is asked for per side because
 // the two ends are not alike.
 //
-// An object's coordinates are nine bits across and eight down, and the hardware
-// wraps them: one placed near the end of that range comes back round to the
-// *other* side of the picture. The renderer reproduces that, so the field must
-// not put an object there -- but only on the side the wrap runs towards. Going
-// the other way an object simply leaves the picture, which costs nothing.
+// Each side asks only for what the view needs. It used to ask for the smaller of
+// that and what the object coordinates had left, because OAM keeps nine bits of
+// an object's X and eight of its Y and the hardware wraps them -- so an object
+// placed near the end of that range came back round to the other side of the
+// picture, and the field had to not put one there.
 //
-// So the near side takes what it needs and the far side takes the smaller of
-// what it needs and what the coordinate space has left. At 464x192 that is six
-// metatiles left, five right, and nothing either way vertically -- upstream's
-// own window already reaches past the top and bottom of a 192-pixel view.
-#define OBJECT_SPAN_MAX 32   // the widest and tallest object, in pixels
+// The renderer is given the position the game computed now (ADR 0024), so there
+// is no range to run out of and no cap to apply.
 #define PLAYER_SCREEN_X 120  // where the player's own sprite sits, in the
 #define PLAYER_SCREEN_Y 72   // hardware's coordinates
 
@@ -78,15 +75,7 @@ u8 agb_port_view_spawn_left(void)
 
 u8 agb_port_view_spawn_right(void)
 {
-    int margin = agb_port_view_margin_x();
-    u8 needed = needed_beyond(AGB_PPU_MIN_W + margin - PLAYER_SCREEN_X, 10);
-    // Where the nine bits run out, less the widest object that must fit before
-    // them, less where the player already is.
-    int allowed = (0x200 - margin - OBJECT_SPAN_MAX - PLAYER_SCREEN_X) / 16 - 10;
-
-    if (allowed < 0)
-        allowed = 0;
-    return needed < allowed ? needed : (u8)allowed;
+    return needed_beyond(AGB_PPU_MIN_W + agb_port_view_margin_x() - PLAYER_SCREEN_X, 10);
 }
 
 u8 agb_port_view_spawn_up(void)
@@ -96,13 +85,7 @@ u8 agb_port_view_spawn_up(void)
 
 u8 agb_port_view_spawn_down(void)
 {
-    int margin = agb_port_view_margin_y();
-    u8 needed = needed_beyond(AGB_PPU_MIN_H + margin - PLAYER_SCREEN_Y, 9);
-    int allowed = (0x100 - margin - OBJECT_SPAN_MAX - PLAYER_SCREEN_Y) / 16 - 9;
-
-    if (allowed < 0)
-        allowed = 0;
-    return needed < allowed ? needed : (u8)allowed;
+    return needed_beyond(AGB_PPU_MIN_H + agb_port_view_margin_y() - PLAYER_SCREEN_Y, 9);
 }
 
 // Two frames of grace. The field's callback runs once per frame, so one frame

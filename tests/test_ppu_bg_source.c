@@ -92,6 +92,7 @@ static void test_handing_over_a_copy_changes_nothing(void)
     memcpy(vram_frame, agb_ppu_framebuffer(), sizeof(vram_frame));
 
     agb_ppu_set_bg_source(0, handed, 32, 32);
+    agb_ppu_set_bg_scroll(0, 0, 0);
     agb_ppu_render_frame();
     frame = agb_ppu_framebuffer();
 
@@ -122,7 +123,11 @@ static void test_a_bigger_buffer_wraps_where_it_ends(void)
         handed[ty * 64 + 40] = 1;
 
     agb_ppu_set_bg_source(0, handed, 64, 64);
-    io16(BG0HOFS, 320 - 8);
+    // Scrolled through the port rather than the register: nine bits cannot say
+    // 320 on a background that is 512 wide and could not say it at all on one
+    // wider. A handed-over background takes its scroll the same way it takes
+    // its size.
+    agb_ppu_set_bg_scroll(0, 320 - 8, 0);
     agb_ppu_render_frame();
     frame = agb_ppu_framebuffer();
 
@@ -132,7 +137,7 @@ static void test_a_bigger_buffer_wraps_where_it_ends(void)
 
     // And the wrap is at 64 tiles, not beyond: 512 pixels further on is the same
     // column again.
-    io16(BG0HOFS, (320 - 8 + 512) & 0x1FF);
+    agb_ppu_set_bg_scroll(0, 320 - 8 + 512, 0);
     agb_ppu_render_frame();
     CHECK(agb_ppu_framebuffer()[8] == green, "the buffer did not wrap at its own width");
 }
@@ -146,6 +151,7 @@ static void test_letting_go_returns_it_to_vram(void)
     fill_both(32, 32);
 
     agb_ppu_set_bg_source(0, handed, 32, 32);
+    agb_ppu_set_bg_scroll(0, 0, 0);
     agb_ppu_render_frame();
     memcpy(vram_frame, agb_ppu_framebuffer(), sizeof(vram_frame));
 

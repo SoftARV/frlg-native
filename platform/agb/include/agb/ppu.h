@@ -26,24 +26,23 @@ int agb_ppu_height(void);
 // Across, the buffer is 512 and the camera's scroll offset decides where the
 // spare room sits: 128 - (W - 240) / 2 is a whole metatile only up to W = 464.
 //
-// Down, the buffer has room to spare, and what used to stop it was an object's
-// eight-bit Y: the field spawns objects down to 248, a 240-tall view's top edge
-// is 256 pixels above that, and in eight bits those are the same place -- so
-// NPCs standing below the screen were drawn along the top of it. The renderer is
-// given the position the game computed now (ADR 0024), so there is nothing left
-// to come round.
+// Down, 360: the buffer is 512 and the camera's own offset leaves a metatile
+// spare at 400. What used to stop it well before that was an object's eight-bit
+// Y -- the field spawns objects to 248, a taller view's top edge is 256 above
+// that, and in eight bits those are the same place, so NPCs below the screen
+// were drawn along the top of it. Positions are exact now (ADR 0024).
 //
-// 240 rather than the 400 the buffer would allow, because what is left unhooked
-// still wraps at 256: a screen that writes OAM itself rather than going through
-// the sprite engine. The field does not, so this is where the next evidence has
-// to come from rather than the next derivation.
+// Across, still 464. 576 would want 40 metatiles of map behind it, and a buffer
+// that is not a power of two turned out to have more in it than the renderer's
+// wrapping -- spike 0013 has the one fault that was found, the one that was not,
+// and the groundwork that is already in place for the next attempt.
 //
 // The floor is the hardware's own size, because showing less than a Game Boy
 // Advance did would hide things the game put on screen.
 #define AGB_PPU_MIN_W 240
 #define AGB_PPU_MIN_H 160
 #define AGB_PPU_MAX_W 464
-#define AGB_PPU_MAX_H 240
+#define AGB_PPU_MAX_H 360
 
 // Read a background from the game's own tilemap buffer instead of from VRAM.
 //
@@ -60,6 +59,12 @@ int agb_ppu_height(void);
 // them starts: this is opt-in, per background, so a screen that has not asked
 // for it keeps exactly the machine it had.
 void agb_ppu_set_bg_source(int bg, const void *tilemap, int width, int height);
+
+// And its scroll, which BGxHOFS cannot hold either: nine bits describe a
+// background of at most 512 pixels, and a handed-over one may be wider. Only
+// consulted for a background that has been handed over; one read from VRAM uses
+// the register, which is the only thing that describes it.
+void agb_ppu_set_bg_scroll(int bg, int x, int y);
 
 // Where the game actually put an object, before OAM kept nine bits of it across
 // and eight down. The truncation is the encoding's rather than the game's, which

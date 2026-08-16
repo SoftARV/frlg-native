@@ -46,18 +46,20 @@
          .paletteMode = 0,
          .priority = 3,
          .baseTile = 0x000
-@@ -1341,12 +1349,20 @@
+@@ -1341,12 +1349,22 @@
      SetBgAttribute(1, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(2, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(3, BG_ATTR_MOSAIC, TRUE);
 -    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE);
 -    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE);
 -    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE);
-+    // 64x64 tiles: four times a hardware screen block, 8 KB apiece. The heap is
-+    // 112 KB and this is the only thing in it that grew.
-+    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE * 4);
-+    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE * 4);
-+    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE * 4);
++    // 64x64 tiles, 8 KB apiece. Not a multiple of a hardware screen block and no
++    // longer required to be, since the renderer reads these rather than a copy of
++    // them in VRAM -- but still a power of two, which is a different constraint
++    // and one the camera has not been made safe against. See spike 0013.
++    gBGTilemapBuffers2 = AllocZeroed(64 * 64 * 2);
++    gBGTilemapBuffers1 = AllocZeroed(64 * 64 * 2);
++    gBGTilemapBuffers3 = AllocZeroed(64 * 64 * 2);
      SetBgTilemapBuffer(1, gBGTilemapBuffers2);
      SetBgTilemapBuffer(2, gBGTilemapBuffers1);
      SetBgTilemapBuffer(3, gBGTilemapBuffers3);
@@ -70,18 +72,20 @@
      InitStandardTextBoxWindows();
      InitTextBoxGfxAndPrinters();
      InitFieldMessageBox();
-@@ -1359,12 +1375,20 @@
+@@ -1359,12 +1377,22 @@
      SetBgAttribute(1, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(2, BG_ATTR_MOSAIC, TRUE);
      SetBgAttribute(3, BG_ATTR_MOSAIC, TRUE);
 -    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE);
 -    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE);
 -    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE);
-+    // 64x64 tiles: four times a hardware screen block, 8 KB apiece. The heap is
-+    // 112 KB and this is the only thing in it that grew.
-+    gBGTilemapBuffers2 = AllocZeroed(BG_SCREEN_SIZE * 4);
-+    gBGTilemapBuffers1 = AllocZeroed(BG_SCREEN_SIZE * 4);
-+    gBGTilemapBuffers3 = AllocZeroed(BG_SCREEN_SIZE * 4);
++    // 64x64 tiles, 8 KB apiece. Not a multiple of a hardware screen block and no
++    // longer required to be, since the renderer reads these rather than a copy of
++    // them in VRAM -- but still a power of two, which is a different constraint
++    // and one the camera has not been made safe against. See spike 0013.
++    gBGTilemapBuffers2 = AllocZeroed(64 * 64 * 2);
++    gBGTilemapBuffers1 = AllocZeroed(64 * 64 * 2);
++    gBGTilemapBuffers3 = AllocZeroed(64 * 64 * 2);
      SetBgTilemapBuffer(1, gBGTilemapBuffers2);
      SetBgTilemapBuffer(2, gBGTilemapBuffers1);
      SetBgTilemapBuffer(3, gBGTilemapBuffers3);
@@ -94,7 +98,7 @@
      InitStandardTextBoxWindows();
      InitTextBoxGfxAndPrinters();
      InitFieldMessageBox();
-@@ -1372,6 +1396,10 @@
+@@ -1372,6 +1400,10 @@
  
  void CleanupOverworldWindowsAndTilemaps(void)
  {
@@ -105,7 +109,7 @@
      FreeAllOverworldWindowBuffers();
      Free(gBGTilemapBuffers3);
      Free(gBGTilemapBuffers1);
-@@ -1472,14 +1500,22 @@
+@@ -1472,14 +1504,22 @@
  }
  
  // This CB2 is used when starting
