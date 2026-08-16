@@ -41,7 +41,7 @@ int agb_ppu_height(void);
 // Advance did would hide things the game put on screen.
 #define AGB_PPU_MIN_W 240
 #define AGB_PPU_MIN_H 160
-#define AGB_PPU_MAX_W 464
+#define AGB_PPU_MAX_W 576
 #define AGB_PPU_MAX_H 360
 
 // Read a background from the game's own tilemap buffer instead of from VRAM.

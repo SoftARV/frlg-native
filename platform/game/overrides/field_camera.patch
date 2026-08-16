@@ -61,7 +61,7 @@
 +//
 +// The renderer reads this buffer directly now (ADR 0024), so the shape is ours
 +// to choose and the obvious one is available.
-+#define TILEMAP_W 64
++#define TILEMAP_W 80
 +#define TILEMAP_H 64
 +
 +static u32 TilemapOffset(u32 x, u32 y)
@@ -176,8 +176,8 @@
 -            if (temp >= 32)
 -                temp -= 32;
 -            DrawMetatileAt(mapLayout, r6 + temp, x + j / 2, y + i / 2);
-+            if (temp >= 64)
-+                temp -= 64;
++            if (temp >= TILEMAP_W)
++                temp -= TILEMAP_W;
 +            DrawMetatileAt(mapLayout, TilemapOffset(temp, r6), x + j / 2, y + i / 2);
          }
      }

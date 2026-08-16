@@ -57,18 +57,18 @@
 +    // longer required to be, since the renderer reads these rather than a copy of
 +    // them in VRAM -- but still a power of two, which is a different constraint
 +    // and one the camera has not been made safe against. See spike 0013.
-+    gBGTilemapBuffers2 = AllocZeroed(64 * 64 * 2);
-+    gBGTilemapBuffers1 = AllocZeroed(64 * 64 * 2);
-+    gBGTilemapBuffers3 = AllocZeroed(64 * 64 * 2);
++    gBGTilemapBuffers2 = AllocZeroed(80 * 64 * 2);
++    gBGTilemapBuffers1 = AllocZeroed(80 * 64 * 2);
++    gBGTilemapBuffers3 = AllocZeroed(80 * 64 * 2);
      SetBgTilemapBuffer(1, gBGTilemapBuffers2);
      SetBgTilemapBuffer(2, gBGTilemapBuffers1);
      SetBgTilemapBuffer(3, gBGTilemapBuffers3);
 +    // And hand the same three to the renderer, which reads them where they are
 +    // instead of the copy the hardware would need in VRAM (ADR 0024). The size
 +    // is the buffer's own from here on, not one of the four a register can say.
-+    agb_ppu_set_bg_source(1, gBGTilemapBuffers2, 64, 64);
-+    agb_ppu_set_bg_source(2, gBGTilemapBuffers1, 64, 64);
-+    agb_ppu_set_bg_source(3, gBGTilemapBuffers3, 64, 64);
++    agb_ppu_set_bg_source(1, gBGTilemapBuffers2, 80, 64);
++    agb_ppu_set_bg_source(2, gBGTilemapBuffers1, 80, 64);
++    agb_ppu_set_bg_source(3, gBGTilemapBuffers3, 80, 64);
      InitStandardTextBoxWindows();
      InitTextBoxGfxAndPrinters();
      InitFieldMessageBox();
@@ -83,18 +83,18 @@
 +    // longer required to be, since the renderer reads these rather than a copy of
 +    // them in VRAM -- but still a power of two, which is a different constraint
 +    // and one the camera has not been made safe against. See spike 0013.
-+    gBGTilemapBuffers2 = AllocZeroed(64 * 64 * 2);
-+    gBGTilemapBuffers1 = AllocZeroed(64 * 64 * 2);
-+    gBGTilemapBuffers3 = AllocZeroed(64 * 64 * 2);
++    gBGTilemapBuffers2 = AllocZeroed(80 * 64 * 2);
++    gBGTilemapBuffers1 = AllocZeroed(80 * 64 * 2);
++    gBGTilemapBuffers3 = AllocZeroed(80 * 64 * 2);
      SetBgTilemapBuffer(1, gBGTilemapBuffers2);
      SetBgTilemapBuffer(2, gBGTilemapBuffers1);
      SetBgTilemapBuffer(3, gBGTilemapBuffers3);
 +    // And hand the same three to the renderer, which reads them where they are
 +    // instead of the copy the hardware would need in VRAM (ADR 0024). The size
 +    // is the buffer's own from here on, not one of the four a register can say.
-+    agb_ppu_set_bg_source(1, gBGTilemapBuffers2, 64, 64);
-+    agb_ppu_set_bg_source(2, gBGTilemapBuffers1, 64, 64);
-+    agb_ppu_set_bg_source(3, gBGTilemapBuffers3, 64, 64);
++    agb_ppu_set_bg_source(1, gBGTilemapBuffers2, 80, 64);
++    agb_ppu_set_bg_source(2, gBGTilemapBuffers1, 80, 64);
++    agb_ppu_set_bg_source(3, gBGTilemapBuffers3, 80, 64);
      InitStandardTextBoxWindows();
      InitTextBoxGfxAndPrinters();
      InitFieldMessageBox();

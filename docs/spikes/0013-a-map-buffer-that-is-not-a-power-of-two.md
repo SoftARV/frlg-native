@@ -4,8 +4,8 @@
 ([ADR 0024](../adr/0024-a-machine-wider-than-the-hardware.md)), so their size is ours to choose. A
 576-pixel view wants 40 metatiles of map behind it, which is 80 tiles and 640 pixels. What breaks?
 
-**Status: not finished.** Two faults found and one fixed; the width stayed at 64 tiles. The height
-went up regardless, for an unrelated reason, so the trip was not wasted.
+**Status: answered.** Two faults, both fixed. The second one is the more interesting: it was not in
+the arithmetic at all, it was a line the change never reached.
 
 ## What the width was supposed to buy
 
@@ -34,24 +34,36 @@ instead of 78.
 Fixed, by stepping in signed arithmetic before the wrap. It is worth keeping at 64 even though
 nothing there can see it, because the next size that is not a power of two will.
 
-## Fault two: not found
+## Fault two: a line the change did not reach
 
-With that fixed, a native 240x160 frame still differs from the same frame at a 64-tile buffer — 26 of
-249 sampled, down from 110. Always **the rightmost metatile column of the visible window**, and the
-region grows leftward as the player walks, which is a column written wrong once and then scrolling
-in.
+With that fixed, a native 240x160 frame still differed — 26 of 249 sampled, down from 110. Always
+**the rightmost metatile column of the visible window**, and the region grew leftward as the player
+walked: a column written wrong once and then scrolling in.
 
-The leading-edge redraw for rightward movement looks right on paper: it writes buffer tile column
-`xTileOffset + TILEMAP_W - 2` with map column `pos.x + TILEMAP_W / 2 - 1 + VIEW_ORIGIN_X`, which for
-80 tiles is column 78 holding map column `pos.x + 27` — and the fill puts map column `O + j / 2` at
-buffer column `xTileOffset + j`, so column 78 is `O + 39`, and `O` is `pos.x - 12`. Those agree.
+The whole-map fill wraps the buffer column it is about to write:
 
-Everywhere else that mixes a `u8` with 80 was checked and is safe, because the largest intermediate
-is 157 and one subtraction is enough. So it is something else, and it was not found.
+```c
+temp = sFieldCameraOffset.xTileOffset + j;
+if (temp >= 64)          // TILEMAP_W everywhere else
+    temp -= 64;
+```
 
-## What shipped instead
+Every other wrap in the file had been turned into `TILEMAP_W`. This one had not, because it sits in a
+nested loop and is indented four spaces further than its siblings — and the edit that changed the
+others matched on text including the indentation, and silently changed nothing here.
 
-The height, which was waiting on nothing else. Object positions are exact now (ADR 0024), so the
+So the fill scattered columns and the leading-edge redraws corrected them one per step, which is
+exactly why the wrong region shrank from the right as the player walked. At 64 tiles the stray
+constant was the right answer, which is why it survived every measurement until the buffer changed
+width.
+
+**The lesson is about the edit, not the code.** A textual replacement that does not assert how many
+times it matched is a silent no-op waiting to happen; the same script asserted counts for every other
+substitution in that file and would have caught this immediately.
+
+## What shipped
+
+Both. 576x360, and the height that was waiting on nothing else. Object positions are exact now (ADR 0024), so the
 eight-bit Y that capped the view at 240 no longer applies, and the buffer has been 512 tall since
 the layers doubled. **464x360**, measured clean in all four directions across 433 scrolling frames of
 a walk that goes round twice.
@@ -68,13 +80,14 @@ Also kept, because they are correct and cost nothing at 64 tiles:
 Everything needed for a wider buffer is therefore in place except the buffer, and the next attempt
 starts by finding what writes that rightmost column.
 
-## For whoever picks it up
+## What found it
 
-Set `TILEMAP_W` to 80 in `field_camera.patch`, the allocation and `agb_ppu_set_bg_source` to 80 in
-`overworld.patch`, and `AGB_PPU_MAX_W` to 576. Then render a recorded walk at **240x160** — not at
-576 — and compare against the same walk at 64 tiles. The fault is visible at the hardware's own size,
-which makes it much cheaper to chase than anything that needs a wide viewport to reproduce.
+Rendering a recorded walk at **240x160** and comparing against the same walk at 64 tiles. The fault
+was visible at the hardware's own size, which made it far cheaper to chase than anything needing a
+wide viewport — and it is the measurement to reach for first when a change to the map buffer goes
+wrong, because it holds everything else still.
 
-The edge detector in the widescreen work reports left and right hits at 576x360, but it also reports
-them on high-contrast map edges when the scroll is a single pixel, so it is not trustworthy on its
-own here. The native comparison is.
+The edge detector from the widescreen work is not the one to trust here. It reported 44 hits on the
+left and 42 on the right at 576x360 *after* both faults were fixed, spread evenly across every column
+it samples — which is what its heuristic does on high-contrast map edges when the scroll is a single
+pixel. A real stale band concentrates in a few columns; this did not.
