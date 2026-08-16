@@ -640,6 +640,23 @@ Ends with something a stranger can install without being told how.
 Display modes and LCD filters, widescreen, high-refresh interpolation. The hooks are designed in
 from Phase 3; this is where they are switched on.
 
+**Landed:** the display-stage seam and the first filter, per-save options and the PORT screen in the
+pause menu, and **widescreen** — the field draws 464x192 where the hardware drew 240x160, with the
+map layers widened, the camera centred on the player and reading through map connections, the HUD
+drawn once instead of tiled, and objects spawned, kept visible and placed correctly out to the edges.
+
+**The viewport is at the hardware's envelope**, not at an arbitrary limit. An object's coordinates
+are nine bits across and eight down, so everything the game can place lives in 512x256; the map
+layers are a text background at its widest; and VRAM has 14 KB free, which holds three 4 KB layers
+and not three of 8 KB. Going further means changing the machine rather than the game — extended
+object coordinates, a larger VRAM, a background size the hardware never had. That is its own spike
+and its own ADR, because it is the first change that would make this port's *machine* differ from a
+Game Boy Advance rather than its behaviour.
+
+**Open:** high-refresh interpolation, and two widescreen faults that are understood but not fixed —
+a strip of the wrong map along the bottom edge when walking up (issue 12), and field effects like
+tall grass stopping at the old screen edge so they no longer cover what stands in them (issue 13).
+
 ## Phase 10 — It connects
 
 Peer-to-peer link play for trades and battles, over `host_net`. Lockstep, so the deterministic
