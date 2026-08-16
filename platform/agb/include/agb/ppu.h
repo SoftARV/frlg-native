@@ -32,16 +32,17 @@ int agb_ppu_height(void);
 // that, and in eight bits those are the same place, so NPCs below the screen
 // were drawn along the top of it. Positions are exact now (ADR 0024).
 //
-// Across, still 464. 576 would want 40 metatiles of map behind it, and a buffer
-// that is not a power of two turned out to have more in it than the renderer's
-// wrapping -- spike 0013 has the one fault that was found, the one that was not,
-// and the groundwork that is already in place for the next attempt.
+// Across, still 464, though the map buffer behind it is 40 metatiles and could
+// feed 576. Past 464 the outer columns smear vertically -- content dragged down
+// the picture -- and spike 0013 has what that is not: not the buffer's slack,
+// not the map connections, not the incremental redraws, and not the scanline
+// overrun that hunting it turned up.
 //
 // The floor is the hardware's own size, because showing less than a Game Boy
 // Advance did would hide things the game put on screen.
 #define AGB_PPU_MIN_W 240
 #define AGB_PPU_MIN_H 160
-#define AGB_PPU_MAX_W 576
+#define AGB_PPU_MAX_W 464
 #define AGB_PPU_MAX_H 360
 
 // Read a background from the game's own tilemap buffer instead of from VRAM.

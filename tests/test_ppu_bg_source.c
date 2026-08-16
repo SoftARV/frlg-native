@@ -25,7 +25,7 @@
 #define GREEN 0x03E0
 
 static uint32_t vram_frame[AGB_PPU_MIN_W * AGB_PPU_MIN_H];
-static uint16_t handed[64 * 64];
+static uint16_t handed[96 * 64];
 
 static void io16(int offset, uint16_t value)
 {
@@ -166,8 +166,53 @@ static void test_letting_go_returns_it_to_vram(void)
           "the frame did not go back to what VRAM holds");
 }
 
+// Every column of a wide buffer must land where it should at the widest viewport
+// there is. This is what caught the scanline buffers being sized to 512 while
+// the viewport could be asked for more: every pixel past 512 was written off the
+// end of an array, and the picture beyond it was whatever that landed on.
+static void test_every_column_of_a_wide_buffer(void)
+{
+    const int W = 80, H = 64;
+    int wrong = 0;
+
+    TEST_CASE("every column of an 80-tile buffer lands where it should at 576 wide");
+
+    agb_ppu_set_viewport(AGB_PPU_MAX_W, AGB_PPU_MIN_H);
+    build_tiles();
+
+    // Tile 1 down one column, tile 0 everywhere else -- moved to each column in
+    // turn, so a column that is fetched from the wrong place shows up as the
+    // marker appearing at the wrong screen x, or not at all.
+    for (int col = 0; col < W; col++)
+    {
+        const uint32_t *frame;
+        int scroll = 0;
+        int expected;
+
+        for (int i = 0; i < W * H; i++)
+            handed[i] = 0;
+        for (int ty = 0; ty < H; ty++)
+            handed[ty * W + col] = 1;
+
+        agb_ppu_set_bg_source(0, handed, W, H);
+        agb_ppu_set_bg_scroll(0, scroll, 0);
+        agb_ppu_render_frame();
+        frame = agb_ppu_framebuffer();
+
+        // screen x = buffer x - scroll + view_ox, where view_ox is (576-240)/2
+        expected = col * 8 - scroll + (AGB_PPU_MAX_W - AGB_PPU_MIN_W) / 2;
+        if (expected < 0 || expected + 8 > AGB_PPU_MAX_W)
+            continue;
+        if (frame[10 * AGB_PPU_MAX_W + expected + 4]
+         == frame[10 * AGB_PPU_MAX_W + expected - 4])
+            wrong++;
+    }
+    CHECK(wrong == 0, "%d of %d columns did not render where they belong", wrong, W);
+}
+
 int main(void)
 {
+    test_every_column_of_a_wide_buffer();
     test_handing_over_a_copy_changes_nothing();
     test_a_bigger_buffer_wraps_where_it_ends();
     test_letting_go_returns_it_to_vram();

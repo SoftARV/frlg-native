@@ -26,8 +26,18 @@
 // world exists, only how much of it is asked for. Buffers are sized for the
 // largest viewport rather than reallocated, so a resize costs nothing and
 // cannot fail halfway.
-#define SCREEN_MAX_W 512
-#define SCREEN_MAX_H 512
+// Every scanline buffer below is this wide, and so is the framebuffer, so these
+// have to be at least the largest viewport that can be asked for. They were
+// 512x512 and the viewport could not exceed 464, so the slack hid the coupling
+// -- until the map layers grew and the width went past 512, at which point every
+// pixel beyond it was written past the end of an array. It looked like a map
+// bug: a column of the picture repeating down the right edge, bars at the left
+// where the framebuffer's own rows had run into each other.
+#define SCREEN_MAX_W AGB_PPU_MAX_W
+#define SCREEN_MAX_H AGB_PPU_MAX_H
+
+_Static_assert(SCREEN_MAX_W >= AGB_PPU_MAX_W && SCREEN_MAX_H >= AGB_PPU_MAX_H,
+               "the scanline buffers must hold the largest viewport");
 
 static int screen_w = NATIVE_W;
 static int screen_h = NATIVE_H;
@@ -1058,6 +1068,33 @@ static void scanline_end(void)
 
     if (dispstat & DISPSTAT_HBLANK_IRQ)
         agb_irq_raise(AGB_IRQ_HBLANK);
+}
+
+// TEMPORARY: dump a handed-over background's entries once, to tell a buffer that
+// holds the wrong thing from a renderer that reads the right thing wrongly.
+#include <stdio.h>
+#include <stdlib.h>
+void agb_ppu_dump_bg_source(int bg, const char *path)
+{
+    FILE *fh;
+
+    if (bg < 0 || bg > 3 || bg_source[bg].tilemap == NULL)
+        return;
+    fh = fopen(path, "w");
+    if (!fh)
+        return;
+    fprintf(fh, "%d %d scroll %d %d\n", bg_source[bg].width, bg_source[bg].height,
+            bg_source[bg].scroll_x, bg_source[bg].scroll_y);
+    for (int y = 0; y < bg_source[bg].height; y++)
+    {
+        for (int x = 0; x < bg_source[bg].width; x++)
+        {
+            const uint8_t *e = bg_source[bg].tilemap + (y * bg_source[bg].width + x) * 2;
+            fprintf(fh, "%04x ", (unsigned)(e[0] | (e[1] << 8)));
+        }
+        fprintf(fh, "\n");
+    }
+    fclose(fh);
 }
 
 void agb_ppu_render_frame(void)

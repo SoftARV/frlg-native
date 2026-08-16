@@ -4,8 +4,10 @@
 ([ADR 0024](../adr/0024-a-machine-wider-than-the-hardware.md)), so their size is ours to choose. A
 576-pixel view wants 40 metatiles of map behind it, which is 80 tiles and 640 pixels. What breaks?
 
-**Status: answered.** Two faults, both fixed. The second one is the more interesting: it was not in
-the arithmetic at all, it was a line the change never reached.
+**Status: three faults found and fixed, and the width still is not right.** The buffer is 40
+metatiles and could feed 576 pixels; the ceiling stays at 464, because past that the outer columns
+smear vertically — content dragged down the picture, reported from play and confirmed in a
+screenshot.
 
 ## What the width was supposed to buy
 
@@ -61,9 +63,43 @@ width.
 times it matched is a silent no-op waiting to happen; the same script asserted counts for every other
 substitution in that file and would have caught this immediately.
 
+## Fault three: the scanline buffers were 512 wide
+
+`SCREEN_MAX_W` sized every scanline buffer in the renderer, and the framebuffer, and it was 512 while
+`AGB_PPU_MAX_W` had become 576. Every pixel past 512 was written off the end of an array — the exact
+shape of fault this project keeps a `no-mmu` label for.
+
+It hid for the same reason fault two did: the two constants had agreed for as long as the viewport
+could not exceed 464, so the coupling was invisible until the width crossed 512. They are derived
+from each other now, with a `_Static_assert` so they cannot drift apart again.
+
+Found by a unit test that walks a marker down every column of an 80-tile buffer at the widest
+viewport and checks each lands where it belongs: seven columns did not, and all seven rendered at
+screen x 512. That test is kept.
+
+**It is not what play reported, though.** Fixing it left the recorded session pixel-identical across
+41 frames at 576x360. Two real bugs, one visible symptom, and they were not the same bug.
+
+## What is still wrong
+
+At 576 the outer columns of the picture smear vertically: the water's columns drag down past where
+the water ends, the building's grey drags down into the grass, and at the left there are solid green
+bars. The middle of the picture is correct.
+
+Vertical smearing means those buffer columns hold the same tilemap entry repeated down their length,
+because a column is filled by a loop that varies the map row. What it is **not**:
+
+- **not the buffer's slack** — a 96-tile buffer renders identically to an 80-tile one at 576;
+- **not the map connections** — disabling `MetatileIdFromConnectedMap` changes nothing;
+- **not the incremental redraws** — forcing `DrawWholeMapView` on every camera step changes nothing,
+  which puts it inside `DrawWholeMapViewInternal` or below it;
+- **not the scanline overrun** above;
+- **not outside the map** — the columns were checked against the map's own width and are inside it.
+
 ## What shipped
 
-Both faults fixed, and with them **576x360** — 40 metatiles of map across where the hardware had 15,
+The three faults, the height, and a buffer wide enough for 576 whenever the smearing is understood
+— but the width ceiling stays at 464. Also **464x360** — 40 metatiles of map across where the hardware had 15,
 and what this display asks for at zoom 6 fullscreen. A native 240x160 walk is identical across all
 249 sampled frames.
 
@@ -80,12 +116,18 @@ Three other things were needed and are worth naming, because none of them is abo
 - the spawn window is no longer capped by the object coordinate range, which stopped applying the
   moment those positions became exact.
 
-## What found it
+## What found the first two
 
 Rendering a recorded walk at **240x160** and comparing against the same walk at 64 tiles. The fault
 was visible at the hardware's own size, which made it far cheaper to chase than anything needing a
 wide viewport — and it is the measurement to reach for first when a change to the map buffer goes
 wrong, because it holds everything else still.
+
+**Three measurements in this spike were wrong before they were right**, which is the other thing to
+carry forward. A world-column mapping that double-counted the scroll made two different columns look
+like one and reported 10% agreement; only a control — the same column mid-screen in two frames, which
+should agree and did not — showed the mapping was at fault rather than the renderer. Build the
+control first.
 
 The edge detector from the widescreen work is not the one to trust here. It reported 44 hits on the
 left and 42 on the right at 576x360 *after* both faults were fixed, spread evenly across every column
