@@ -1,0 +1,42 @@
+--- a/src/sprite.c
++++ b/src/sprite.c
+@@ -471,11 +471,19 @@
+     }
+ }
+ 
++// platform/agb/src/ppu.c: where the game actually put an object, before OAM
++// keeps nine bits of it across and eight down. ADR 0024.
++extern void agb_ppu_set_object_position(int slot, int x, int y);
++extern void agb_ppu_clear_object_positions(void);
++
+ void AddSpritesToOamBuffer(void)
+ {
+     int i = 0;
+     u8 oamIndex = 0;
+ 
++    // Rebuilt from nothing each frame, like the buffer it describes.
++    agb_ppu_clear_object_positions();
++
+     while (i < MAX_SPRITES)
+     {
+         struct Sprite *sprite = &gSprites[gSpriteOrder[i]];
+@@ -1657,6 +1665,19 @@
+     if (!sprite->subspriteTables || sprite->subspriteMode == SUBSPRITES_OFF)
+     {
+         gMain.oamBuffer[*oamIndex] = sprite->oam;
++        // The same sum UpdateOamCoords made, kept whole. That one assigns it to
++        // a nine-bit field and an eight-bit one; this is what it was before.
++        //
++        // Only for an object that is one OAM entry, which is every NPC and every
++        // item on the ground. One drawn from several entries takes its base from
++        // the truncated oam.x below, so its parts would have to be worked out
++        // again from here -- and it is a rarity in the field, so it keeps the
++        // hardware's wrapping until something needs otherwise.
++        agb_ppu_set_object_position(*oamIndex,
++            sprite->x + sprite->x2 + sprite->centerToCornerVecX
++                + (sprite->coordOffsetEnabled ? gSpriteCoordOffsetX : 0),
++            sprite->y + sprite->y2 + sprite->centerToCornerVecY
++                + (sprite->coordOffsetEnabled ? gSpriteCoordOffsetY : 0));
+         (*oamIndex)++;
+         return 0;
+     }

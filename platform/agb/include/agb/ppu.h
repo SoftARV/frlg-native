@@ -26,25 +26,25 @@ int agb_ppu_height(void);
 // Across, the buffer is 512 and the camera's scroll offset decides where the
 // spare room sits: 128 - (W - 240) / 2 is a whole metatile only up to W = 464.
 //
-// Down, the buffer has room to spare and the ceiling is somewhere else entirely.
-// **An object's Y is eight bits.** Everything the hardware can place vertically
-// lives in 256 pixels, and objects must exist below the view before they are
-// seen -- the field spawns them nine metatiles past the player, which reaches
-// 248. A view of 240 puts its own top edge 256 pixels above that, which is the
-// same place: NPCs standing below the screen were drawn along the top of it, and
-// walking towards them made them vanish, because that moved them out of the
-// aliasing and not into view.
+// Down, the buffer has room to spare, and what used to stop it was an object's
+// eight-bit Y: the field spawns objects down to 248, a 240-tall view's top edge
+// is 256 pixels above that, and in eight bits those are the same place -- so
+// NPCs standing below the screen were drawn along the top of it. The renderer is
+// given the position the game computed now (ADR 0024), so there is nothing left
+// to come round.
 //
-// 192 is where that stays small. Lifting it means giving the renderer the
-// position the game computed instead of the eight bits that survived OAM, which
-// is the next step of ADR 0024 and what the width is waiting on too.
+// 240 rather than the 400 the buffer would allow, because two things still wrap
+// at 256: an object drawn from several OAM entries, which takes its base from
+// the truncated value, and any screen that writes OAM itself. Neither is common
+// in the field and both are visible only past this, so this is where the next
+// evidence has to come from rather than the next derivation.
 //
 // The floor is the hardware's own size, because showing less than a Game Boy
 // Advance did would hide things the game put on screen.
 #define AGB_PPU_MIN_W 240
 #define AGB_PPU_MIN_H 160
 #define AGB_PPU_MAX_W 464
-#define AGB_PPU_MAX_H 192
+#define AGB_PPU_MAX_H 240
 
 // Read a background from the game's own tilemap buffer instead of from VRAM.
 //
@@ -61,6 +61,18 @@ int agb_ppu_height(void);
 // them starts: this is opt-in, per background, so a screen that has not asked
 // for it keeps exactly the machine it had.
 void agb_ppu_set_bg_source(int bg, const void *tilemap, int width, int height);
+
+// Where the game actually put an object, before OAM kept nine bits of it across
+// and eight down. The truncation is the encoding's rather than the game's, which
+// computes these as a signed pair -- so given them, this renderer can place an
+// object outside the 512x256 those bits can name. ADR 0024.
+//
+// By OAM slot, and cleared every time the sprite engine rebuilds the buffer. A
+// slot with nothing set is placed from OAM and wraps as the hardware does, which
+// is what every screen but the field gets, and what an object drawn from several
+// OAM entries still gets.
+void agb_ppu_set_object_position(int slot, int x, int y);
+void agb_ppu_clear_object_positions(void);
 
 // Clamped to the range above. Returns true if the viewport is now different
 // from what it was, which is the caller's cue to resize anything it keeps in

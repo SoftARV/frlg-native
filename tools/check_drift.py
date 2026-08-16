@@ -53,7 +53,7 @@ WATCHED = {
     "src/naming_screen.c": "patched: null tolerance",
     "src/overworld.c": "patched: null tolerance, and diff-patched to tell the port the field is on screen",
     "src/battle_transition.c": "patched: null tolerance",
-    "src/sprite.c": "patched: null tolerance",
+    "src/sprite.c": "patched: null tolerance, and diff-patched to keep an object's position before OAM truncates it",
     "src/trainer_card.c": "patched: null tolerance",
     "src/pokemon_summary_screen.c": "patched: null tolerance",
     "src/pokemon_storage_system_tasks.c": "patched: null tolerance",

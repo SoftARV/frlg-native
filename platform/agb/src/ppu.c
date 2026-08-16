@@ -694,6 +694,36 @@ static int obj_texel(uint32_t offset, int is_256, int tx, int palette)
 // which object owns a pixel is settled among the objects alone: lowest priority
 // value wins, and OAM order breaks a tie. Only then does that pixel compete
 // with the backgrounds, at the priority it carries.
+// Where the game actually put an object, before OAM kept nine bits of it across
+// and eight down. ADR 0024: the truncation is the encoding's, not the game's --
+// it computes these as a signed pair and hands them over to be cut.
+//
+// Indexed by OAM slot, and only for the slots the sprite engine filled this
+// frame. Anything else -- a screen writing OAM directly, an object drawn from
+// several entries -- has no entry here and is placed from the nine and eight
+// bits, wrapping as the hardware does.
+static struct
+{
+    int16_t x;
+    int16_t y;
+    bool known;
+} obj_pos[OBJ_COUNT];
+
+void agb_ppu_clear_object_positions(void)
+{
+    for (int i = 0; i < OBJ_COUNT; i++)
+        obj_pos[i].known = false;
+}
+
+void agb_ppu_set_object_position(int slot, int x, int y)
+{
+    if (slot < 0 || slot >= OBJ_COUNT)
+        return;
+    obj_pos[slot].x = (int16_t)x;
+    obj_pos[slot].y = (int16_t)y;
+    obj_pos[slot].known = true;
+}
+
 static void render_obj_line(int line)
 {
     uint16_t dispcnt = io16(REG_DISPCNT);
@@ -726,12 +756,17 @@ static void render_obj_line(int line)
         // a rotated sprite needs the corners its own box cannot hold.
         int box_w = mode == OBJ_MODE_AFFINE_DOUBLE ? width * 2 : width;
         int box_h = mode == OBJ_MODE_AFFINE_DOUBLE ? height * 2 : height;
-        int x = OBJ_X(attr1);
+        // Placed from what the game meant where that is known, and from what
+        // survived OAM where it is not. The difference only shows outside the
+        // hardware's own 240x160, which is the only place either can be wrong.
+        bool placed = obj_pos[n].known;
+        int x = placed ? obj_pos[n].x : OBJ_X(attr1);
         // Objects wrap at 256 rather than at the bottom of the screen, so one
         // placed low enough reappears at the top.
         // The hardware's row, not the viewport's: an object's Y is in the
         // hardware's coordinates like its X, and only the X was being shifted.
-        int py = (line - view_oy() - OBJ_Y(attr0)) & 0xFF;
+        int py = placed ? line - view_oy() - obj_pos[n].y
+                        : ((line - view_oy() - OBJ_Y(attr0)) & 0xFF);
         int16_t pa = 0, pb = 0, pc = 0, pd = 0;
 
         // A window object contributes shape rather than colour: its opaque
@@ -744,7 +779,9 @@ static void render_obj_line(int line)
 
         if (mode == OBJ_MODE_HIDDEN)
             continue;
-        if (py >= box_h || tile < min_tile)
+        // py can be negative now: a placed object is not wrapped into 0..255
+        // first, so a line above it is above it rather than 200 lines below.
+        if (py < 0 || py >= box_h || tile < min_tile)
             continue;
 
 
@@ -778,10 +815,11 @@ static void render_obj_line(int line)
             // object between 256 and the left margin belongs in the right of
             // the picture and was being read as off the left edge, so nothing
             // was drawn out there until it crossed into the hardware's own 240.
-            int sx = ((x + col) & 0x1FF) + view_ox();
+            int sx = placed ? x + col + view_ox()
+                            : ((x + col) & 0x1FF) + view_ox();
             int across = mosaic_snap(col, mos_h);
 
-            if (sx >= screen_w)
+            if (!placed && sx >= screen_w)
                 sx -= 0x200;
             int tx, ty;
             int index;

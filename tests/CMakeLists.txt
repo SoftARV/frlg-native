@@ -38,6 +38,11 @@ frlg_add_test(test_ppu_scanline_irq)
 # to switch on for one background and not the others.
 frlg_add_test(test_ppu_bg_source)
 
+# An object placed from what the game meant rather than from what OAM kept. The
+# difference only shows outside the hardware's own 240x160, which is where the
+# eight bits of an object's Y stop meaning what they say.
+frlg_add_test(test_ppu_object_position)
+
 # A wider viewport must show more, never different. The fault this guards
 # against renders every layer correctly and only gets their relationship wrong,
 # which looks plausible on screen and is obvious under comparison.

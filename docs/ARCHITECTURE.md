@@ -215,6 +215,7 @@ changes, not pret's file.
 | `overworld.patch` | `src/overworld.c` | the field's map layers are 64 tiles wide, handed to the renderer directly, and the field tells the port when it is on screen |
 | `field_camera.patch` | `src/field_camera.c` | the camera fills those layers, centres them on the player, and reads through a map connection for what the buffer does not hold |
 | `bg.patch` | `src/bg.c` | a background handed to the renderer is forgotten when the screen that owns it goes away |
+| `sprite.patch` | `src/sprite.c` | an object's position is kept whole for the renderer, before OAM keeps nine bits of it across and eight down |
 | `event_object_movement.patch` | `src/event_object_movement.c` | object events spawn as far out as the view reaches, in a second pass so the nearer ones still get the slots |
 
 Two things about a patched source that are silent rather than loud, both found by them happening:
