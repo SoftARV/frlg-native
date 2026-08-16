@@ -29,7 +29,7 @@ public class Application : Adw.Application {
             application_name = "frlg-native",
             application_icon = "application-x-executable",
             developer_name = "SoftARV",
-            version = "0.1.0",
+            version = Config.VERSION,
             comments = _("A native port of Pokémon FireRed. Ships no game data: the game comes from a ROM you legally own."),
             website = "https://github.com/SoftARV/frlg-native",
             issue_url = "https://github.com/SoftARV/frlg-native/issues",

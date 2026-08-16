@@ -34,9 +34,9 @@
   <content_rating type="oars-1.1" />
 
   <releases>
-    <release version="0.1.0" date="2026-08-15">
+    <release version="@VERSION@" date="@DATE@">
       <description>
-        <p>First packaged build.</p>
+        <p>A development build, named for the commit it was built from.</p>
       </description>
     </release>
   </releases>

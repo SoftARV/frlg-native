@@ -27,7 +27,15 @@ install_data(app_id + '.desktop',
   install_dir: get_option('datadir') / 'applications',
 )
 
-install_data(app_id + '.metainfo.xml',
+# Generated, because the version in it is the one thing that tells two testing
+# builds apart -- see the top-level meson.build.
+metainfo = configure_file(
+  input: app_id + '.metainfo.xml.in',
+  output: app_id + '.metainfo.xml',
+  configuration: {'VERSION': full_version, 'DATE': build_date},
+)
+
+install_data(metainfo,
   install_dir: get_option('datadir') / 'metainfo',
 )
 

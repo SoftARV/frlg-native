@@ -1402,6 +1402,18 @@ toolchain and a byte-matching reference build to generate the manifest from. Tha
 where it can be built, not only on how — it is the open question for any store that builds from
 source on its own infrastructure.
 
+**A build says which commit it is.** There are no releases yet, so `0.1.0` alone named the broken
+build and the fixed one identically, and a tester could not tell you which they had. The version is
+`0.1.0-<commit>-dev` — `0.1.0-be9ed29-dev` — and an uncommitted tree says `-dirty` before the `-dev`,
+because a bundle labelled with a commit it does not match is the thing this is for. It reaches the
+AppStream release, which is what `flatpak info` reports, and the launcher's About dialog, which is
+what a tester can read without a terminal.
+
+The commit is read from git where there is a git to read. In a Flatpak build there is not: the
+manifest takes `launcher/` as a directory source, so the build sees that directory and nothing above
+it. `tools/package_flatpak.sh` writes `launcher/build-id.txt` first and builds second, and is the
+supported way to package — a bare `flatpak-builder` line produces a bundle that cannot name itself.
+
 ## 10. Ports
 
 Each directory under `ports/` holds only what is irreducibly platform-specific: the entry point,
