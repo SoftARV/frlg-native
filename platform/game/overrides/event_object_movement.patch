@@ -1,14 +1,20 @@
 --- a/src/event_object_movement.c
 +++ b/src/event_object_movement.c
-@@ -1789,30 +1789,57 @@
+@@ -1789,30 +1789,62 @@
      return spriteId;
  }
  
 -void TrySpawnObjectEvents(s16 cameraX, s16 cameraY)
-+// How far past the hardware's screen this port's field view reaches, in pixels.
-+// Zero at 240x160. See platform/game/port_view.c.
++// How far past the hardware's screen this port's field view reaches: in pixels
++// for the test that hides a sprite, in metatiles for the window one spawns in.
++// Zero at 240x160. See platform/game/port_view.c, which explains why the second
++// is not simply the first divided by sixteen.
 +extern u16 agb_port_view_margin_x(void);
 +extern u16 agb_port_view_margin_y(void);
++extern u8 agb_port_view_spawn_left(void);
++extern u8 agb_port_view_spawn_right(void);
++extern u8 agb_port_view_spawn_up(void);
++extern u8 agb_port_view_spawn_down(void);
 +
 +static void TrySpawnObjectEventsInWindow(s16 left, s16 top, s16 right, s16 bottom, s16 cameraX, s16 cameraY)
  {
@@ -36,7 +42,8 @@
          s16 right = gSaveBlock1Ptr->pos.x + MAP_OFFSET_W + 2;
          s16 top = gSaveBlock1Ptr->pos.y;
          s16 bottom = gSaveBlock1Ptr->pos.y + MAP_OFFSET_H + 2;
--
++        TrySpawnObjectEventsInWindow(left, top, right, bottom, cameraX, cameraY);
+ 
 -        objectCount = gMapHeader.events->objectEventCount;
 -
 -        for (i = 0; i < objectCount; i++)
@@ -49,12 +56,6 @@
 -                && !FlagGet(template->flagId))
 -                TrySpawnObjectEventTemplate(template, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup, cameraX, cameraY);
 -        }
-+        // Rounded up: half a metatile of view still shows whoever stands in it.
-+        s16 marginX = (agb_port_view_margin_x() + 15) / 16;
-+        s16 marginY = (agb_port_view_margin_y() + 15) / 16;
-+
-+        TrySpawnObjectEventsInWindow(left, top, right, bottom, cameraX, cameraY);
-+
 +        // The wider view gets a second pass rather than a bigger first one, and
 +        // the order is the whole point. At most OBJECT_EVENTS_COUNT object
 +        // events exist at once -- sixteen, the player among them -- and maps go
@@ -66,14 +67,17 @@
 +        // margin gets what is left. A template already spawned is refused by
 +        // GetAvailableObjectEventId, which is also what makes calling this every
 +        // frame safe in the first place.
-+        if (marginX != 0 || marginY != 0)
-+            TrySpawnObjectEventsInWindow(left - marginX, top - marginY,
-+                                         right + marginX, bottom + marginY,
++        if (agb_port_view_spawn_left() || agb_port_view_spawn_right()
++         || agb_port_view_spawn_up() || agb_port_view_spawn_down())
++            TrySpawnObjectEventsInWindow(left - agb_port_view_spawn_left(),
++                                         top - agb_port_view_spawn_up(),
++                                         right + agb_port_view_spawn_right(),
++                                         bottom + agb_port_view_spawn_down(),
 +                                         cameraX, cameraY);
      }
  }
  
-@@ -1840,10 +1867,14 @@
+@@ -1840,10 +1872,12 @@
  
  static void RemoveObjectEventIfOutsideView(struct ObjectEvent *objectEvent)
  {
@@ -83,24 +87,18 @@
 -    s16 bottom = gSaveBlock1Ptr->pos.y + MAP_OFFSET_H + 2;
 +    // The same window the second spawn pass uses, or everything it spawned
 +    // would be removed again on the frame after.
-+    s16 marginX = (agb_port_view_margin_x() + 15) / 16;
-+    s16 marginY = (agb_port_view_margin_y() + 15) / 16;
-+    s16 left =   gSaveBlock1Ptr->pos.x - 2 - marginX;
-+    s16 right =  gSaveBlock1Ptr->pos.x + MAP_OFFSET_W + 2 + marginX;
-+    s16 top =    gSaveBlock1Ptr->pos.y - marginY;
-+    s16 bottom = gSaveBlock1Ptr->pos.y + MAP_OFFSET_H + 2 + marginY;
++    s16 left =   gSaveBlock1Ptr->pos.x - 2 - agb_port_view_spawn_left();
++    s16 right =  gSaveBlock1Ptr->pos.x + MAP_OFFSET_W + 2 + agb_port_view_spawn_right();
++    s16 top =    gSaveBlock1Ptr->pos.y - agb_port_view_spawn_up();
++    s16 bottom = gSaveBlock1Ptr->pos.y + MAP_OFFSET_H + 2 + agb_port_view_spawn_down();
  
      if (objectEvent->currentCoords.x >= left && objectEvent->currentCoords.x <= right
       && objectEvent->currentCoords.y >= top && objectEvent->currentCoords.y <= bottom)
-@@ -8001,13 +8032,24 @@
+@@ -8001,13 +8035,24 @@
      {
          minX = -16;
      }
 -    if ((s16)x >= (DISPLAY_WIDTH + 16) || (s16)x2 < minX)
--    {
--        objectEvent->offScreen = TRUE;
--    }
--    if ((s16)y >= (DISPLAY_HEIGHT + 16) || (s16)y2 < -16)
 +    // The screen these bounds describe is the hardware's, and sprite coordinates
 +    // are still in it -- the renderer centres them itself. So an object standing
 +    // in the part of the field only a wider viewport can see is inside the
@@ -108,6 +106,10 @@
 +    // old screen edge used to be. That is the pop, and spawning it earlier does
 +    // not help: it exists, it is just invisible.
      {
+-        objectEvent->offScreen = TRUE;
+-    }
+-    if ((s16)y >= (DISPLAY_HEIGHT + 16) || (s16)y2 < -16)
+-    {
 -        objectEvent->offScreen = TRUE;
 +        s16 edgeX = agb_port_view_margin_x();
 +        s16 edgeY = agb_port_view_margin_y();
