@@ -63,22 +63,22 @@ substitution in that file and would have caught this immediately.
 
 ## What shipped
 
-Both. 576x360, and the height that was waiting on nothing else. Object positions are exact now (ADR 0024), so the
-eight-bit Y that capped the view at 240 no longer applies, and the buffer has been 512 tall since
-the layers doubled. **464x360**, measured clean in all four directions across 433 scrolling frames of
-a walk that goes round twice.
+Both faults fixed, and with them **576x360** — 40 metatiles of map across where the hardware had 15,
+and what this display asks for at zoom 6 fullscreen. A native 240x160 walk is identical across all
+249 sampled frames.
 
-Also kept, because they are correct and cost nothing at 64 tiles:
+The height came along for a different reason: object positions are exact now
+([ADR 0024](../adr/0024-a-machine-wider-than-the-hardware.md)), so the eight-bit Y that capped the
+view at 240 stopped applying, and the buffer had been 512 tall since the layers doubled.
 
-- the renderer's wrap by subtraction, so a background need not be a power of two;
-- the scroll handed to the renderer whole, since `BGxHOFS` is nine bits and describes at most 512
-  pixels;
-- the camera's signed step, above;
-- the spawn window no longer capped by the object coordinate range, which stopped applying when the
-  positions became exact.
+Three other things were needed and are worth naming, because none of them is about width as such:
 
-Everything needed for a wider buffer is therefore in place except the buffer, and the next attempt
-starts by finding what writes that rightmost column.
+- the renderer wraps a handed-over background by subtraction rather than by masking, so its size need
+  not be a power of two;
+- the scroll is handed to the renderer whole, because `BGxHOFS` is nine bits and describes a
+  background of at most 512 pixels — the same truncation as an object's position, in the same shape;
+- the spawn window is no longer capped by the object coordinate range, which stopped applying the
+  moment those positions became exact.
 
 ## What found it
 
