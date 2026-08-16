@@ -90,28 +90,66 @@ bool host_video_open(const char *title, int width, int height, int scale)
         return false;
     }
 
+    // This number is the zoom: how many screen pixels one of the game's own is
+    // drawn as, and the same quantity the options screen shows and the launcher
+    // sets. It has to stay that, which is why the display's content scale is
+    // *not* folded into it -- doing that made a 6 into a 12 on a 200% display,
+    // a zoom nobody asked for and one digit too wide for the row that shows it.
+    //
     // A window is asked for in the units the driver works in, and those differ:
     // Wayland takes logical pixels and the compositor scales them up, X11 takes
-    // real ones. On a display asking for 200% that is the difference between a
-    // comfortable window and a postage stamp, so the display's own content scale
-    // is folded in. FRLG_SCALE overrides the lot.
+    // real ones. So the same zoom fills more of a 200% display under Wayland
+    // than under X11. Someone who wants more raises it, and the number goes on
+    // meaning what it says.
     {
         const char *want = getenv("FRLG_SCALE");
-        float content = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
         char line[96];
 
         // Same order as everywhere else: the environment is what a run was
-        // told, the setting is what a person chose, the display is the guess.
+        // told, then the setting is what a person chose.
         if (want != NULL)
             scale = atoi(want) > 0 ? atoi(want) : scale;
         else if (host_setting_int("scale", 0) > 0)
             scale = host_setting_int("scale", scale);
-        else if (content >= 1.5f)
-            scale = (int)(scale * content + 0.5f);
 
-        snprintf(line, sizeof(line), "window scale %d (display asks for %.2f)",
-                 scale, content);
+        // The range the options screen can express and host_video_set_zoom
+        // accepts. Nothing may put the two out of step.
+        if (scale < 1)
+            scale = 1;
+        if (scale > 9)
+            scale = 9;
+
+        snprintf(line, sizeof(line), "zoom %d (one game pixel is %d on screen)",
+                 scale, scale);
         host_log(line);
+    }
+
+    // And down again if that does not fit on the display. A window larger than
+    // the screen opens with its title bar off the top on some compositors,
+    // where it cannot be dragged back -- so the default is chosen for a desk
+    // monitor and reduced here rather than for the smallest laptop anyone owns.
+    {
+        SDL_Rect usable;
+
+        if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable))
+        {
+            int fitted = scale;
+
+            while (fitted > 1
+               && (width * fitted > usable.w || height * fitted > usable.h))
+                fitted--;
+
+            if (fitted != scale)
+            {
+                char line[96];
+
+                snprintf(line, sizeof(line),
+                         "zoom %d does not fit %dx%d, using %d",
+                         scale, usable.w, usable.h, fitted);
+                host_log(line);
+                scale = fitted;
+            }
+        }
     }
 
     if (!SDL_CreateWindowAndRenderer(title, width * scale, height * scale,
@@ -224,7 +262,9 @@ int host_video_zoom(void)
 
 void host_video_set_zoom(int value)
 {
-    if (value >= 1 && value <= 8)
+    // Nine because the options screen prints one digit, and the window's own
+    // scale is clamped to the same range so the two cannot disagree.
+    if (value >= 1 && value <= 9)
         zoom = value;
 }
 

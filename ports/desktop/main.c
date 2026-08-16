@@ -954,7 +954,12 @@ int main(int argc, char **argv)
     sigaddset(&block, SIGALRM);
     pthread_sigmask(SIG_BLOCK, &block, NULL);
 
-    if (!host_video_open("frlg-native", AGB_PPU_MIN_W, AGB_PPU_MIN_H, 3))
+    // Six, because 240x160 was a screen four inches wide and is a postage stamp
+    // on a desk monitor. The art was drawn for pixels of a certain apparent
+    // size rather than for a certain count of them, and six is what puts them
+    // back at roughly that size. host_video_open brings it down if the window
+    // would not fit the display.
+    if (!host_video_open("frlg-native", AGB_PPU_MIN_W, AGB_PPU_MIN_H, 6))
         return 1;
 
     // Before anything else can fail: a session that opens after the first
