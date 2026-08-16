@@ -45,6 +45,19 @@ int agb_ppu_height(void);
 // for a strip that fails to scroll with the rest of the frame. Raising either
 // brings the artifact back at that edge only, and only while walking.
 //
+// **The height does not go up by making the map layers taller.** 64x64 tiles
+// would give the camera twice the rows and put the rewritten one well out of
+// sight, and there is nowhere to put them: the field's tilesets fill 0x0000 to
+// 0x7FFF exactly, BG0 takes 0x8000 for its own tiles and 0xF800 for its map, and
+// the 14 KB left between them holds three 4 KB layers but not three of 8 KB.
+//
+// Behind that is a wall no amount of VRAM moves. An object's Y is eight bits, so
+// everything the hardware can place vertically lives in 256 pixels, and a view
+// taller than that draws the same NPC twice. Allowing for where objects have to
+// sit before they are seen, the real ceiling on this axis is somewhere near 240
+// -- 48 pixels above where it is now, for a change that touches the camera, the
+// tilemaps, both wrap points and the VRAM map.
+//
 // The floor is the hardware's own size, because showing less than a Game Boy
 // Advance did would hide things the game put on screen.
 #define AGB_PPU_MIN_W 240
