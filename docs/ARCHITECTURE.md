@@ -214,6 +214,7 @@ changes, not pret's file.
 | `start_menu.patch` | `src/start_menu.c` | the pause menu scrolls, so the port can add an entry to a tile budget that is already exactly full |
 | `overworld.patch` | `src/overworld.c` | the field's map layers are 64 tiles wide, and the field tells the port when it is on screen |
 | `field_camera.patch` | `src/field_camera.c` | the camera fills those layers, centres them on the player, and reads through a map connection for what the buffer does not hold |
+| `event_object_movement.patch` | `src/event_object_movement.c` | object events spawn as far out as the view reaches, in a second pass so the nearer ones still get the slots |
 
 Two things about a patched source that are silent rather than loud, both found by them happening:
 
@@ -221,8 +222,7 @@ Two things about a patched source that are silent rather than loud, both found b
   configures, so adding a `.patch` and rebuilding does nothing at all, with no message.
 - **The patched copy is not in `src/`,** so a quoted include of something beside the original —
   `#include "data/object_events/object_event_graphics.h"` — stops resolving the moment that file
-  grows its first patch. `-iquote src` fixes it, and is not in the flags because nothing needs it
-  yet.
+  grows its first patch. `-iquote src` is last in the chain for that.
 
 Overrides carry a **maintenance** cost, not a fidelity one: a forked file stops receiving upstream
 fixes. Prefer a shadow macro; reach for an override only when there is no macro seam. That an override

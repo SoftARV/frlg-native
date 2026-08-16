@@ -16,6 +16,31 @@
 #include "constants/quest_log.h"
 
 #include "agb/frame.h"
+#include "agb/ppu.h"
+
+// How much further than the hardware's screen the field view reaches, in
+// metatiles, on each side.
+//
+// Object events spawn in a window around the player, and upstream sizes that
+// window to the screen it had. A wider one shows ground the game has not spawned
+// anything on, so an NPC standing there does not exist until the player walks
+// close enough, and then appears out of nothing a few tiles inside the edge.
+//
+// Zero at 240x160, which is what leaves upstream's window exactly as it was.
+u8 agb_port_view_margin_x(void)
+{
+    int extra = (agb_ppu_width() - AGB_PPU_MIN_W) / 2;
+
+    // Rounded up: half a metatile of view still shows whoever stands in it.
+    return (u8)((extra + 15) / 16);
+}
+
+u8 agb_port_view_margin_y(void)
+{
+    int extra = (agb_ppu_height() - AGB_PPU_MIN_H) / 2;
+
+    return (u8)((extra + 15) / 16);
+}
 
 // Two frames of grace. The field's callback runs once per frame, so one frame
 // of silence means a screen change, not a slow frame -- but a fade or a script

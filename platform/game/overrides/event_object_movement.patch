@@ -1,0 +1,91 @@
+--- a/src/event_object_movement.c
++++ b/src/event_object_movement.c
+@@ -1789,30 +1789,56 @@
+     return spriteId;
+ }
+ 
+-void TrySpawnObjectEvents(s16 cameraX, s16 cameraY)
++// How far past the hardware's screen this port's field view reaches, in
++// metatiles. Zero at 240x160. See platform/game/port_view.c.
++extern u8 agb_port_view_margin_x(void);
++extern u8 agb_port_view_margin_y(void);
++
++static void TrySpawnObjectEventsInWindow(s16 left, s16 top, s16 right, s16 bottom, s16 cameraX, s16 cameraY)
+ {
+     u8 i;
+-    u8 objectCount;
++    u8 objectCount = gMapHeader.events->objectEventCount;
++
++    for (i = 0; i < objectCount; i++)
++    {
++        struct ObjectEventTemplate *template = &gSaveBlock1Ptr->objectEventTemplates[i];
++        s16 npcX = template->x + MAP_OFFSET;
++        s16 npcY = template->y + MAP_OFFSET;
++
++        if (top <= npcY && bottom >= npcY && left <= npcX && right >= npcX
++            && !FlagGet(template->flagId))
++            TrySpawnObjectEventTemplate(template, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup, cameraX, cameraY);
++    }
++}
+ 
++void TrySpawnObjectEvents(s16 cameraX, s16 cameraY)
++{
+     if (gMapHeader.events != NULL)
+     {
+         s16 left = gSaveBlock1Ptr->pos.x - 2;
+         s16 right = gSaveBlock1Ptr->pos.x + MAP_OFFSET_W + 2;
+         s16 top = gSaveBlock1Ptr->pos.y;
+         s16 bottom = gSaveBlock1Ptr->pos.y + MAP_OFFSET_H + 2;
++        s16 marginX = agb_port_view_margin_x();
++        s16 marginY = agb_port_view_margin_y();
+ 
+-        objectCount = gMapHeader.events->objectEventCount;
++        TrySpawnObjectEventsInWindow(left, top, right, bottom, cameraX, cameraY);
+ 
+-        for (i = 0; i < objectCount; i++)
+-        {
+-            struct ObjectEventTemplate *template = &gSaveBlock1Ptr->objectEventTemplates[i];
+-            s16 npcX = template->x + MAP_OFFSET;
+-            s16 npcY = template->y + MAP_OFFSET;
+-
+-            if (top <= npcY && bottom >= npcY && left <= npcX && right >= npcX
+-                && !FlagGet(template->flagId))
+-                TrySpawnObjectEventTemplate(template, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup, cameraX, cameraY);
+-        }
++        // The wider view gets a second pass rather than a bigger first one, and
++        // the order is the whole point. At most OBJECT_EVENTS_COUNT object
++        // events exist at once -- sixteen, the player among them -- and maps go
++        // up to twenty-nine of them. Spawning from one wider window in template
++        // order would let somebody four screens away take the last slot from
++        // somebody standing next to the player.
++        //
++        // So everything upstream would have spawned is spawned first, and the
++        // margin gets what is left. A template already spawned is refused by
++        // GetAvailableObjectEventId, which is also what makes calling this every
++        // frame safe in the first place.
++        if (marginX != 0 || marginY != 0)
++            TrySpawnObjectEventsInWindow(left - marginX, top - marginY,
++                                         right + marginX, bottom + marginY,
++                                         cameraX, cameraY);
+     }
+ }
+ 
+@@ -1840,10 +1866,14 @@
+ 
+ static void RemoveObjectEventIfOutsideView(struct ObjectEvent *objectEvent)
+ {
+-    s16 left =   gSaveBlock1Ptr->pos.x - 2;
+-    s16 right =  gSaveBlock1Ptr->pos.x + MAP_OFFSET_W + 2;
+-    s16 top =    gSaveBlock1Ptr->pos.y;
+-    s16 bottom = gSaveBlock1Ptr->pos.y + MAP_OFFSET_H + 2;
++    // The same window the second spawn pass uses, or everything it spawned
++    // would be removed again on the frame after.
++    s16 marginX = agb_port_view_margin_x();
++    s16 marginY = agb_port_view_margin_y();
++    s16 left =   gSaveBlock1Ptr->pos.x - 2 - marginX;
++    s16 right =  gSaveBlock1Ptr->pos.x + MAP_OFFSET_W + 2 + marginX;
++    s16 top =    gSaveBlock1Ptr->pos.y - marginY;
++    s16 bottom = gSaveBlock1Ptr->pos.y + MAP_OFFSET_H + 2 + marginY;
+ 
+     if (objectEvent->currentCoords.x >= left && objectEvent->currentCoords.x <= right
+      && objectEvent->currentCoords.y >= top && objectEvent->currentCoords.y <= bottom)

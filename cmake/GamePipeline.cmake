@@ -28,6 +28,11 @@ set(FRLG_GAME_CPPFLAGS
     -I "${FRLG_AGB_INCLUDE}"
     -include agb/prelude.h
     -iquote include
+    # Last in the chain: a quoted include resolves against the including file's
+    # own directory first, and a patched copy is not in src/ any more -- so a
+    # source that reaches for "data/..." beside itself stops finding it the
+    # moment it grows a patch. event_object_movement.c is one.
+    -iquote src
     -DFIRERED -DREVISION=0 -DENGLISH -DMODERN=1
     -Wno-trigraphs)
 
